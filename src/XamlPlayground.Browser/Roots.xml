@@ -8,6 +8,11 @@
   <!-- Avalonia Themes -->
 
   <assembly fullname="Avalonia.Themes.Fluent" preserve="All" />
+  <assembly fullname="Avalonia.Themes.Simple" preserve="All" />
+  <assembly fullname="Avalonia.Controls.ColorPicker" preserve="All" />
+  <assembly fullname="Avalonia.Diagnostics" preserve="All" />
+  <assembly fullname="ProDataGrid.FormulaEngine" preserve="All" />
+  <assembly fullname="ProDataGrid.FormulaEngine.Excel" preserve="All" />
 
   <!-- Avalonia Core -->
 

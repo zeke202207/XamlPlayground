@@ -1,0 +1,3 @@
+[submodule "external/ProDataGrid"]
+	path = external/ProDataGrid
+	url = https://github.com/wieslawsoltes/ProDataGrid.git

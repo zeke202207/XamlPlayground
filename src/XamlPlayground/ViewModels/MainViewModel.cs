@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using Octokit;
@@ -24,6 +25,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<SampleViewModel> _samples;
     [ObservableProperty] private SampleViewModel? _currentSample;
     [ObservableProperty] private Control? _control;
+    [ObservableProperty] private AvaloniaObject? _diagnosticsRoot;
     [ObservableProperty] private bool _enableAutoRun;
     [ObservableProperty] private string? _lastErrorMessage;
     [ObservableProperty] private int _editorFontSize;
@@ -162,6 +164,7 @@ public partial class MainViewModel : ViewModelBase
     private void Open(SampleViewModel sampleViewModel)
     {
         Control = null;
+        DiagnosticsRoot = null;
         LastErrorMessage = null;
 
         CurrentSample = sampleViewModel;
@@ -270,8 +273,7 @@ public partial class MainViewModel : ViewModelBase
                     var control = AvaloniaRuntimeXamlLoader.Load(stream, scriptAssembly, rootInstance);
                     if (control is { })
                     {
-                        Control = (Control)control;
-                        LastErrorMessage = null;
+                        ShowControl((Control)control);
                     }
                 }
             }
@@ -280,8 +282,7 @@ public partial class MainViewModel : ViewModelBase
                 var control = AvaloniaRuntimeXamlLoader.Parse<Control?>(xaml, null);
                 if (control is { })
                 {
-                    Control = control;
-                    LastErrorMessage = null;
+                    ShowControl(control);
                 }
             }
         }
@@ -294,6 +295,19 @@ public partial class MainViewModel : ViewModelBase
         {
             _update = false;
         }
+    }
+
+    private void ShowControl(Control control)
+    {
+        var scope = new Border
+        {
+            Name = "GeneratedSampleScope",
+            Child = control
+        };
+
+        Control = scope;
+        DiagnosticsRoot = scope;
+        LastErrorMessage = null;
     }
 
     private async Task OpenXamlFile()

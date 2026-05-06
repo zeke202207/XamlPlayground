@@ -22,7 +22,10 @@
     <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="$(MicrosoftCodeAnalysisVersion)" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="$(MicrosoftCodeAnalysisVersion)" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="$(MicrosoftCodeAnalysisVersion)" />
-    <PackageReference Condition="'$(Configuration)' == 'Debug'" Include="ProDiagnostics" Version="$(ProDiagnosticsVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\external\ProDataGrid\src\ProDiagnostics\ProDiagnostics.csproj" />
   </ItemGroup>
 
   <ItemGroup>
