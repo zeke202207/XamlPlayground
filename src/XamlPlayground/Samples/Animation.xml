@@ -266,7 +266,7 @@
                      PlaybackDirection="Normal">
             <KeyFrame Cue="0%">
               <Setter Property="Background">
-                <RadialGradientBrush Center="0%,100%" Radius="0.8">
+                <RadialGradientBrush Center="0%,100%" RadiusX="0.8" RadiusY="0.8">
                   <GradientStop Offset="0" Color="Red"/>
                   <GradientStop Offset="1" Color="Blue"/>
                 </RadialGradientBrush>
@@ -274,7 +274,7 @@
             </KeyFrame>
             <KeyFrame Cue="25%">
               <Setter Property="Background">
-                <RadialGradientBrush Center="0%,0%" Radius="1">
+                <RadialGradientBrush Center="0%,0%" RadiusX="1" RadiusY="1">
                   <GradientStop Offset="0" Color="Red"/>
                   <GradientStop Offset="1" Color="Blue"/>
                 </RadialGradientBrush>
@@ -282,7 +282,7 @@
             </KeyFrame>
             <KeyFrame Cue="50%">
               <Setter Property="Background">
-                <RadialGradientBrush Center="100%,0%" Radius="0.8">
+                <RadialGradientBrush Center="100%,0%" RadiusX="0.8" RadiusY="0.8">
                   <GradientStop Offset="0" Color="Red"/>
                   <GradientStop Offset="1" Color="Blue"/>
                 </RadialGradientBrush>
@@ -290,7 +290,7 @@
             </KeyFrame>
             <KeyFrame Cue="75%">
               <Setter Property="Background">
-                <RadialGradientBrush Center="100%,100%" Radius="1">
+                <RadialGradientBrush Center="100%,100%" RadiusX="1" RadiusY="1">
                   <GradientStop Offset="0" Color="Red"/>
                   <GradientStop Offset="1" Color="Blue"/>
                 </RadialGradientBrush>
@@ -298,7 +298,7 @@
             </KeyFrame>
             <KeyFrame Cue="100%">
               <Setter Property="Background">
-                <RadialGradientBrush Center="0%,100%" Radius="0.8">
+                <RadialGradientBrush Center="0%,100%" RadiusX="0.8" RadiusY="0.8">
                   <GradientStop Offset="0" Color="Red"/>
                   <GradientStop Offset="1" Color="Blue"/>
                 </RadialGradientBrush>
