@@ -13,6 +13,9 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -22,13 +25,45 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
+    - name: Checkout
+      shell: bash
+      run: |
+        git init .
+        git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+        git checkout --force FETCH_HEAD
+        git submodule update --init --recursive
+
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 10.0.x
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        if ! command -v dotnet >/dev/null 2>&1 || ! dotnet --version | grep -q '^10\.'; then
+          curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+          bash dotnet-install.sh --channel 10.0 --install-dir "$PWD/.dotnet"
+          echo "$PWD/.dotnet" >> "$GITHUB_PATH"
+          export PATH="$PWD/.dotnet:$PATH"
+        fi
+        dotnet --info
+
+    - name: Setup .NET
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+        $hasDotNet10 = $false
+        if ($dotnet) {
+          $hasDotNet10 = (& dotnet --version) -match '^10\.'
+        }
+        if (-not $hasDotNet10) {
+          $installDir = Join-Path $PWD ".dotnet"
+          Invoke-WebRequest https://dot.net/v1/dotnet-install.ps1 -OutFile dotnet-install.ps1
+          ./dotnet-install.ps1 -Channel 10.0 -InstallDir $installDir
+          Add-Content -Path $env:GITHUB_PATH -Value $installDir
+          $env:PATH = "$installDir;$env:PATH"
+        }
+        dotnet --info
+
     - name: Install wasm-tools
       run: dotnet workload install wasm-tools
     - name: Restore solution

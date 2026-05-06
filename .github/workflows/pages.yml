@@ -5,9 +5,7 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: github-pages
@@ -20,18 +18,24 @@ env:
 jobs:
   deploy-to-github-pages:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
+    - name: Checkout
+      run: |
+        git init .
+        git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+        git checkout --force FETCH_HEAD
+        git submodule update --init --recursive
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 10.0.x
+      run: |
+        if ! command -v dotnet >/dev/null 2>&1 || ! dotnet --version | grep -q '^10\.'; then
+          curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+          bash dotnet-install.sh --channel 10.0 --install-dir "$PWD/.dotnet"
+          echo "$PWD/.dotnet" >> "$GITHUB_PATH"
+          export PATH="$PWD/.dotnet:$PATH"
+        fi
+        dotnet --info
 
     - name: Install wasm-tools
       run: dotnet workload install wasm-tools
@@ -48,14 +52,13 @@ jobs:
     - name: Add .nojekyll file
       run: touch release/wwwroot/.nojekyll
 
-    - name: Setup Pages
-      uses: actions/configure-pages@v5
-
-    - name: Upload Pages artifact
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: release/wwwroot
-
-    - name: Deploy to GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v4
+    - name: Commit wwwroot to GitHub Pages
+      run: |
+        cd release/wwwroot
+        git init .
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git checkout -b gh-pages
+        git add -A
+        git commit -m "Deploy GitHub Pages"
+        git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
