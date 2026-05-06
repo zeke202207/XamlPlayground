@@ -27,10 +27,12 @@ jobs:
     steps:
     - name: Checkout
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         git init .
-        git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-        git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+        git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+        git -c "http.extraheader=AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
         git checkout --force FETCH_HEAD
         git submodule update --init --recursive
 
