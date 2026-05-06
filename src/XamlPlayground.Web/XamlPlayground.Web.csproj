@@ -6,6 +6,7 @@
     <RootNamespace>XamlPlayground.Web</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <WasmEnableThreads>false</WasmEnableThreads>
+    <WasmEnableWebcil>false</WasmEnableWebcil>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">

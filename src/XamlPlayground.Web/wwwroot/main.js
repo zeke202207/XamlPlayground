@@ -10,5 +10,15 @@ const dotnetRuntime = await dotnet
     .create();
 
 const config = dotnetRuntime.getConfig();
+const assemblyAssets = [
+    ...(config.resources?.coreAssembly ?? []),
+    ...(config.resources?.assembly ?? [])
+]
+    .filter(asset => typeof asset.name === "string" && asset.name.endsWith(".dll"))
+    .map(asset => `${asset.virtualPath ?? asset.name}|${asset.name}`);
 
-await dotnetRuntime.runMain(config.mainAssemblyName, [window.location.search, globalThis.document.baseURI]);
+await dotnetRuntime.runMain(config.mainAssemblyName, [
+    window.location.search,
+    globalThis.document.baseURI,
+    assemblyAssets.join(";")
+]);

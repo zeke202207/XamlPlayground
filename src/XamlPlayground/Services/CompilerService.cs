@@ -16,8 +16,40 @@ namespace XamlPlayground.Services;
 public static class CompilerService
 {
     private static PortableExecutableReference[]? s_references;
+    private static IReadOnlyDictionary<string, string> s_browserReferenceAssets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     public static string? BaseUri { get; set; }
+
+    public static void SetBrowserReferenceAssets(string? assets)
+    {
+        s_references = null;
+
+        if (string.IsNullOrWhiteSpace(assets))
+        {
+            s_browserReferenceAssets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            return;
+        }
+
+        var browserReferenceAssets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var asset in assets.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = asset.Split('|', 2, StringSplitOptions.TrimEntries);
+            var virtualPath = parts[0];
+            var name = parts.Length == 2 ? parts[1] : parts[0];
+            if (!name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var assemblyName = GetAssemblyName(virtualPath);
+            if (!string.IsNullOrWhiteSpace(assemblyName))
+            {
+                browserReferenceAssets[assemblyName] = name;
+            }
+        }
+
+        s_browserReferenceAssets = browserReferenceAssets;
+    }
 
     private static async Task LoadReferences()
     {
@@ -43,15 +75,13 @@ public static class CompilerService
                 try
                 {
                     var name = reference.GetName().Name;
-                    var requestUri = await ResolveBrowserReferenceUri(client, name);
-                    if (requestUri is null)
+                    var metadataReference = await LoadBrowserReference(client, name);
+                    if (metadataReference is null)
                     {
                         continue;
                     }
 
-                    Console.WriteLine($"Loading reference requestUri: {requestUri}, FullName: {reference.FullName}");
-                    var stream = await client.GetStreamAsync(requestUri);
-                    appDomainReferences.Add(MetadataReference.CreateFromStream(stream));
+                    appDomainReferences.Add(metadataReference);
                 }
                 catch (Exception exception)
                 {
@@ -60,6 +90,7 @@ public static class CompilerService
             }
 
             s_references = appDomainReferences.ToArray();
+            Console.WriteLine($"Loaded browser references: {s_references.Length}");
         }
         else
         {
@@ -74,30 +105,63 @@ public static class CompilerService
         }
     }
 
-    private static async Task<string?> ResolveBrowserReferenceUri(HttpClient client, string? name)
+    private static async Task<PortableExecutableReference?> LoadBrowserReference(HttpClient client, string? name)
     {
         if (BaseUri is null || string.IsNullOrWhiteSpace(name))
         {
             return null;
         }
 
-        foreach (var requestUri in new[] { $"{BaseUri}_framework/{name}.dll", $"{BaseUri}managed/{name}.dll" })
+        Exception? lastException = null;
+        foreach (var requestUri in ResolveBrowserReferenceUris(name))
         {
             try
             {
-                using var response = await client.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead);
-                if (response.IsSuccessStatusCode)
-                {
-                    return requestUri;
-                }
+                var bytes = await client.GetByteArrayAsync(requestUri);
+                return MetadataReference.CreateFromImage(bytes);
             }
             catch (Exception exception)
             {
-                Console.WriteLine(exception);
+                lastException = exception;
             }
         }
 
+        if (lastException is { })
+        {
+            Console.WriteLine($"Failed to load browser reference '{name}': {lastException.Message}");
+        }
+
         return null;
+    }
+
+    private static IEnumerable<string> ResolveBrowserReferenceUris(string name)
+    {
+        if (s_browserReferenceAssets.TryGetValue(name, out var asset))
+        {
+            yield return ResolveBrowserReferenceUri(asset);
+        }
+
+        yield return ResolveBrowserReferenceUri($"_framework/{name}.dll");
+        yield return ResolveBrowserReferenceUri($"managed/{name}.dll");
+    }
+
+    private static string GetAssemblyName(string virtualPath)
+    {
+        var normalized = virtualPath.Replace('\\', '/');
+        var fileName = normalized[(normalized.LastIndexOf('/') + 1)..];
+        return fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            ? fileName[..^".dll".Length]
+            : fileName;
+    }
+
+    private static string ResolveBrowserReferenceUri(string asset)
+    {
+        var normalized = asset.Replace('\\', '/');
+        var relativePath = normalized.Contains('/')
+            ? normalized
+            : $"_framework/{normalized}";
+
+        return new Uri(new Uri(BaseUri!, UriKind.Absolute), relativePath).ToString();
     }
 
     public static async Task<(Assembly? Assembly, AssemblyLoadContext? Context)> GetScriptAssembly(string code)

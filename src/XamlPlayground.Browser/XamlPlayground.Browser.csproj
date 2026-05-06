@@ -5,6 +5,7 @@
     <OutputType>Exe</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <WasmEnableThreads>false</WasmEnableThreads>
+    <WasmEnableWebcil>false</WasmEnableWebcil>
   </PropertyGroup>
 
   <PropertyGroup>

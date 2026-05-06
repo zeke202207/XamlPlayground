@@ -10,9 +10,10 @@ using XamlPlayground.Services;
 
 internal partial class Program
 {
-    private static void Initialize(string id, string baseUri)
+    private static void Initialize(string id, string baseUri, string browserReferenceAssets)
     {
         CompilerService.BaseUri = baseUri;
+        CompilerService.SetBrowserReferenceAssets(browserReferenceAssets);
 
         id = id.Replace("XamlPlayground/", "").Replace("gist/", "").Replace("?gist=", "").Replace("/", "");
 
@@ -24,7 +25,10 @@ internal partial class Program
 
     private static Task Main(string[] args) =>
         BuildAvaloniaApp()
-            .AfterSetup(_ => Initialize(args.ElementAtOrDefault(0) ?? string.Empty, args.ElementAtOrDefault(1) ?? string.Empty))
+            .AfterSetup(_ => Initialize(
+                args.ElementAtOrDefault(0) ?? string.Empty,
+                args.ElementAtOrDefault(1) ?? string.Empty,
+                args.ElementAtOrDefault(2) ?? string.Empty))
             .StartBrowserAppAsync("out");
 
     public static AppBuilder BuildAvaloniaApp()
