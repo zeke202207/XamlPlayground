@@ -29,12 +29,18 @@
   </UserControl.Styles>
   
   <DockPanel>
-    <Label Content="{Binding LastErrorMessage}" 
-           IsVisible="{Binding !!LastErrorMessage}"
-           Background="Red"
-           Foreground="White"
-           Classes="text"
-           DockPanel.Dock="Bottom" />
+    <TextBox Text="{Binding LastErrorMessage}"
+             IsVisible="{Binding !!LastErrorMessage}"
+             IsReadOnly="True"
+             AcceptsReturn="True"
+             TextWrapping="Wrap"
+             ScrollViewer.VerticalScrollBarVisibility="Auto"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             Background="Red"
+             Foreground="White"
+             BorderThickness="0"
+             Padding="4"
+             DockPanel.Dock="Bottom" />
     
     <TabControl TabStripPlacement="Bottom" Classes="code" BorderBrush="#283e74" BorderThickness="0,0,1,0">
       <TabControl.Styles>
