@@ -90,7 +90,14 @@
         </ae:TextEditor>
       </TabItem>
       <TabItem Header="Diagnostics">
-        <diag:DevToolsView Root="{Binding DiagnosticsRoot}" />
+        <diag:DevToolsView Root="{Binding DiagnosticsRoot}">
+          <diag:DevToolsView.Options>
+            <diag:DevToolsOptions ShowMenu="False"
+                                  ShowResourcesTab="False"
+                                  ShowAssetsTab="False"
+                                  ScopeEventsToRoot="True" />
+          </diag:DevToolsView.Options>
+        </diag:DevToolsView>
       </TabItem>
     </TabControl>
   </DockPanel>
