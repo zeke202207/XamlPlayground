@@ -1,39 +1,29 @@
-﻿using System;
-using System.Net.Http;
+﻿using System.Linq;
 using System.Runtime.Versioning;
 using System.Threading.Tasks;
 using Avalonia;
-using Avalonia.Browser.Blazor;
-using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Microsoft.Extensions.DependencyInjection;
-using XamlPlayground.Web;
+using Avalonia.Browser;
+using XamlPlayground.Services;
 
 [assembly: SupportedOSPlatform("browser")]
 
-public class Program
+public partial class Program
 {
-    public static async Task Main(string[] args)
+    private static void Initialize(string id, string baseUri)
     {
-        var host = CreateHostBuilder(args).Build();
-        await StartAvaloniaApp();
-        await host.RunAsync();
+        CompilerService.BaseUri = baseUri;
+
+        id = id.Replace("XamlPlayground/", "").Replace("gist/", "").Replace("?gist=", "").Replace("/", "");
+
+        if (Application.Current is XamlPlayground.App app)
+        {
+            app.InitialGist = id;
+        }
     }
 
-    public static async Task StartAvaloniaApp()
-    {
-        await AppBuilder.Configure<XamlPlayground.App>()
+    private static Task Main(string[] args) =>
+        AppBuilder.Configure<XamlPlayground.App>()
             .WithInterFont()
-            .StartBlazorAppAsync();
-    }
-
-    public static WebAssemblyHostBuilder CreateHostBuilder(string[] args)
-    {
-        var builder = WebAssemblyHostBuilder.CreateDefault(args);
-
-        builder.RootComponents.Add<App>("#app");
-
-        builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
-
-        return builder;
-    }
+            .AfterSetup(_ => Initialize(args.ElementAtOrDefault(0) ?? string.Empty, args.ElementAtOrDefault(1) ?? string.Empty))
+            .StartBrowserAppAsync("out");
 }

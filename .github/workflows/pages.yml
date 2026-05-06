@@ -4,58 +4,58 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: true
+
 jobs:
   deploy-to-github-pages:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
 
-    - name: Setup .NET 8
-      uses: actions/setup-dotnet@v3
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
       with:
-          dotnet-version: 8.0.100
+        dotnet-version: 10.0.x
 
     - name: Install wasm-tools
       run: dotnet workload install wasm-tools
 
-    - name: Install DotNetCompress
-      run: dotnet tool install --global DotNetCompress --version 3.0.0 --no-cache
-
     - name: Publish .NET Project
       run: dotnet publish src/XamlPlayground.Browser/XamlPlayground.Browser.csproj -c Release -o release --nologo
 
-    - name: Brotli Compress Output (dll)
-      run: DotNetCompress -d src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/managed -p '*.dll' --format br --threads 4
-
-    - name: Brotli Compress Output (js)
-      run: DotNetCompress -d src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/ -p '*.js' --format br --threads 4
-
-    - name: Brotli Compress Output (wasm)
-      run: DotNetCompress -d src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/ -p '*.wasm' --format br --threads 4
-
-    - name: GZip Compress Output (dll)
-      run: DotNetCompress -d src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/managed -p '*.dll' --format gz --threads 4
-
-    - name: GZip Compress Output (js)
-      run: DotNetCompress -d src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/ -p '*.js' --format gz --threads 4
-
-    - name: GZip Compress Output (wasm)
-      run: DotNetCompress -d src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/ -p '*.wasm' --format gz --threads 4
-
     - name: Change base-tag in index.html from / to XamlPlayground
-      run: sed -i 's/<base href="\/" \/>/<base href="\/XamlPlayground\/" \/>/g' src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/index.html
+      run: sed -i 's/<base href="\/"\/>/<base href="\/XamlPlayground\/"\/>/g' release/wwwroot/index.html
 
-    - name: copy index.html to 404.html
-      run: cp src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/index.html src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/404.html
+    - name: Copy index.html to 404.html
+      run: cp release/wwwroot/index.html release/wwwroot/404.html
 
     - name: Add .nojekyll file
-      run: touch src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle/.nojekyll
+      run: touch release/wwwroot/.nojekyll
 
-    - name: Commit wwwroot to GitHub Pages
-      uses: JamesIves/github-pages-deploy-action@4.1.7
+    - name: Setup Pages
+      uses: actions/configure-pages@v5
+
+    - name: Upload Pages artifact
+      uses: actions/upload-pages-artifact@v3
       with:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        BRANCH: gh-pages
-        FOLDER: src/XamlPlayground.Browser/bin/Release/net8.0-browser/browser-wasm/AppBundle
+        path: release/wwwroot
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4

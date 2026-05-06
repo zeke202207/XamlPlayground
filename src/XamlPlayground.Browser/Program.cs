@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Runtime.Versioning;
 using System.Threading.Tasks;
 using Avalonia;
@@ -23,7 +24,7 @@ internal partial class Program
 
     private static Task Main(string[] args) =>
         BuildAvaloniaApp()
-            .AfterSetup(_ => Initialize(args[0], args[1]))
+            .AfterSetup(_ => Initialize(args.ElementAtOrDefault(0) ?? string.Empty, args.ElementAtOrDefault(1) ?? string.Empty))
             .StartBrowserAppAsync("out");
 
     public static AppBuilder BuildAvaloniaApp()

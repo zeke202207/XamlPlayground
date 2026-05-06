@@ -9,6 +9,10 @@ on:
     branches:
     - main
 
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: true
+
 jobs:
   build:
     strategy:
@@ -18,14 +22,24 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
-    - name: Setup .NET Core
-      uses: actions/setup-dotnet@v1
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
     - name: Install wasm-tools
       run: dotnet workload install wasm-tools
-    - name: Build Release
-      run: dotnet build --configuration Release
-    - name: Test Release
-      run: dotnet test --configuration Release
+    - name: Restore solution
+      run: dotnet restore XamlPlayground.sln
+    - name: Restore legacy web project
+      run: dotnet restore src/XamlPlayground.Web/XamlPlayground.Web.csproj
+    - name: Build desktop app
+      run: dotnet build src/XamlPlayground.NetCore/XamlPlayground.NetCore.csproj --configuration Release --no-restore
+    - name: Build browser app
+      run: dotnet build src/XamlPlayground.Browser/XamlPlayground.Browser.csproj --configuration Release --no-restore /p:RunAOTCompilation=false
+    - name: Build legacy web app
+      run: dotnet build src/XamlPlayground.Web/XamlPlayground.Web.csproj --configuration Release --no-restore /p:RunAOTCompilation=false
+    - name: Test solution
+      run: dotnet test XamlPlayground.sln --configuration Release --no-restore

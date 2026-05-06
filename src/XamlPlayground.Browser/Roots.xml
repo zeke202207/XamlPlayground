@@ -8,7 +8,6 @@
   <!-- Avalonia Themes -->
 
   <assembly fullname="Avalonia.Themes.Fluent" preserve="All" />
-  <assembly fullname="Avalonia.Themes.Simple" preserve="All" />
 
   <!-- Avalonia Core -->
 
@@ -29,8 +28,9 @@
 
   <!-- Avalonia Behaviors -->
 
-  <assembly fullname="Avalonia.Xaml.Interactions" preserve="All" />
-  <assembly fullname="Avalonia.Xaml.Interactivity" preserve="All" />
+  <assembly fullname="Xaml.Behaviors.Interactions" preserve="All" />
+  <assembly fullname="Xaml.Behaviors.Interactions.Responsive" preserve="All" />
+  <assembly fullname="Xaml.Behaviors.Interactivity" preserve="All" />
 
   <!-- AvaloniaEdit -->
 

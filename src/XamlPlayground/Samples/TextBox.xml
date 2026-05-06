@@ -16,11 +16,11 @@
             </Flyout>
           </TextBox.ContextFlyout>
         </TextBox>
-        <TextBox Width="200" Watermark="ReadOnly" IsReadOnly="True" Text="This is read only"/>
-        <TextBox Width="200" Watermark="Numeric with watermark" x:Name="numericWatermark"/>
+        <TextBox Width="200" PlaceholderText="ReadOnly" IsReadOnly="True" Text="This is read only"/>
+        <TextBox Width="200" PlaceholderText="Numeric with placeholder" x:Name="numericWatermark"/>
         <TextBox Width="200"
-                 Watermark="Floating Watermark"
-                 UseFloatingWatermark="True"
+                 PlaceholderText="Floating Placeholder"
+                 UseFloatingPlaceholder="True"
                  Text="Lorem ipsum dolor sit amet, consectetur adipiscing elit."/>
         <MaskedTextBox Width="200" ResetOnSpace="False"  Mask="(LLL) 999-0000"/>
 
@@ -31,9 +31,9 @@
         </TextBox>
 
         <TextBox Width="200"
-                 Watermark="Password Box"
+                 PlaceholderText="Password Box"
                  Classes="revealPasswordButton"
-                 UseFloatingWatermark="True"
+                 UseFloatingPlaceholder="True"
                  PasswordChar="*"
                  Text="Password" />
         <TextBox Width="200" Text="Left aligned text" TextAlignment="Left" />

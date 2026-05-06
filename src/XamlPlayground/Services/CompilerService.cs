@@ -43,7 +43,12 @@ public static class CompilerService
                 try
                 {
                     var name = reference.GetName().Name;
-                    var requestUri = $"{BaseUri}managed/{name}.dll";
+                    var requestUri = await ResolveBrowserReferenceUri(client, name);
+                    if (requestUri is null)
+                    {
+                        continue;
+                    }
+
                     Console.WriteLine($"Loading reference requestUri: {requestUri}, FullName: {reference.FullName}");
                     var stream = await client.GetStreamAsync(requestUri);
                     appDomainReferences.Add(MetadataReference.CreateFromStream(stream));
@@ -67,6 +72,32 @@ public static class CompilerService
 
             s_references = appDomainReferences.ToArray();
         }
+    }
+
+    private static async Task<string?> ResolveBrowserReferenceUri(HttpClient client, string? name)
+    {
+        if (BaseUri is null || string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        foreach (var requestUri in new[] { $"{BaseUri}_framework/{name}.dll", $"{BaseUri}managed/{name}.dll" })
+        {
+            try
+            {
+                using var response = await client.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead);
+                if (response.IsSuccessStatusCode)
+                {
+                    return requestUri;
+                }
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine(exception);
+            }
+        }
+
+        return null;
     }
 
     public static async Task<(Assembly? Assembly, AssemblyLoadContext? Context)> GetScriptAssembly(string code)

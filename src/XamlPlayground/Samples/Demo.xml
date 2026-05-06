@@ -48,13 +48,13 @@
         <StackPanel>
           <TextBlock Text="TextBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
           <TextBox Text="Enabled"/>
-          <TextBox Watermark="Placeholder" Margin="0,5,0,0"/>
+          <TextBox PlaceholderText="Placeholder" Margin="0,5,0,0"/>
           <TextBox Text="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
         </StackPanel>
         <StackPanel Margin="20,0">
           <TextBlock Text="PasswordBox" FontSize="18" TextAlignment="Center" Margin="0,0,0,10"/>
           <TextBox PasswordChar="*" Text="Enabled"/>
-          <TextBox PasswordChar="*" Watermark="Placeholder" Margin="0,5,0,0"/>
+          <TextBox PasswordChar="*" PlaceholderText="Placeholder" Margin="0,5,0,0"/>
           <TextBox PasswordChar="*" Text="Disabled" IsEnabled="False" Margin="0,5,0,0"/>
         </StackPanel>
         <StackPanel>

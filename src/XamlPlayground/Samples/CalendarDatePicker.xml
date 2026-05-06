@@ -30,11 +30,11 @@
                             Margin="0,0,0,8"/>
 
         <CalendarDatePicker Margin="0,0,0,8"
-                            Watermark="Watermark"/>
+                            PlaceholderText="Placeholder"/>
         <CalendarDatePicker Margin="0,0,0,8"
                             Name="DatePicker5"
-                            Watermark="Floating Watermark"
-                            UseFloatingWatermark="True"/>
+                            PlaceholderText="Floating Placeholder"
+                            UseFloatingPlaceholder="True"/>
 
         <TextBlock Text="Disabled"/>
         <CalendarDatePicker IsEnabled="False"/>
