@@ -3,7 +3,7 @@
 [![CI](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/build.yml/badge.svg)](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/build.yml)
 [![Deploy to GitHub Pages](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/pages.yml/badge.svg)](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/pages.yml)
 
-![Xaml Playground logo](src/XamlPlayground/Assets/Logo.svg)
+<img src="src/XamlPlayground/Assets/Logo.svg" alt="Xaml Playground logo" width="160">
 
 Xaml Playground is an interactive XAML editor and previewer for Avalonia.
 
