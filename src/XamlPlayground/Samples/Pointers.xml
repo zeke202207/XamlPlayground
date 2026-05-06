@@ -1,0 +1,35 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <TabControl>
+    <TabItem Header="Capture">
+      <WrapPanel>
+        <Border MinWidth="250"
+                MinHeight="170"
+                Margin="5"
+                Padding="50"
+                Background="{DynamicResource SystemAccentColor}"
+                ToolTip.Placement="Bottom">
+          <TextBlock Foreground="White">Pointer surface 1</TextBlock>
+        </Border>
+        <Border MinWidth="250"
+                MinHeight="170"
+                Margin="5"
+                Padding="50"
+                Background="{DynamicResource SystemAccentColor}"
+                ToolTip.Placement="Bottom">
+          <TextBlock Foreground="White">Pointer surface 2</TextBlock>
+        </Border>
+      </WrapPanel>
+    </TabItem>
+
+    <TabItem Header="Pointer Properties">
+      <StackPanel Margin="12" Spacing="8">
+        <TextBlock TextWrapping="Wrap">The full ControlCatalog page draws intermediate points with custom controls and code-behind. This standalone version keeps the pointer interaction surface visible in runtime XAML.</TextBlock>
+        <Button Cursor="Hand" Content="Hover" Width="160" />
+        <Border Cursor="Cross" Background="LightYellow" BorderBrush="Gray" BorderThickness="1" Padding="16">
+          <TextBlock Text="Hover for cross cursor" />
+        </Border>
+      </StackPanel>
+    </TabItem>
+  </TabControl>
+</UserControl>

@@ -1,5 +1,17 @@
 ﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <UserControl.Resources>
+    <MenuFlyout x:Key="SharedMenuFlyout" Placement="Bottom">
+      <MenuItem Header="Item 1">
+        <MenuItem Header="Subitem 1" />
+        <MenuItem Header="Subitem 2" />
+        <MenuItem Header="Subitem 3" />
+      </MenuItem>
+      <MenuItem Header="Item 2" InputGesture="Ctrl+A" />
+      <MenuItem Header="Item 3" />
+    </MenuFlyout>
+  </UserControl.Resources>
+
   <StackPanel Orientation="Vertical" Spacing="4">
     <TextBlock Classes="h2">A button control</TextBlock>
 
@@ -22,10 +34,16 @@
                 <SolidColorBrush x:Key="ButtonBackground">DarkRed</SolidColorBrush>
                 <SolidColorBrush x:Key="ButtonBackgroundPointerOver">Red</SolidColorBrush>
                 <SolidColorBrush x:Key="ButtonBackgroundPressed">OrangeRed</SolidColorBrush>
+                <SolidColorBrush x:Key="ButtonForeground">White</SolidColorBrush>
+                <SolidColorBrush x:Key="ButtonForegroundPointerOver">Black</SolidColorBrush>
+                <SolidColorBrush x:Key="ButtonForegroundPressed">Black</SolidColorBrush>
               </Style.Resources>
             </Style>
           </Button.Styles>
         </Button>
+        <Button Classes="accent">Accent</Button>
+        <Button LetterSpacing="0">Normal Spacing</Button>
+        <Button LetterSpacing="2.0">Loose Spacing</Button>
         <RepeatButton Name="RepeatButton">
           <TextBlock Name="RepeatButtonTextBlock" Text="Repeat Button: 0" />
         </RepeatButton>
@@ -38,7 +56,49 @@
         <Button BorderBrush="{DynamicResource SystemAccentColor}" BorderThickness="4">Thick Border</Button>
         <Button BorderBrush="{DynamicResource SystemAccentColor}" BorderThickness="4" IsEnabled="False">Disabled</Button>
         <Button BorderBrush="{DynamicResource SystemAccentColor}" KeyboardNavigation.IsTabStop="False">IsTabStop=False</Button>
+        <Button LetterSpacing="-0.5">Tight Spacing</Button>
+        <Button LetterSpacing="4.0">E X T R A   L O O S E</Button>
       </StackPanel>
     </StackPanel>
+
+    <WrapPanel HorizontalAlignment="Center" Margin="0,16,0,0" ItemWidth="220">
+      <StackPanel Margin="8" Spacing="8">
+        <TextBlock FontWeight="SemiBold" Text="HyperlinkButton" />
+        <HyperlinkButton NavigateUri="https://docs.avaloniaui.net/docs/welcome">
+          <TextBlock Text="Avalonia Docs" />
+        </HyperlinkButton>
+        <HyperlinkButton IsEnabled="False" NavigateUri="https://docs.avaloniaui.net/docs/welcome">
+          <TextBlock Text="Disabled link" />
+        </HyperlinkButton>
+      </StackPanel>
+
+      <StackPanel Margin="8" Spacing="8">
+        <TextBlock FontWeight="SemiBold" Text="DropDownButton" />
+        <DropDownButton Flyout="{StaticResource SharedMenuFlyout}">
+          <TextBlock Text="Drop Down Button" />
+        </DropDownButton>
+        <DropDownButton IsEnabled="False">Disabled</DropDownButton>
+      </StackPanel>
+
+      <StackPanel Margin="8" Spacing="8">
+        <TextBlock FontWeight="SemiBold" Text="SplitButton" />
+        <SplitButton Flyout="{StaticResource SharedMenuFlyout}">
+          <TextBlock Text="Content" />
+        </SplitButton>
+        <SplitButton IsEnabled="False" Flyout="{StaticResource SharedMenuFlyout}">
+          <TextBlock Text="Disabled" />
+        </SplitButton>
+      </StackPanel>
+
+      <StackPanel Margin="8" Spacing="8">
+        <TextBlock FontWeight="SemiBold" Text="ToggleSplitButton" />
+        <ToggleSplitButton Flyout="{StaticResource SharedMenuFlyout}">
+          <TextBlock Text="Content" />
+        </ToggleSplitButton>
+        <ToggleSplitButton IsChecked="True" Flyout="{StaticResource SharedMenuFlyout}">
+          <TextBlock Text="Checked" />
+        </ToggleSplitButton>
+      </StackPanel>
+    </WrapPanel>
   </StackPanel>
 </UserControl>

@@ -1,0 +1,27 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <DockPanel LastChildFill="True">
+    <TextBlock DockPanel.Dock="Top" Classes="h2" TextWrapping="Wrap">
+      TransitioningContentControl shows a page transition whenever Content changes.
+    </TextBlock>
+
+    <StackPanel DockPanel.Dock="Bottom" Margin="10" Spacing="8">
+      <TextBlock Text="Static playground sample: edit Content or PageTransition in XAML and run again to compare transitions." TextWrapping="Wrap" />
+      <ComboBox SelectedIndex="0" Width="220" IsEnabled="False">
+        <ComboBoxItem>CrossFade</ComboBoxItem>
+        <ComboBoxItem>PageSlide</ComboBoxItem>
+      </ComboBox>
+    </StackPanel>
+
+    <Border Margin="10" BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+      <TransitioningContentControl>
+        <TransitioningContentControl.PageTransition>
+          <CrossFade Duration="0:0:0.35" />
+        </TransitioningContentControl.PageTransition>
+        <Border Background="{DynamicResource SystemAccentColor}" Padding="48">
+          <TextBlock Text="Transition Content" Foreground="White" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+      </TransitioningContentControl>
+    </Border>
+  </DockPanel>
+</UserControl>

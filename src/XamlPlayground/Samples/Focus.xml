@@ -1,0 +1,25 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <TabControl>
+    <TabItem Header="XY Focus">
+      <StackPanel XYFocus.NavigationModes="Enabled">
+        <TextBlock Text="Use keyboard or gamepad directional focus navigation between the buttons." TextWrapping="Wrap" />
+        <Canvas HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Width="500" Height="380">
+          <Canvas.Styles>
+            <Style Selector="Button">
+              <Setter Property="XYFocus.UpNavigationStrategy" Value="Projection" />
+              <Setter Property="XYFocus.DownNavigationStrategy" Value="Projection" />
+              <Setter Property="XYFocus.LeftNavigationStrategy" Value="Projection" />
+              <Setter Property="XYFocus.RightNavigationStrategy" Value="Projection" />
+            </Style>
+          </Canvas.Styles>
+
+          <Button Canvas.Top="0" Canvas.Left="50" Width="150" Height="150">A</Button>
+          <Button Canvas.Top="150" Canvas.Left="400" Width="50" Height="50">C</Button>
+          <Button Canvas.Top="200" Canvas.Left="0" Width="50" Height="50">B</Button>
+          <Button Canvas.Top="300" Canvas.Left="100" Width="50" Height="50">D</Button>
+        </Canvas>
+      </StackPanel>
+    </TabItem>
+  </TabControl>
+</UserControl>

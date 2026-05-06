@@ -1,0 +1,33 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <WrapPanel ItemWidth="400">
+    <HeaderedContentControl Header="This is the text header!"
+                            FontSize="16"
+                            FontWeight="Bold"
+                            BorderBrush="Gray"
+                            BorderThickness="3"
+                            CornerRadius="3"
+                            Margin="8"
+                            Padding="8">
+      <TextBlock Text="Some content" />
+    </HeaderedContentControl>
+
+    <GroupBox Header="This is a GroupBox" Margin="8" Padding="8">
+      <TextBlock Text="Essentially a restyled HeaderedContentControl" />
+    </GroupBox>
+
+    <HeaderedContentControl Header="This is an image content sample" Margin="8">
+      <Image Source="avares://XamlPlayground/Assets/Logo.png" Width="96" Height="96" />
+    </HeaderedContentControl>
+
+    <HeaderedContentControl Margin="8" Padding="8">
+      <HeaderedContentControl.Header>
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <Image Source="avares://XamlPlayground/Assets/Logo.png" Width="24" Height="24" />
+          <TextBlock Text="Composite header" VerticalAlignment="Center" />
+        </StackPanel>
+      </HeaderedContentControl.Header>
+      <TextBlock Text="Headers can be non-textual content." />
+    </HeaderedContentControl>
+  </WrapPanel>
+</UserControl>

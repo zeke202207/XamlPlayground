@@ -140,7 +140,7 @@ public partial class MainViewModel : ViewModelBase
 
         samples.Add(new SampleViewModel("Code", Templates.s_xaml, Templates.s_code, Open, AutoRun));
 
-        foreach (var resourceName in resourceNames)
+        foreach (var resourceName in resourceNames.OrderBy(GetSampleName, StringComparer.Ordinal))
         {
             if (!resourceName.EndsWith(sampleExtension, StringComparison.OrdinalIgnoreCase))
             {

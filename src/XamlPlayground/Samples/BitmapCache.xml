@@ -1,0 +1,44 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <DockPanel>
+    <DockPanel.Resources>
+      <BitmapCache x:Key="Cache" />
+      <ScaleTransform x:Key="Transform" ScaleX="1" ScaleY="{Binding $self.ScaleX, Mode=OneWay}" />
+      <TranslateTransform x:Key="SubPixelTransform" />
+    </DockPanel.Resources>
+
+    <StackPanel DockPanel.Dock="Right" ZIndex="1" Margin="8" Spacing="4">
+      <TextBlock>Render at scale</TextBlock>
+      <Slider Minimum="0.1" Maximum="4" Value="{Binding Source={StaticResource Cache}, Path=RenderAtScale, Mode=TwoWay}" Width="200" />
+      <TextBlock>Scale</TextBlock>
+      <Slider Minimum="0.1" Maximum="4" Value="{Binding Source={StaticResource Transform}, Path=ScaleX, Mode=TwoWay}" Width="200" />
+      <CheckBox IsChecked="{Binding Source={StaticResource Cache}, Path=EnableClearType, Mode=TwoWay}">Enable clear type</CheckBox>
+      <CheckBox IsChecked="{Binding Source={StaticResource Cache}, Path=SnapsToDevicePixels, Mode=TwoWay}">Snap to device pixels</CheckBox>
+      <TextBlock>Subpixel offset X</TextBlock>
+      <Slider Minimum="0" Maximum="1" Value="{Binding Source={StaticResource SubPixelTransform}, Path=X, Mode=TwoWay}" Width="200" />
+    </StackPanel>
+
+    <Decorator RenderTransform="{StaticResource SubPixelTransform}">
+      <Border Background="Beige"
+              Margin="10"
+              RenderTransform="{StaticResource Transform}"
+              RenderTransformOrigin="0.5,0.5">
+        <Border Margin="10"
+                CacheMode="{StaticResource Cache}"
+                TextElement.Foreground="Black">
+          <Border Margin="10"
+                  BorderThickness="2"
+                  BorderBrush="Black"
+                  Background="White"
+                  Padding="8">
+            <StackPanel Spacing="8">
+              <Slider MinWidth="200" />
+              <TextBlock TextWrapping="Wrap">This subtree is cached into a bitmap. Move the sliders to compare cache scale, layout transform, and subpixel offset behavior.</TextBlock>
+              <Rectangle Width="180" Height="80" RadiusX="12" RadiusY="12" Fill="{DynamicResource SystemAccentColor}" />
+            </StackPanel>
+          </Border>
+        </Border>
+      </Border>
+    </Decorator>
+  </DockPanel>
+</UserControl>

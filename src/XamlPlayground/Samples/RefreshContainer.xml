@@ -1,0 +1,21 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <DockPanel HorizontalAlignment="Stretch"
+             Height="600"
+             VerticalAlignment="Top">
+    <Label DockPanel.Dock="Top">A control that supports pull to refresh.</Label>
+    <RefreshContainer DockPanel.Dock="Bottom"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      PullDirection="TopToBottom"
+                      Margin="5">
+      <ListBox HorizontalAlignment="Stretch" VerticalAlignment="Top">
+        <ListBoxItem>Pull down to request refresh</ListBoxItem>
+        <ListBoxItem>Item 1</ListBoxItem>
+        <ListBoxItem>Item 2</ListBoxItem>
+        <ListBoxItem>Item 3</ListBoxItem>
+        <ListBoxItem>Item 4</ListBoxItem>
+      </ListBox>
+    </RefreshContainer>
+  </DockPanel>
+</UserControl>

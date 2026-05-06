@@ -1,0 +1,26 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <TabControl>
+    <TabItem Header="Element">
+      <StackPanel Margin="18" Spacing="8" Width="320">
+        <TextBlock FontSize="16" Text="Element name bindings" />
+        <TextBox Name="NameBox" UseFloatingPlaceholder="True" PlaceholderText="Name" Text="Avalonia" />
+        <TextBlock Text="{Binding #NameBox.Text, StringFormat='Hello, {0}'}" />
+
+        <Slider Name="AmountSlider" Minimum="0" Maximum="100" Value="42" />
+        <TextBlock Text="{Binding #AmountSlider.Value, StringFormat='Slider value: {0:F0}'}" />
+        <ProgressBar Minimum="0" Maximum="100" Value="{Binding #AmountSlider.Value}" />
+      </StackPanel>
+    </TabItem>
+
+    <TabItem Header="Self">
+      <StackPanel Margin="18" Spacing="8" Width="320">
+        <TextBlock FontSize="16" Text="Self and sibling bindings" />
+        <CheckBox Name="EnableInput" Content="Enable input" IsChecked="True" />
+        <TextBox Text="Bound enabled state" IsEnabled="{Binding #EnableInput.IsChecked}" />
+        <ToggleSwitch Name="Switch" Content="Toggle bound output" />
+        <TextBlock IsVisible="{Binding #Switch.IsChecked}" Text="The switch is on." />
+      </StackPanel>
+    </TabItem>
+  </TabControl>
+</UserControl>

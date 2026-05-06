@@ -1,0 +1,24 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <StackPanel Orientation="Vertical" Spacing="4">
+    <TextBlock Classes="h2">A selectable strip of tabs without associated content.</TextBlock>
+
+    <Separator Margin="0 16" />
+
+    <TextBlock Classes="h1">Defined in XAML</TextBlock>
+    <TabStrip>
+      <TabStripItem>Item 1</TabStripItem>
+      <TabStripItem>Item 2</TabStripItem>
+      <TabStripItem IsEnabled="False">Disabled</TabStripItem>
+    </TabStrip>
+
+    <Separator Margin="0 16" />
+
+    <TextBlock Classes="h1">More items</TextBlock>
+    <TabStrip>
+      <TabStripItem>Item 3</TabStripItem>
+      <TabStripItem>Item 4</TabStripItem>
+      <TabStripItem>Item 5</TabStripItem>
+    </TabStrip>
+  </StackPanel>
+</UserControl>

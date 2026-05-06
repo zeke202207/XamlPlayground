@@ -1,0 +1,36 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <StackPanel Spacing="12">
+    <TextBlock Classes="h2">ThemeVariantScope and theme dictionaries.</TextBlock>
+
+    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+      <ThemeVariantScope RequestedThemeVariant="Light">
+        <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Padding="12" CornerRadius="6">
+          <StackPanel Spacing="8">
+            <TextBlock Text="Light scope" FontWeight="SemiBold" />
+            <TextBox PlaceholderText="Input here" />
+            <ComboBox SelectedIndex="0">
+              <ComboBoxItem>One</ComboBoxItem>
+              <ComboBoxItem>Two</ComboBoxItem>
+            </ComboBox>
+            <Button Content="Button" />
+          </StackPanel>
+        </Border>
+      </ThemeVariantScope>
+
+      <ThemeVariantScope Grid.Column="1" RequestedThemeVariant="Dark">
+        <Border Background="{DynamicResource SystemControlBackgroundAltHighBrush}" Padding="12" CornerRadius="6">
+          <StackPanel Spacing="8">
+            <TextBlock Text="Dark scope" FontWeight="SemiBold" />
+            <TextBox PlaceholderText="Input here" />
+            <ComboBox SelectedIndex="0">
+              <ComboBoxItem>One</ComboBoxItem>
+              <ComboBoxItem>Two</ComboBoxItem>
+            </ComboBox>
+            <Button Content="Button" />
+          </StackPanel>
+        </Border>
+      </ThemeVariantScope>
+    </Grid>
+  </StackPanel>
+</UserControl>

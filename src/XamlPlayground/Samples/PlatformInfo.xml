@@ -1,0 +1,42 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <StackPanel Spacing="20">
+    <TextBlock Text="Platform and form-factor markup extensions." TextWrapping="Wrap" />
+
+    <StackPanel TextElement.Foreground="White">
+      <StackPanel Orientation="Horizontal">
+        <Border Height="100" Width="100" Background="{OnFormFactor Gray, Desktop=Green}">
+          <TextBlock Text="Desktop" />
+        </Border>
+        <Border Height="100" Width="100" Background="{OnFormFactor Gray, Mobile=Green}">
+          <TextBlock Text="Mobile" />
+        </Border>
+        <Border Height="100" Width="100" Background="{OnFormFactor Gray, TV=Green}">
+          <TextBlock Text="TV" />
+        </Border>
+      </StackPanel>
+      <WrapPanel>
+        <Border Height="100" Width="100" Background="{OnPlatform Gray, Windows=Green}">
+          <TextBlock Text="Windows" />
+        </Border>
+        <Border Height="100" Width="100" Background="{OnPlatform Gray, macOS=Green}">
+          <TextBlock Text="macOS" />
+        </Border>
+        <Border Height="100" Width="100" Background="{OnPlatform Gray, Linux=Green}">
+          <TextBlock Text="Linux" />
+        </Border>
+        <Border Height="100" Width="100" Background="{OnPlatform Gray, Browser=Green}">
+          <TextBlock Text="Browser" />
+        </Border>
+        <Border Height="100" Width="100">
+          <Border.Background>
+            <OnPlatform Default="Gray">
+              <On Options="macOS, Linux, Windows" Content="Green" />
+            </OnPlatform>
+          </Border.Background>
+          <TextBlock Text="Desktop OS" />
+        </Border>
+      </WrapPanel>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

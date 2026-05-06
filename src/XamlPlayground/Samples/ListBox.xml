@@ -1,0 +1,52 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <DockPanel>
+    <DockPanel.Styles>
+      <Style Selector="ListBox ListBoxItem:nth-child(even)">
+        <Setter Property="ContextFlyout">
+          <MenuFlyout>
+            <MenuItem Header="Context item" />
+          </MenuFlyout>
+        </Setter>
+      </Style>
+      <Style Selector="ListBox ListBoxItem:nth-child(5n+3)">
+        <Setter Property="Foreground" Value="Red" />
+        <Setter Property="FontWeight" Value="Bold" />
+      </Style>
+      <Style Selector="ListBox ListBoxItem:nth-last-child(5n+4)">
+        <Setter Property="Background" Value="LightBlue" />
+        <Setter Property="FontWeight" Value="Bold" />
+      </Style>
+    </DockPanel.Styles>
+
+    <StackPanel DockPanel.Dock="Top" Margin="4">
+      <TextBlock Classes="h2">Hosts a collection of selectable ListBoxItem controls.</TextBlock>
+      <TextBlock TextWrapping="Wrap">Each fifth item is highlighted using nth-child and nth-last-child selectors.</TextBlock>
+    </StackPanel>
+
+    <StackPanel DockPanel.Dock="Right" Margin="8" Spacing="8">
+      <CheckBox IsChecked="{Binding #Items.SelectionMode, Converter={x:Static ObjectConverters.IsNotNull}}">Selection enabled</CheckBox>
+      <TextBlock Text="SelectionMode" />
+      <ComboBox SelectedIndex="1" Width="160">
+        <ComboBoxItem>Single</ComboBoxItem>
+        <ComboBoxItem>Multiple</ComboBoxItem>
+        <ComboBoxItem>Toggle</ComboBoxItem>
+      </ComboBox>
+    </StackPanel>
+
+    <ListBox Name="Items" SelectionMode="Multiple" AutoScrollToSelectedItem="True">
+      <ListBoxItem>Item 1</ListBoxItem>
+      <ListBoxItem>Item 2</ListBoxItem>
+      <ListBoxItem>Item 3</ListBoxItem>
+      <ListBoxItem>Item 4</ListBoxItem>
+      <ListBoxItem>Item 5</ListBoxItem>
+      <ListBoxItem>Item 6</ListBoxItem>
+      <ListBoxItem>Item 7</ListBoxItem>
+      <ListBoxItem>Item 8</ListBoxItem>
+      <ListBoxItem>Item 9</ListBoxItem>
+      <ListBoxItem>Item 10</ListBoxItem>
+      <ListBoxItem>Item 11</ListBoxItem>
+      <ListBoxItem>Item 12</ListBoxItem>
+    </ListBox>
+  </DockPanel>
+</UserControl>

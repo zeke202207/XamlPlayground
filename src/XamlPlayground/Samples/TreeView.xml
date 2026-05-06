@@ -1,0 +1,38 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <StackPanel Orientation="Vertical" Spacing="4">
+    <TextBlock Classes="h2">Displays a hierarchical tree of data.</TextBlock>
+
+    <StackPanel Orientation="Horizontal"
+                Margin="0,16,0,0"
+                HorizontalAlignment="Center"
+                Spacing="16">
+      <StackPanel Orientation="Vertical" Spacing="8">
+        <TreeView Width="250" Height="350" SelectionMode="Multiple">
+          <TreeViewItem Header="Documents" IsExpanded="True">
+            <TreeViewItem Header="Invoices" />
+            <TreeViewItem Header="Reports">
+              <TreeViewItem Header="Q1.pdf" />
+              <TreeViewItem Header="Q2.pdf" />
+            </TreeViewItem>
+          </TreeViewItem>
+          <TreeViewItem Header="Pictures" IsExpanded="True">
+            <TreeViewItem Header="Logo.png" />
+            <TreeViewItem Header="Screenshots" />
+          </TreeViewItem>
+          <TreeViewItem Header="Source">
+            <TreeViewItem Header="App.axaml" />
+            <TreeViewItem Header="MainView.axaml" />
+          </TreeViewItem>
+        </TreeView>
+
+        <ComboBox SelectedIndex="1" IsEnabled="False">
+          <ComboBoxItem>Single</ComboBoxItem>
+          <ComboBoxItem>Multiple</ComboBoxItem>
+          <ComboBoxItem>Toggle</ComboBoxItem>
+          <ComboBoxItem>AlwaysSelected</ComboBoxItem>
+        </ComboBox>
+      </StackPanel>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

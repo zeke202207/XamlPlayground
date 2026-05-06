@@ -1,0 +1,25 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,*">
+    <StackPanel Grid.ColumnSpan="2" Orientation="Vertical" Spacing="4">
+      <TextBlock Classes="h2">Defines a cursor for pointer interaction.</TextBlock>
+    </StackPanel>
+
+    <StackPanel Grid.Row="1" Margin="0 8 8 8" Spacing="6">
+      <Button Cursor="Arrow" Content="Arrow" />
+      <Button Cursor="Hand" Content="Hand" />
+      <Button Cursor="Ibeam" Content="I-beam" />
+      <Button Cursor="Wait" Content="Wait" />
+      <Button Cursor="Cross" Content="Cross" />
+    </StackPanel>
+
+    <StackPanel Grid.Column="1" Grid.Row="1" Margin="8 8 0 8" Spacing="8">
+      <Button Cursor="SizeAll" Padding="16">
+        <TextBlock>Move cursor</TextBlock>
+      </Button>
+      <Border Cursor="Hand" Background="{DynamicResource SystemAccentColor}" CornerRadius="6" Padding="16">
+        <TextBlock Foreground="White" Text="Hover for hand cursor" />
+      </Border>
+    </StackPanel>
+  </Grid>
+</UserControl>

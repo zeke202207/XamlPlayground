@@ -96,6 +96,24 @@
           <TextBlock Text="👪 👨‍👩‍👧 👨‍👩‍👧‍👦" />
         </StackPanel>
       </Border>
+      <Border>
+        <SelectableTextBlock Margin="10" TextWrapping="Wrap">
+          This <Span FontWeight="Bold">is</Span> a
+          <Span Background="Silver" Foreground="Maroon">TextBlock</Span>
+          with <Span TextDecorations="Underline">several</Span>
+          <Span FontStyle="Italic">Span</Span> elements,
+          <Span Foreground="Blue">
+            using a <Bold>variety</Bold> of <Italic>styles</Italic>
+          </Span>.
+        </SelectableTextBlock>
+      </Border>
+      <Border>
+        <TextBlock FontFamily="Times New Roman">
+          <Run Text="ABC" FontFeatures="+c2sc, +smcp"/>
+          <Run Text="DEF"/>
+          <Run Text="0123" FontFeatures="frac"/>
+        </TextBlock>
+      </Border>
     </WrapPanel>
   </StackPanel>
 </UserControl>

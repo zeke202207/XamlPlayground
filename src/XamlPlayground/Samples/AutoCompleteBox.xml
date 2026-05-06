@@ -1,0 +1,74 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:sys="using:System"
+             xmlns:col="using:System.Collections">
+  <UserControl.Resources>
+    <col:ArrayList x:Key="States">
+      <sys:String>Alabama</sys:String>
+      <sys:String>Alaska</sys:String>
+      <sys:String>Arizona</sys:String>
+      <sys:String>Arkansas</sys:String>
+      <sys:String>California</sys:String>
+      <sys:String>Colorado</sys:String>
+      <sys:String>Connecticut</sys:String>
+      <sys:String>Florida</sys:String>
+      <sys:String>New York</sys:String>
+      <sys:String>Washington</sys:String>
+    </col:ArrayList>
+  </UserControl.Resources>
+
+  <StackPanel Orientation="Vertical" Spacing="4" MaxWidth="660">
+    <TextBlock Classes="h2">A text input with filtered completion suggestions.</TextBlock>
+
+    <UniformGrid Margin="-8,0" Columns="2">
+      <UniformGrid.Styles>
+        <Style Selector="StackPanel">
+          <Setter Property="Margin" Value="8" />
+          <Setter Property="Spacing" Value="4" />
+        </Style>
+      </UniformGrid.Styles>
+
+      <StackPanel>
+        <TextBlock Text="MinimumPrefixLength: 0" />
+        <AutoCompleteBox MinimumPrefixLength="0" ItemsSource="{StaticResource States}" />
+      </StackPanel>
+      <StackPanel>
+        <TextBlock Text="MinimumPrefixLength: 1" />
+        <AutoCompleteBox MinimumPrefixLength="1" ItemsSource="{StaticResource States}" />
+      </StackPanel>
+      <StackPanel>
+        <TextBlock Text="Contains filter" />
+        <AutoCompleteBox FilterMode="Contains" ItemsSource="{StaticResource States}" />
+      </StackPanel>
+      <StackPanel>
+        <TextBlock Text="MinimumPopulateDelay: 1s" />
+        <AutoCompleteBox MinimumPopulateDelay="00:00:01" ItemsSource="{StaticResource States}" />
+      </StackPanel>
+      <StackPanel>
+        <TextBlock Text="MaxDropDownHeight: 60" />
+        <AutoCompleteBox MaxDropDownHeight="60" ItemsSource="{StaticResource States}" />
+      </StackPanel>
+      <StackPanel>
+        <TextBlock Text="PlaceholderText" />
+        <AutoCompleteBox PlaceholderText="Search states" ItemsSource="{StaticResource States}" />
+      </StackPanel>
+      <StackPanel>
+        <TextBlock Text="Custom placeholder color" />
+        <AutoCompleteBox PlaceholderText="Search here..." PlaceholderForeground="Green" ItemsSource="{StaticResource States}" />
+      </StackPanel>
+      <StackPanel>
+        <TextBlock Text="Disabled" />
+        <AutoCompleteBox IsEnabled="False" ItemsSource="{StaticResource States}" />
+      </StackPanel>
+    </UniformGrid>
+
+    <StackPanel Margin="8" Spacing="4">
+      <TextBlock Text="With validation error" />
+      <AutoCompleteBox FilterMode="Contains" ItemsSource="{StaticResource States}">
+        <DataValidationErrors.Error>
+          <sys:Exception />
+        </DataValidationErrors.Error>
+      </AutoCompleteBox>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

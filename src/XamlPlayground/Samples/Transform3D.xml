@@ -1,0 +1,63 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <UserControl.Styles>
+    <Style Selector="Border.Test">
+      <Setter Property="Width" Value="200" />
+      <Setter Property="Height" Value="200" />
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="BorderBrush" Value="Black" />
+    </Style>
+    <Style Selector="TextBlock, Label, Slider">
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="10,0,10,0" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid ColumnDefinitions="Auto,*,Auto,*" RowDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
+    <Border Name="B1" Background="DarkRed" Classes="Test">
+      <Border.RenderTransform>
+        <Rotate3DTransform CenterZ="-100" Depth="{Binding #DepthSlider.Value}" AngleX="{Binding #AngleXSlider.Value}" />
+      </Border.RenderTransform>
+      <TextBlock Text="3D content" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Border>
+
+    <Label Grid.Column="0" Grid.Row="1">Depth:</Label>
+    <Slider Name="DepthSlider" Grid.Column="1" Grid.Row="1" Value="180" Minimum="100" Maximum="300" />
+
+    <Border Grid.Row="0" Grid.Column="2" Classes="Test" ZIndex="-2">
+      <Border.Background>
+        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+          <GradientStop Offset="0" Color="Red" />
+          <GradientStop Offset="1" Color="Blue" />
+        </LinearGradientBrush>
+      </Border.Background>
+      <Border.RenderTransform>
+        <Rotate3DTransform Depth="{Binding #DepthSlider.Value}"
+                           CenterX="{Binding #CenterXSlider.Value}"
+                           CenterY="{Binding #CenterYSlider.Value}"
+                           CenterZ="{Binding #CenterZSlider.Value}"
+                           AngleX="{Binding #AngleXSlider.Value}"
+                           AngleY="{Binding #AngleYSlider.Value}"
+                           AngleZ="{Binding #AngleZSlider.Value}" />
+      </Border.RenderTransform>
+    </Border>
+
+    <Label Grid.Row="1" Grid.Column="2">Center X:</Label>
+    <Slider Name="CenterXSlider" Grid.Row="1" Grid.Column="3" Value="0" Minimum="-100" Maximum="100" />
+
+    <Label Grid.Row="2" Grid.Column="2">Center Y:</Label>
+    <Slider Name="CenterYSlider" Grid.Row="2" Grid.Column="3" Value="0" Minimum="-100" Maximum="100" />
+
+    <Label Grid.Row="3" Grid.Column="2">Center Z:</Label>
+    <Slider Name="CenterZSlider" Grid.Row="3" Grid.Column="3" Value="0" Minimum="-100" Maximum="100" />
+
+    <Label Grid.Row="4" Grid.Column="2">Angle X:</Label>
+    <Slider Name="AngleXSlider" Grid.Row="4" Grid.Column="3" Value="20" Minimum="-180" Maximum="180" />
+
+    <Label Grid.Row="5" Grid.Column="2">Angle Y:</Label>
+    <Slider Name="AngleYSlider" Grid.Row="5" Grid.Column="3" Value="30" Minimum="-180" Maximum="180" />
+
+    <Label Grid.Row="6" Grid.Column="2">Angle Z:</Label>
+    <Slider Name="AngleZSlider" Grid.Row="6" Grid.Column="3" Value="0" Minimum="-180" Maximum="180" />
+  </Grid>
+</UserControl>

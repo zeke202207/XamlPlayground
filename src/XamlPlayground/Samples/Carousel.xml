@@ -1,0 +1,34 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Right" Width="220" Margin="12" Spacing="8">
+      <TextBlock Text="Carousel" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource SystemControlHighlightAccentBrush}" />
+      <TextBlock TextWrapping="Wrap" Opacity="0.7" Text="A swipeable or button-driven selector for one item at a time." />
+      <Button Content="Static sample: use pointer or touch gestures" HorizontalAlignment="Stretch" IsEnabled="False" />
+    </StackPanel>
+
+    <Border DockPanel.Dock="Right" Width="1" Background="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+
+    <Border Margin="12"
+            BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+            BorderThickness="1"
+            CornerRadius="6"
+            ClipToBounds="True">
+      <Carousel Height="300" IsSwipeEnabled="True">
+        <Carousel.PageTransition>
+          <PageSlide Duration="0.25" Orientation="Horizontal" />
+        </Carousel.PageTransition>
+
+        <Border Margin="14,12" CornerRadius="12" Background="#2255AA" Padding="24">
+          <TextBlock Text="Item 1" Foreground="White" FontSize="32" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <Border Margin="14,12" CornerRadius="12" Background="#2D7D46" Padding="24">
+          <TextBlock Text="Item 2" Foreground="White" FontSize="32" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <Border Margin="14,12" CornerRadius="12" Background="#9A4B1E" Padding="24">
+          <TextBlock Text="Item 3" Foreground="White" FontSize="32" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+      </Carousel>
+    </Border>
+  </DockPanel>
+</UserControl>

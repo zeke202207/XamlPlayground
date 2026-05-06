@@ -1,0 +1,74 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <StackPanel Orientation="Vertical" Spacing="12">
+    <TextBlock Classes="h2">Accelerator and access key support.</TextBlock>
+
+    <Menu>
+      <MenuItem Header="_First">
+        <MenuItem Header="Standard _Menu Item" InputGesture="Ctrl+A" />
+        <MenuItem Header="_Disabled Menu Item" IsEnabled="False" InputGesture="Ctrl+D" />
+        <Separator />
+        <MenuItem Header="Menu with Sub _Menu">
+          <MenuItem Header="Submenu _1" />
+          <MenuItem Header="Submenu _2 with Submenu">
+            <MenuItem Header="Submenu Level 2" />
+          </MenuItem>
+        </MenuItem>
+        <MenuItem Header="Menu Item with _Icon" InputGesture="Ctrl+Shift+B">
+          <MenuItem.Icon>
+            <Image Source="avares://XamlPlayground/Assets/Logo.png" Width="16" Height="16" />
+          </MenuItem.Icon>
+        </MenuItem>
+        <MenuItem Header="Menu Item with _Checkbox" ToggleType="CheckBox" />
+      </MenuItem>
+      <MenuItem Header="_Second">
+        <MenuItem Header="Second _Menu Item" />
+        <MenuItem IsChecked="True" Header="Second _Menu toggle item" ToggleType="CheckBox" />
+        <Separator />
+        <MenuItem GroupName="A" Header="Radio 1 - group" ToggleType="Radio" />
+        <MenuItem IsChecked="True" GroupName="A" Header="Radio 2 - group" ToggleType="Radio" />
+        <MenuItem GroupName="A" Header="Radio 3 - group" ToggleType="Radio" />
+      </MenuItem>
+      <MenuItem Header="Thir_d">
+        <MenuItem Header="About" />
+        <MenuItem Header="_Child">
+          <MenuItem Header="_Grandchild" />
+        </MenuItem>
+      </MenuItem>
+    </Menu>
+
+    <TabControl Margin="10" BorderBrush="Gray" BorderThickness="1">
+      <TabItem Header="_Tab 1">
+        <StackPanel>
+          <TextBlock Margin="5">This is tab 1 content</TextBlock>
+          <Label Target="Tab1TextBox1">_Label Tab1Label1</Label>
+          <TextBox Name="Tab1TextBox1" Margin="5" Text="This is tab 1 content" />
+          <Label Target="Tab1TextBox2">Label _Tab1Label2</Label>
+          <TextBox Name="Tab1TextBox2" Margin="5" Text="This is tab 1 content" />
+        </StackPanel>
+      </TabItem>
+      <TabItem Header="T_ab 2">
+        <TextBlock Margin="5">This is tab 2 content</TextBlock>
+      </TabItem>
+      <TabItem Header="_Tab 3" />
+      <TabItem Header="_Tab 4">
+        <TextBlock Margin="5">This is tab 4 content</TextBlock>
+      </TabItem>
+    </TabControl>
+
+    <StackPanel Spacing="8">
+      <Label>Label with Ac_celerator and no Target</Label>
+      <TextBox Text="Some Text" />
+      <Label Target="TextBox1">_Label with Accelerator</Label>
+      <TextBox Name="TextBox1" Text="Some Text" />
+      <Label Target="TextBox2">La_bel with Accelerator</Label>
+      <TextBox Name="TextBox2" Text="Some Text" />
+    </StackPanel>
+
+    <StackPanel Spacing="10" Orientation="Horizontal">
+      <Button>_Button 1</Button>
+      <Button>_Button 2</Button>
+      <Button>_Button 3</Button>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

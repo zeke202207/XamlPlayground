@@ -1,0 +1,39 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <StackPanel Spacing="10">
+    <StackPanel.Styles>
+      <ContainerQuery Name="UniformGrid" Query="max-width:400">
+        <Style Selector="UniformGrid#ContentGrid">
+          <Setter Property="Columns" Value="1" />
+        </Style>
+      </ContainerQuery>
+      <ContainerQuery Name="UniformGrid" Query="min-width:400">
+        <Style Selector="UniformGrid#ContentGrid">
+          <Setter Property="Columns" Value="2" />
+        </Style>
+      </ContainerQuery>
+      <ContainerQuery Name="UniformGrid" Query="min-width:800">
+        <Style Selector="UniformGrid#ContentGrid">
+          <Setter Property="Columns" Value="3" />
+        </Style>
+      </ContainerQuery>
+    </StackPanel.Styles>
+
+    <TextBlock Text="Dynamically change properties of controls based on the size of a parent container." TextWrapping="Wrap" />
+    <Border Container.Name="UniformGrid"
+            VerticalAlignment="Stretch"
+            HorizontalAlignment="Stretch"
+            Container.Sizing="Width">
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <UniformGrid Name="ContentGrid">
+          <Border Margin="10" MinHeight="100" Background="#2255AA" CornerRadius="20" />
+          <Border Margin="10" MinHeight="100" Background="#2D7D46" CornerRadius="20" />
+          <Border Margin="10" MinHeight="100" Background="#9A4B1E" CornerRadius="20" />
+          <Border Margin="10" MinHeight="100" Background="#7C3EA0" CornerRadius="20" />
+          <Border Margin="10" MinHeight="100" Background="#B85C5C" CornerRadius="20" />
+          <Border Margin="10" MinHeight="100" Background="#53666D" CornerRadius="20" />
+        </UniformGrid>
+      </ScrollViewer>
+    </Border>
+  </StackPanel>
+</UserControl>
