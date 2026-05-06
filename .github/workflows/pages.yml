@@ -44,8 +44,23 @@ jobs:
     - name: Install wasm-tools
       run: dotnet workload install wasm-tools
 
+    - name: Install DotNetCompress
+      run: dotnet tool install --tool-path ./.tools DotNetCompress --version 5.0.0 --no-cache
+
     - name: Publish .NET Project
       run: dotnet publish src/XamlPlayground.Browser/XamlPlayground.Browser.csproj -c Release -o release --nologo
+
+    - name: Brotli Compress Output
+      run: |
+        ./.tools/DotNetCompress -d release/wwwroot -p '*.wasm' --format br --threads 4 --recursive
+        ./.tools/DotNetCompress -d release/wwwroot -p '*.js' --format br --threads 4 --recursive
+        ./.tools/DotNetCompress -d release/wwwroot -p '*.dll' --format br --threads 4 --recursive
+
+    - name: GZip Compress Output
+      run: |
+        ./.tools/DotNetCompress -d release/wwwroot -p '*.wasm' --format gz --threads 4 --recursive
+        ./.tools/DotNetCompress -d release/wwwroot -p '*.js' --format gz --threads 4 --recursive
+        ./.tools/DotNetCompress -d release/wwwroot -p '*.dll' --format gz --threads 4 --recursive
 
     - name: Change base-tag in index.html from / to XamlPlayground
       run: sed -i 's/<base href="\/"\/>/<base href="\/XamlPlayground\/"\/>/g' release/wwwroot/index.html
