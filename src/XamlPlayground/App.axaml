@@ -11,6 +11,12 @@
              RequestedThemeVariant="Light"
              x:Class="XamlPlayground.App">
   <Application.DataTemplates>
+    <DataTemplate DataType="dockVm:WorkspaceFileDocumentDockViewModel">
+      <dockViews:WorkspaceFileEditorDockView />
+    </DataTemplate>
+    <DataTemplate DataType="dockVm:SolutionExplorerDockViewModel">
+      <dockViews:SolutionExplorerDockView />
+    </DataTemplate>
     <DataTemplate DataType="dockVm:XamlEditorDockViewModel">
       <dockViews:XamlEditorDockView />
     </DataTemplate>

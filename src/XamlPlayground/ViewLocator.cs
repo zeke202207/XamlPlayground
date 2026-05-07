@@ -18,6 +18,8 @@ public partial class ViewLocator : IDataTemplate
 
         return data switch
         {
+            WorkspaceFileDocumentDockViewModel => new WorkspaceFileEditorDockView(),
+            SolutionExplorerDockViewModel => new SolutionExplorerDockView(),
             XamlEditorDockViewModel => new XamlEditorDockView(),
             CodeEditorDockViewModel => new CodeEditorDockView(),
             PreviewDockViewModel => new PreviewDockView(),

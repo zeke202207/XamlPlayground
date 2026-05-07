@@ -17,28 +17,36 @@ using XamlPlayground.Views.Docking;
 using XamlPlayground.Services;
 using XamlPlayground.ViewModels;
 using XamlPlayground.ViewModels.Docking;
+using XamlPlayground.ViewModels.Workspace;
+using XamlPlayground.Workspace;
 
 namespace XamlPlayground.Tests;
 
 public sealed class MainViewModelTests
 {
     [Fact]
-    public void NewFileCommand_CreatesUntitledHelloWorldUserControl()
+    public void NewFileCommand_AddsUserControlToActiveProject()
     {
         TestApplication.EnsureAvaloniaInitialized();
 
         var viewModel = new MainViewModel(null);
         var previousCount = viewModel.Samples.Count;
+        var project = viewModel.ActiveProject;
+        Assert.NotNull(project);
+        var previousFileCount = project.Files.Count;
 
         viewModel.NewFileCommand.Execute(null);
 
-        var sample = Assert.IsType<SampleViewModel>(viewModel.CurrentSample);
-        Assert.Equal(previousCount + 1, viewModel.Samples.Count);
-        Assert.Equal("Untitled", sample.Name);
-        Assert.Contains("<UserControl", sample.Xaml.Text, StringComparison.Ordinal);
-        Assert.Contains("TextBlock", sample.Xaml.Text, StringComparison.Ordinal);
-        Assert.Contains("Hello, world!", sample.Xaml.Text, StringComparison.Ordinal);
-        Assert.True(string.IsNullOrEmpty(sample.Code.Text));
+        Assert.Equal(previousCount, viewModel.Samples.Count);
+        Assert.Equal(previousFileCount + 2, project.Files.Count);
+        var userControl = project.FindFile("Views/UserControl1.axaml");
+        var codeBehind = project.FindFile("Views/UserControl1.axaml.cs");
+        Assert.NotNull(userControl);
+        Assert.NotNull(codeBehind);
+        Assert.Contains("<UserControl", userControl.Text, StringComparison.Ordinal);
+        Assert.Contains("UserControl1", userControl.Text, StringComparison.Ordinal);
+        Assert.Contains("partial class UserControl1", codeBehind.Text, StringComparison.Ordinal);
+        Assert.Same(userControl, viewModel.ActiveXamlFile);
     }
 
     [Fact]
@@ -99,15 +107,26 @@ public sealed class MainViewModelTests
         Assert.Equal(DockFloatingWindowHostMode.Default, root.FloatingWindowHostMode);
 
         var dockables = Enumerate(root).ToList();
-        var xamlEditor = Assert.Single(dockables.OfType<XamlEditorDockViewModel>());
-        var codeEditor = Assert.Single(dockables.OfType<CodeEditorDockViewModel>());
+        var documents = dockables.OfType<WorkspaceFileDocumentDockViewModel>().ToList();
+        var solutionExplorer = Assert.Single(dockables.OfType<SolutionExplorerDockViewModel>());
         var preview = Assert.Single(dockables.OfType<PreviewDockViewModel>());
         var diagnosticTreeTools = dockables.OfType<DiagnosticTreeDockViewModel>().ToList();
         var diagnosticTools = dockables.OfType<DiagnosticToolDockViewModel>().ToList();
         var errors = Assert.Single(dockables.OfType<ErrorsDockViewModel>());
 
-        Assert.Same(viewModel, xamlEditor.Shell);
-        Assert.Same(viewModel, codeEditor.Shell);
+        Assert.Collection(
+            documents,
+            document =>
+            {
+                Assert.Same(viewModel, document.Shell);
+                Assert.Equal("Main.axaml", document.File.Path);
+            },
+            document =>
+            {
+                Assert.Same(viewModel, document.Shell);
+                Assert.Equal("Main.axaml.cs", document.File.Path);
+            });
+        Assert.Same(viewModel, solutionExplorer.Shell);
         Assert.Same(viewModel, preview.Shell);
         Assert.All(diagnosticTreeTools, diagnosticTool => Assert.Same(viewModel, diagnosticTool.Shell));
         Assert.All(diagnosticTools, diagnosticTool => Assert.Same(viewModel, diagnosticTool.Shell));
@@ -127,8 +146,7 @@ public sealed class MainViewModelTests
         var factory = Assert.IsType<PlaygroundDockFactory>(viewModel.DockFactory);
         Assert.NotNull(factory.ContextLocator);
         var contextLocator = factory.ContextLocator;
-        Assert.Same(xamlEditor, contextLocator["XamlEditor"]());
-        Assert.Same(codeEditor, contextLocator["CodeEditor"]());
+        Assert.Same(solutionExplorer, contextLocator["SolutionExplorer"]());
         Assert.Same(preview, contextLocator["Preview"]());
         Assert.Same(diagnosticTreeTools[0], contextLocator["DiagnosticsCombinedTree"]());
         Assert.Same(diagnosticTreeTools[1], contextLocator["DiagnosticsLogicalTree"]());
@@ -137,6 +155,56 @@ public sealed class MainViewModelTests
         Assert.Same(diagnosticTools[1], contextLocator["DiagnosticsResources"]());
         Assert.Same(diagnosticTools[2], contextLocator["DiagnosticsAssets"]());
         Assert.Same(errors, contextLocator["Errors"]());
+    }
+
+    [Fact]
+    public void NewProjectWizard_CreatesBrowserSafeAvaloniaProjectStructure()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ShowNewProjectWizardCommand.Execute(null);
+
+        Assert.True(viewModel.NewProjectWizard.IsOpen);
+        viewModel.NewProjectWizard.SolutionName = "BrowserApp";
+        viewModel.NewProjectWizard.SelectedTemplate = Assert.Single(
+            viewModel.NewProjectWizard.Templates,
+            template => template.ShortName == "avalonia.xplat");
+
+        viewModel.CreateProjectCommand.Execute(null);
+
+        Assert.False(viewModel.NewProjectWizard.IsOpen);
+        var solution = viewModel.Solution;
+        Assert.NotNull(solution);
+        var project = Assert.Single(solution.Projects);
+        Assert.Equal("BrowserApp", solution.Name);
+        Assert.Equal("avalonia.xplat", project.TemplateShortName);
+        Assert.NotNull(project.FindFile("BrowserApp.csproj"));
+        Assert.NotNull(project.FindFile("App.axaml"));
+        Assert.NotNull(project.FindFile("App.axaml.cs"));
+        Assert.NotNull(project.FindFile("Views/MainView.axaml"));
+        Assert.NotNull(project.FindFile("Views/MainView.axaml.cs"));
+        Assert.NotNull(project.FindFile("Styles/Resources.axaml"));
+        Assert.Equal("Views/MainView.axaml", viewModel.ActiveXamlFile?.Path);
+        Assert.Equal("Views/MainView.axaml.cs", viewModel.ActiveCodeFile?.Path);
+    }
+
+    [Fact]
+    public void SolutionExplorerNodeCommand_OpensEditableFileInDocumentDock()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var root = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        var resourceNode = FindNode(viewModel.SolutionExplorerNodes, "Resources.axaml");
+        Assert.NotNull(resourceNode);
+
+        resourceNode.OpenCommand.Execute(null);
+
+        Assert.Equal("Styles/Resources.axaml", viewModel.ActiveXamlFile?.Path);
+        Assert.Contains(
+            Enumerate(root).OfType<WorkspaceFileDocumentDockViewModel>(),
+            document => document.File.Path == "Styles/Resources.axaml");
     }
 
     [Fact]
@@ -188,7 +256,9 @@ public sealed class MainViewModelTests
             var factory = Assert.IsAssignableFrom<IFactory>(viewModel.DockFactory);
             var editorDock = Assert.Single(Enumerate(root).OfType<IDocumentDock>(), dock => dock.Id == "Editors");
             var bottomDock = Assert.Single(Enumerate(root).OfType<IToolDock>(), dock => dock.Id == "Bottom");
-            var codeEditor = Assert.Single(Enumerate(root).OfType<CodeEditorDockViewModel>());
+            var codeDocument = Assert.Single(
+                Enumerate(root).OfType<WorkspaceFileDocumentDockViewModel>(),
+                document => document.File.Path == "Main.axaml.cs");
             var errors = Assert.Single(Enumerate(root).OfType<ErrorsDockViewModel>());
 
             var dockControl = new DockControl
@@ -214,16 +284,16 @@ public sealed class MainViewModelTests
                 window.Show();
                 PumpLayout(window);
 
-                var xamlView = Assert.Single(dockControl.GetVisualDescendants().OfType<XamlEditorDockView>());
+                var xamlView = Assert.Single(dockControl.GetVisualDescendants().OfType<WorkspaceFileEditorDockView>());
                 var xamlTextEditor = Assert.Single(xamlView.GetVisualDescendants().OfType<TextEditor>());
-                Assert.Same(viewModel.CurrentSample!.Xaml, xamlTextEditor.Document);
+                Assert.Same(viewModel.ActiveXamlFile!.Document, xamlTextEditor.Document);
 
-                editorDock.ActiveDockable = codeEditor;
+                editorDock.ActiveDockable = codeDocument;
                 PumpLayout(window);
 
-                var codeView = Assert.Single(dockControl.GetVisualDescendants().OfType<CodeEditorDockView>());
+                var codeView = Assert.Single(dockControl.GetVisualDescendants().OfType<WorkspaceFileEditorDockView>());
                 var codeTextEditor = Assert.Single(codeView.GetVisualDescendants().OfType<TextEditor>());
-                Assert.Same(viewModel.CurrentSample.Code, codeTextEditor.Document);
+                Assert.Same(codeDocument.File.Document, codeTextEditor.Document);
 
                 viewModel.LastErrorMessage = "Broken sample";
                 PumpLayout(window);
@@ -337,5 +407,25 @@ public sealed class MainViewModelTests
                 yield return child;
             }
         }
+    }
+
+    private static SolutionExplorerNodeViewModel? FindNode(
+        IEnumerable<SolutionExplorerNodeViewModel> nodes,
+        string title)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.Title == title)
+            {
+                return node;
+            }
+
+            if (FindNode(node.Children, title) is { } child)
+            {
+                return child;
+            }
+        }
+
+        return null;
     }
 }

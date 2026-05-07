@@ -4,8 +4,41 @@ using Avalonia.Diagnostics;
 using Dock.Model.Controls;
 using Dock.Model.Core;
 using Dock.Model.Mvvm.Controls;
+using XamlPlayground.Workspace;
 
 namespace XamlPlayground.ViewModels.Docking;
+
+public sealed class WorkspaceFileDocumentDockViewModel : Document
+{
+    public WorkspaceFileDocumentDockViewModel(MainViewModel shell, InMemoryProjectFile file)
+    {
+        Shell = shell;
+        File = file;
+        Id = $"Document:{file.Path}";
+        Title = file.Name;
+        CanClose = true;
+        file.PropertyChanged += FileOnPropertyChanged;
+    }
+
+    public MainViewModel Shell { get; }
+
+    public InMemoryProjectFile File { get; }
+
+    public string Extension => File.Extension;
+
+    public void Dispose()
+    {
+        File.PropertyChanged -= FileOnPropertyChanged;
+    }
+
+    private void FileOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(InMemoryProjectFile.IsDirty))
+        {
+            Title = File.IsDirty ? $"{File.Name}*" : File.Name;
+        }
+    }
+}
 
 public sealed class XamlEditorDockViewModel : Document
 {
@@ -40,6 +73,20 @@ public sealed class PreviewDockViewModel : Tool
         Shell = shell;
         Id = "Preview";
         Title = "Preview";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class SolutionExplorerDockViewModel : Tool
+{
+    public SolutionExplorerDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "SolutionExplorer";
+        Title = "Solution Explorer";
         CanClose = false;
         KeepPinnedDockableVisible = true;
     }

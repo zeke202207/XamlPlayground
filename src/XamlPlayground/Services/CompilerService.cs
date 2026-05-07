@@ -211,13 +211,31 @@ public static class CompilerService
 
     public static async Task<ScriptCompilationResult> GetScriptAssembly(string code)
     {
+        return await GetProjectAssembly(
+            Path.GetRandomFileName(),
+            new[] { ("Script.cs", code) });
+    }
+
+    public static async Task<ScriptCompilationResult> GetProjectAssembly(
+        string assemblyName,
+        IEnumerable<(string Path, string Text)> codeFiles)
+    {
         var references = await GetMetadataReferences();
 
-        var stringText = SourceText.From(code, Encoding.UTF8);
-        var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
-        var parsedSyntaxTree = SyntaxFactory.ParseSyntaxTree(stringText, parseOptions);
+        var parsedSyntaxTrees = codeFiles
+            .Where(static file => !string.IsNullOrWhiteSpace(file.Text))
+            .Select(static file => SyntaxFactory.ParseSyntaxTree(
+                SourceText.From(file.Text, Encoding.UTF8),
+                CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest),
+                file.Path))
+            .ToArray();
+
         var compilationOptions = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary).WithOptimizationLevel(OptimizationLevel.Release);
-        var compilation = CSharpCompilation.Create(Path.GetRandomFileName(), new[] { parsedSyntaxTree }, references, compilationOptions);
+        var compilation = CSharpCompilation.Create(
+            string.IsNullOrWhiteSpace(assemblyName) ? Path.GetRandomFileName() : assemblyName,
+            parsedSyntaxTrees,
+            references,
+            compilationOptions);
 
         using var ms = new MemoryStream();
         var result = compilation.Emit(ms);

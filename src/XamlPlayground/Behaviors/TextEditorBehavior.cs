@@ -497,14 +497,18 @@ public class TextEditorBehavior : Behavior<TextEditor>
         if (Utilities.IsBrowser())
         {
             DisposeTextMateInstallation();
-            _textEditor.SyntaxHighlighting = HighlightingManager.Instance.GetDefinitionByExtension(extension ?? Extension);
+            _textEditor.SyntaxHighlighting = string.IsNullOrWhiteSpace(extension ?? Extension)
+                ? null
+                : HighlightingManager.Instance.GetDefinitionByExtension(extension ?? Extension);
             return;
         }
 
         if (extension is null)
         {
             DisposeTextMateInstallation();
-            _textEditor.SyntaxHighlighting = HighlightingManager.Instance.GetDefinitionByExtension(Extension);
+            _textEditor.SyntaxHighlighting = string.IsNullOrWhiteSpace(Extension)
+                ? null
+                : HighlightingManager.Instance.GetDefinitionByExtension(Extension);
             return;
         }
 

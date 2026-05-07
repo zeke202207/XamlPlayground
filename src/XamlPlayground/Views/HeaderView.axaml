@@ -86,7 +86,9 @@
               Foreground="{DynamicResource AppHeaderForegroundBrush}">
 
           <MenuItem Header="File" Classes="main">
-            <MenuItem Header="New" Command="{Binding NewFileCommand}" />
+            <MenuItem Header="New Project..." Command="{Binding ShowNewProjectWizardCommand}" />
+            <MenuItem Header="New User Control" Command="{Binding AddUserControlCommand}" />
+            <MenuItem Header="New Resource Dictionary" Command="{Binding AddResourceDictionaryCommand}" />
             <Separator />
             <MenuItem Header="Open Xaml..." Command="{Binding OpenXamlFileCommand}" />
             <MenuItem Header="Save Xaml As..." Command="{Binding SaveXamlFileCommand}" />
@@ -98,6 +100,10 @@
           <MenuItem Header="Run" 
                     Classes="main"
                     Command="{Binding RunCommand}" />
+
+          <MenuItem Header="Build"
+                    Classes="main"
+                    Command="{Binding BuildSolutionCommand}" />
 
           <MenuItem CornerRadius="3"
                     Classes="main popup"

@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:XamlPlayground.ViewModels"
+             xmlns:workspace="clr-namespace:XamlPlayground.Workspace"
              xmlns:dock="using:Dock.Avalonia.Controls"
              xmlns:views="clr-namespace:XamlPlayground.Views"
              mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="450"
@@ -22,5 +23,72 @@
                       InitializeLayout="False"
                       EnableManagedWindowLayer="True"
                       Margin="4" />
+
+    <Border Grid.RowSpan="2"
+            IsVisible="{Binding NewProjectWizard.IsOpen}"
+            Background="#66000000"
+            ZIndex="1000">
+      <Border Width="520"
+              MaxWidth="720"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Background="{DynamicResource DockSurfacePanelBrush}"
+              BorderBrush="{DynamicResource EditorBorderBrush}"
+              BorderThickness="1"
+              Padding="18">
+        <StackPanel Spacing="14">
+          <TextBlock Text="New Solution"
+                     FontSize="20"
+                     FontWeight="SemiBold" />
+          <Grid RowDefinitions="Auto,Auto,Auto"
+                ColumnDefinitions="140,*"
+                RowSpacing="10"
+                ColumnSpacing="12">
+            <TextBlock Text="Solution name:"
+                       VerticalAlignment="Center" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding NewProjectWizard.SolutionName, Mode=TwoWay}" />
+
+            <TextBlock Grid.Row="1"
+                       Text="Template:"
+                       VerticalAlignment="Center" />
+            <ComboBox Grid.Row="1"
+                      Grid.Column="1"
+                      ItemsSource="{Binding NewProjectWizard.Templates}"
+                      SelectedItem="{Binding NewProjectWizard.SelectedTemplate, Mode=TwoWay}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate DataType="workspace:AvaloniaProjectTemplate">
+                  <StackPanel>
+                    <TextBlock Text="{Binding Name}" />
+                    <TextBlock Text="{Binding ShortName}"
+                               Opacity="0.65"
+                               FontSize="11" />
+                  </StackPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+
+            <TextBlock Grid.Row="2"
+                       Grid.Column="1"
+                       Text="{Binding NewProjectWizard.SelectedTemplate.Description}"
+                       TextWrapping="Wrap"
+                       Opacity="0.75" />
+          </Grid>
+
+          <TextBlock Text="Templates are modeled from the locally installed Avalonia template set: avalonia.app, avalonia.mvvm, avalonia.xplat."
+                     TextWrapping="Wrap"
+                     Opacity="0.7" />
+
+          <StackPanel Orientation="Horizontal"
+                      HorizontalAlignment="Right"
+                      Spacing="8">
+            <Button Content="Cancel"
+                    Command="{Binding CancelNewProjectCommand}" />
+            <Button Content="Create"
+                    Command="{Binding CreateProjectCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Border>
   </Grid>
 </UserControl>

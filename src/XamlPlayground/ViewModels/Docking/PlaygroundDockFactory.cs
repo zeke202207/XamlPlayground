@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
 using Avalonia.Diagnostics;
 using Dock.Avalonia.Controls;
 using Dock.Model.Controls;
@@ -15,8 +17,8 @@ public sealed class PlaygroundDockFactory : Factory
 {
     private readonly MainViewModel _shell;
     private IRootDock? _rootDock;
-    private XamlEditorDockViewModel? _xamlEditor;
-    private CodeEditorDockViewModel? _codeEditor;
+    private IDocumentDock? _editorDock;
+    private SolutionExplorerDockViewModel? _solutionExplorer;
     private PreviewDockViewModel? _preview;
     private DiagnosticTreeDockViewModel? _combinedTree;
     private DiagnosticTreeDockViewModel? _logicalTree;
@@ -34,8 +36,7 @@ public sealed class PlaygroundDockFactory : Factory
 
     public override IRootDock CreateLayout()
     {
-        _xamlEditor = new XamlEditorDockViewModel(_shell);
-        _codeEditor = new CodeEditorDockViewModel(_shell);
+        _solutionExplorer = new SolutionExplorerDockViewModel(_shell);
         _preview = new PreviewDockViewModel(_shell);
         _combinedTree = CreateDiagnosticsTreeTool("DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree);
         _logicalTree = CreateDiagnosticsTreeTool("DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree);
@@ -51,8 +52,12 @@ public sealed class PlaygroundDockFactory : Factory
         editorDock.IsCollapsable = false;
         editorDock.CanCloseLastDockable = false;
         editorDock.EnableWindowDrag = true;
-        editorDock.VisibleDockables = CreateList<IDockable>(_xamlEditor, _codeEditor);
-        editorDock.ActiveDockable = _xamlEditor;
+        editorDock.VisibleDockables = CreateList<IDockable>();
+        if (editorDock is INotifyPropertyChanged notifyEditorDock)
+        {
+            notifyEditorDock.PropertyChanged += EditorDockOnPropertyChanged;
+        }
+        _editorDock = editorDock;
 
         var bottomDock = CreateToolDock();
         bottomDock.Id = "Bottom";
@@ -86,10 +91,19 @@ public sealed class PlaygroundDockFactory : Factory
         previewDock.Id = "PreviewDock";
         previewDock.Title = "Preview";
         previewDock.Alignment = Alignment.Right;
-        previewDock.Proportion = 0.45;
+        previewDock.Proportion = 0.36;
         previewDock.CanCloseLastDockable = false;
         previewDock.VisibleDockables = CreateList<IDockable>(_preview);
         previewDock.ActiveDockable = _preview;
+
+        var solutionDock = CreateToolDock();
+        solutionDock.Id = "SolutionExplorerDock";
+        solutionDock.Title = "Solution Explorer";
+        solutionDock.Alignment = Alignment.Right;
+        solutionDock.Proportion = 0.22;
+        solutionDock.CanCloseLastDockable = false;
+        solutionDock.VisibleDockables = CreateList<IDockable>(_solutionExplorer);
+        solutionDock.ActiveDockable = _solutionExplorer;
 
         var mainDock = CreateProportionalDock();
         mainDock.Id = "Workspace";
@@ -99,7 +113,9 @@ public sealed class PlaygroundDockFactory : Factory
         mainDock.VisibleDockables = CreateList<IDockable>(
             centerDock,
             new ProportionalDockSplitter { CanResize = true, ResizePreview = true },
-            previewDock);
+            previewDock,
+            new ProportionalDockSplitter { CanResize = true, ResizePreview = true },
+            solutionDock);
         mainDock.ActiveDockable = centerDock;
 
         var rootDock = CreateRootDock();
@@ -135,8 +151,7 @@ public sealed class PlaygroundDockFactory : Factory
     {
         ContextLocator = new Dictionary<string, Func<object?>>
         {
-            ["XamlEditor"] = () => _xamlEditor,
-            ["CodeEditor"] = () => _codeEditor,
+            ["SolutionExplorer"] = () => _solutionExplorer,
             ["Preview"] = () => _preview,
             ["DiagnosticsCombinedTree"] = () => _combinedTree,
             ["DiagnosticsLogicalTree"] = () => _logicalTree,
@@ -158,6 +173,53 @@ public sealed class PlaygroundDockFactory : Factory
         };
 
         base.InitLayout(layout);
+    }
+
+    public void ResetDocuments(IEnumerable<XamlPlayground.Workspace.InMemoryProjectFile> files)
+    {
+        if (_editorDock is null)
+        {
+            return;
+        }
+
+        var documents = files
+            .Where(static file => file.CanEdit)
+            .Take(2)
+            .Select(CreateWorkspaceDocument)
+            .Cast<IDockable>()
+            .ToArray();
+
+        _editorDock.VisibleDockables = CreateList<IDockable>(documents);
+        _editorDock.ActiveDockable = documents.FirstOrDefault();
+
+        if (_editorDock.ActiveDockable is WorkspaceFileDocumentDockViewModel document)
+        {
+            _shell.ActivateWorkspaceFileFromDocument(document.File);
+        }
+    }
+
+    public void OpenDocument(XamlPlayground.Workspace.InMemoryProjectFile file)
+    {
+        if (_editorDock is null)
+        {
+            return;
+        }
+
+        var visibleDockables = _editorDock.VisibleDockables ?? CreateList<IDockable>();
+        _editorDock.VisibleDockables = visibleDockables;
+
+        var existing = visibleDockables
+            .OfType<WorkspaceFileDocumentDockViewModel>()
+            .FirstOrDefault(document => ReferenceEquals(document.File, file));
+
+        if (existing is null)
+        {
+            existing = CreateWorkspaceDocument(file);
+            visibleDockables.Add(existing);
+        }
+
+        _editorDock.ActiveDockable = existing;
+        _shell.ActivateWorkspaceFileFromDocument(file);
     }
 
     public void ActivateErrors()
@@ -191,5 +253,21 @@ public sealed class PlaygroundDockFactory : Factory
         DevToolsViewKind viewKind)
     {
         return new DiagnosticTreeDockViewModel(_shell, id, title, viewKind);
+    }
+
+    private WorkspaceFileDocumentDockViewModel CreateWorkspaceDocument(XamlPlayground.Workspace.InMemoryProjectFile file)
+    {
+        return new WorkspaceFileDocumentDockViewModel(_shell, file);
+    }
+
+    private void EditorDockOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(IDocumentDock.ActiveDockable) ||
+            _editorDock?.ActiveDockable is not WorkspaceFileDocumentDockViewModel document)
+        {
+            return;
+        }
+
+        _shell.ActivateWorkspaceFileFromDocument(document.File);
     }
 }

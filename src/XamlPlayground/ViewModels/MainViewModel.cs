@@ -25,6 +25,8 @@ using Dock.Model.Core;
 using Microsoft.CodeAnalysis;
 using XamlPlayground.Services;
 using XamlPlayground.ViewModels.Docking;
+using XamlPlayground.ViewModels.Workspace;
+using XamlPlayground.Workspace;
 using Avalonia.Threading;
 
 namespace XamlPlayground.ViewModels;
@@ -44,8 +46,18 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool _isDarkTheme;
     [ObservableProperty] private string? _lastErrorMessage;
     [ObservableProperty] private int _editorFontSize;
+    [ObservableProperty] private InMemorySolution? _solution;
+    [ObservableProperty] private ObservableCollection<SolutionExplorerNodeViewModel> _solutionExplorerNodes = new();
+    [ObservableProperty] private SolutionExplorerNodeViewModel? _selectedSolutionExplorerNode;
+    [ObservableProperty] private NewProjectWizardViewModel _newProjectWizard = new();
+    [ObservableProperty] private InMemoryProject? _activeProject;
+    [ObservableProperty] private InMemoryProjectFile? _activeXamlFile;
+    [ObservableProperty] private InMemoryProjectFile? _activeCodeFile;
+    [ObservableProperty] private string _workspaceStatus = "No solution loaded.";
     private readonly IDockThemeManager _dockThemeManager;
+    private readonly InMemorySolutionFactory _solutionFactory;
     private bool _update;
+    private bool _openingSample;
     private (Assembly? Assembly, AssemblyLoadContext? Context)? _previous;
     private IStorageFile? _openXamlFile;
     private IStorageFile? _openCodeFile;
@@ -58,24 +70,31 @@ public partial class MainViewModel : ViewModelBase
         _enableAutoRun = true;
         _isDarkTheme = IsApplicationDarkTheme();
         _dockThemeManager = new DockFluentThemeManager();
+        _solutionFactory = new InMemorySolutionFactory(OnProjectFileChanged);
 
         NewFileCommand = new RelayCommand(NewFile);
+        ShowNewProjectWizardCommand = new RelayCommand(ShowNewProjectWizard);
+        CreateProjectCommand = new RelayCommand(CreateProjectFromWizard);
+        CancelNewProjectCommand = new RelayCommand(() => NewProjectWizard.IsOpen = false);
+        AddUserControlCommand = new RelayCommand(AddUserControl, () => ActiveProject is not null);
+        AddResourceDictionaryCommand = new RelayCommand(AddResourceDictionary, () => ActiveProject is not null);
+        BuildSolutionCommand = new RelayCommand(RunActiveDocument);
         OpenXamlFileCommand = new AsyncRelayCommand(async () => await OpenXamlFile());
         SaveXamlFileCommand = new AsyncRelayCommand(async () => await SaveXamlFile());
         OpenCodeFileCommand = new AsyncRelayCommand(async () => await OpenCodeFile());
         SaveCodeFileCommand = new AsyncRelayCommand(async () => await SaveCodeFile());
-        RunCommand = new RelayCommand(() => Run(_currentSample?.Xaml.Text, _currentSample?.Code.Text));
+        RunCommand = new RelayCommand(RunActiveDocument);
         ToggleThemeCommand = new RelayCommand(ToggleTheme);
         GistCommand = new AsyncRelayCommand<string?>(Gist);
         InitializeDockLayout();
 
         if (!string.IsNullOrEmpty(initialGist))
         {
-            Gist(initialGist);
+            _ = Gist(initialGist);
         }
         else
         {
-            CurrentSample = _samples.FirstOrDefault(x => x.Name == "Demo");
+            CurrentSample = Samples.FirstOrDefault(x => x.Name == "Demo");
         }
     }
 
@@ -88,6 +107,18 @@ public partial class MainViewModel : ViewModelBase
     public ICommand GistCommand { get; }
 
     public ICommand NewFileCommand { get; }
+
+    public ICommand ShowNewProjectWizardCommand { get; }
+
+    public ICommand CreateProjectCommand { get; }
+
+    public ICommand CancelNewProjectCommand { get; }
+
+    public ICommand AddUserControlCommand { get; }
+
+    public ICommand AddResourceDictionaryCommand { get; }
+
+    public ICommand BuildSolutionCommand { get; }
 
     public ICommand OpenXamlFileCommand { get; }
 
@@ -108,7 +139,14 @@ public partial class MainViewModel : ViewModelBase
         if (e.PropertyName == nameof(CurrentSample)
             && CurrentSample is { } sampleViewModel)
         {
-            Open(sampleViewModel);
+            OpenCurrentSample(sampleViewModel);
+            return;
+        }
+
+        if (e.PropertyName == nameof(ActiveProject))
+        {
+            (AddUserControlCommand as RelayCommand)?.NotifyCanExecuteChanged();
+            (AddResourceDictionaryCommand as RelayCommand)?.NotifyCanExecuteChanged();
         }
     }
 
@@ -237,9 +275,8 @@ public partial class MainViewModel : ViewModelBase
         {
             var (xaml, code) = await GetGistContent(id);
             var sample = new SampleViewModel("Gist", xaml, code, Open, AutoRun);
-            _samples.Insert(0, sample);
-            CurrentSample = sample; 
-            AutoRun(CurrentSample);
+            Samples.Insert(0, sample);
+            CurrentSample = sample;
         }
         catch (Exception exception)
         {
@@ -302,6 +339,74 @@ public partial class MainViewModel : ViewModelBase
         DockLayout = layout;
     }
 
+    private void LoadSolution(InMemorySolution solution)
+    {
+        Solution = solution;
+        ActiveProject = solution.Projects.FirstOrDefault();
+        SolutionExplorerNodes = BuildSolutionExplorer(solution);
+        WorkspaceStatus = $"{solution.Name}: {solution.Projects.Count} project(s)";
+
+        var firstXaml = ActiveProject?.GetXamlFiles()
+            .FirstOrDefault(file => file.Kind == ProjectFileKind.Xaml && !file.Path.StartsWith("App.", StringComparison.OrdinalIgnoreCase))
+            ?? ActiveProject?.GetXamlFiles().FirstOrDefault();
+        var firstCode = firstXaml is { } ? ActiveProject?.FindCodeBehind(firstXaml) : ActiveProject?.GetCSharpFiles().FirstOrDefault();
+
+        ActiveXamlFile = firstXaml;
+        ActiveCodeFile = firstCode;
+
+        if (DockFactory is PlaygroundDockFactory factory && firstXaml is { })
+        {
+            var files = firstCode is { }
+                ? new[] { firstXaml, firstCode }
+                : new[] { firstXaml };
+            factory.ResetDocuments(files);
+        }
+    }
+
+    private ObservableCollection<SolutionExplorerNodeViewModel> BuildSolutionExplorer(InMemorySolution solution)
+    {
+        var solutionNode = new SolutionExplorerNodeViewModel($"Solution '{solution.Name}'", ProjectFileKind.Solution);
+        foreach (var project in solution.Projects)
+        {
+            var projectNode = new SolutionExplorerNodeViewModel(project.Name, ProjectFileKind.Project, project: project);
+            solutionNode.Children.Add(projectNode);
+
+            foreach (var file in project.Files.OrderBy(static file => file.Path, StringComparer.OrdinalIgnoreCase))
+            {
+                AddFileNode(projectNode, project, file);
+            }
+        }
+
+        return new ObservableCollection<SolutionExplorerNodeViewModel> { solutionNode };
+    }
+
+    private void AddFileNode(SolutionExplorerNodeViewModel projectNode, InMemoryProject project, InMemoryProjectFile file)
+    {
+        var segments = file.Path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var parent = projectNode;
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            var folderName = segments[i];
+            var folder = parent.Children.FirstOrDefault(child =>
+                child.Kind == ProjectFileKind.Folder &&
+                string.Equals(child.Title, folderName, StringComparison.OrdinalIgnoreCase));
+            if (folder is null)
+            {
+                folder = new SolutionExplorerNodeViewModel(folderName, ProjectFileKind.Folder, project: project);
+                parent.Children.Add(folder);
+            }
+
+            parent = folder;
+        }
+
+        parent.Children.Add(new SolutionExplorerNodeViewModel(
+            file.Name,
+            file.Kind,
+            new RelayCommand(() => OpenWorkspaceFile(file)),
+            project,
+            file));
+    }
+
     private string GetUntitledSampleName()
     {
         const string name = "Untitled";
@@ -321,6 +426,57 @@ public partial class MainViewModel : ViewModelBase
 
     private void NewFile()
     {
+        if (ActiveProject is { })
+        {
+            AddUserControl();
+            return;
+        }
+
+        CreateUntitledSample();
+    }
+
+    private void Open(SampleViewModel sampleViewModel)
+    {
+        if (ReferenceEquals(CurrentSample, sampleViewModel))
+        {
+            OpenCurrentSample(sampleViewModel);
+            return;
+        }
+
+        CurrentSample = sampleViewModel;
+    }
+
+    private void OpenCurrentSample(SampleViewModel sampleViewModel)
+    {
+        if (_openingSample)
+        {
+            return;
+        }
+
+        _openingSample = true;
+        try
+        {
+            Control = null;
+            DiagnosticsRoot = null;
+            LastErrorMessage = null;
+            _openXamlFile = null;
+            _openCodeFile = null;
+
+            LoadSolution(_solutionFactory.CreateSampleSolution(sampleViewModel.Name, sampleViewModel.Xaml, sampleViewModel.Code));
+
+            if (EnableAutoRun)
+            {
+                RunActiveDocument();
+            }
+        }
+        finally
+        {
+            _openingSample = false;
+        }
+    }
+
+    private void CreateUntitledSample()
+    {
         _openXamlFile = null;
         _openCodeFile = null;
 
@@ -329,18 +485,106 @@ public partial class MainViewModel : ViewModelBase
         CurrentSample = sample;
     }
 
-    private void Open(SampleViewModel sampleViewModel)
+    private void ShowNewProjectWizard()
     {
-        Control = null;
-        DiagnosticsRoot = null;
-        LastErrorMessage = null;
+        NewProjectWizard.SolutionName = GetUniqueSolutionName();
+        NewProjectWizard.SelectedTemplate ??= NewProjectWizard.Templates.FirstOrDefault();
+        NewProjectWizard.IsOpen = true;
+    }
 
-        CurrentSample = sampleViewModel;
-
-        if (_enableAutoRun)
-        { 
-            Run(sampleViewModel.Xaml.Text, sampleViewModel.Code.Text);
+    private void CreateProjectFromWizard()
+    {
+        var template = NewProjectWizard.SelectedTemplate ?? NewProjectWizard.Templates.FirstOrDefault();
+        if (template is null)
+        {
+            return;
         }
+
+        var solutionName = string.IsNullOrWhiteSpace(NewProjectWizard.SolutionName)
+            ? GetUniqueSolutionName()
+            : NewProjectWizard.SolutionName.Trim();
+
+        CurrentSample = null;
+        LoadSolution(_solutionFactory.CreateSolution(solutionName, template));
+        NewProjectWizard.IsOpen = false;
+        LastErrorMessage = null;
+        RunActiveDocument();
+    }
+
+    private string GetUniqueSolutionName()
+    {
+        var index = 1;
+        var name = $"App{index}";
+        while (Solution?.Name == name || Samples.Any(sample => sample.Name == name))
+        {
+            index++;
+            name = $"App{index}";
+        }
+
+        return name;
+    }
+
+    private void AddUserControl()
+    {
+        if (ActiveProject is not { } project)
+        {
+            return;
+        }
+
+        var file = _solutionFactory.AddUserControl(project);
+        SolutionExplorerNodes = Solution is { } solution
+            ? BuildSolutionExplorer(solution)
+            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        OpenWorkspaceFile(file);
+    }
+
+    private void AddResourceDictionary()
+    {
+        if (ActiveProject is not { } project)
+        {
+            return;
+        }
+
+        var file = _solutionFactory.AddResourceDictionary(project);
+        SolutionExplorerNodes = Solution is { } solution
+            ? BuildSolutionExplorer(solution)
+            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        OpenWorkspaceFile(file);
+    }
+
+    private void OpenWorkspaceFile(InMemoryProjectFile file)
+    {
+        if (!file.CanEdit)
+        {
+            return;
+        }
+
+        ActivateWorkspaceFileFromDocument(file);
+        if (DockFactory is PlaygroundDockFactory factory)
+        {
+            factory.OpenDocument(file);
+        }
+    }
+
+    internal void ActivateWorkspaceFileFromDocument(InMemoryProjectFile file)
+    {
+        if (ActiveProject is not { } project)
+        {
+            return;
+        }
+
+        if (file.IsXaml)
+        {
+            ActiveXamlFile = file;
+            ActiveCodeFile = project.FindCodeBehind(file) ?? ActiveCodeFile;
+        }
+        else if (file.IsCSharp)
+        {
+            ActiveCodeFile = file;
+            ActiveXamlFile = project.FindXamlForCodeBehind(file) ?? ActiveXamlFile;
+        }
+
+        WorkspaceStatus = $"{project.Name}: {file.Path}";
     }
 
     private static List<FilePickerFileType> GetXamlFileTypes()
@@ -364,19 +608,29 @@ public partial class MainViewModel : ViewModelBase
 
     private void AutoRun(SampleViewModel sampleViewModel)
     {
-        if (EnableAutoRun)
-        { 
-            Run(sampleViewModel.Xaml.Text, sampleViewModel.Code.Text);
+        if (EnableAutoRun && ReferenceEquals(sampleViewModel, CurrentSample))
+        {
+            RunActiveDocument();
         }
     }
 
-    private void Run(string? xaml, string? code)
+    private void OnProjectFileChanged(InMemoryProjectFile file)
     {
-        _timer?.Dispose();
-        _timer = DispatcherTimer.RunOnce(() => _ = RunInternal(xaml, code), AutoRunDelay);
+        if (!EnableAutoRun || !ReferenceEquals(file, ActiveXamlFile) && !ReferenceEquals(file, ActiveCodeFile))
+        {
+            return;
+        }
+
+        RunActiveDocument();
     }
 
-    private async Task RunInternal(string? xaml, string? code)
+    private void RunActiveDocument()
+    {
+        _timer?.Dispose();
+        _timer = DispatcherTimer.RunOnce(() => _ = RunInternal(), AutoRunDelay);
+    }
+
+    private async Task RunInternal()
     {
         if (_update)
             return;
@@ -384,6 +638,8 @@ public partial class MainViewModel : ViewModelBase
         _update = true;
         var diagnosticsMessage = default(string);
         var xamlDiagnostics = new List<RuntimeXamlDiagnostic>();
+        var xamlFile = ActiveXamlFile;
+        var project = ActiveProject;
 
         try
         {
@@ -403,18 +659,26 @@ public partial class MainViewModel : ViewModelBase
             }
 #endif
             Assembly? scriptAssembly = null;
-            if (!TryValidateXml(xaml, out var xmlErrorMessage))
+            if (xamlFile is null)
+            {
+                LastErrorMessage = "No XAML document is active.";
+                return;
+            }
+
+            if (!TryValidateXml(xamlFile.Text, out var xmlErrorMessage))
             {
                 LastErrorMessage = xmlErrorMessage;
                 return;
             }
-            var xamlText = xaml!;
+            var xamlText = xamlFile.Text;
 
-            if (code is { } && !string.IsNullOrWhiteSpace(code))
+            if (project is { } && project.GetCSharpFiles().Any(static file => !string.IsNullOrWhiteSpace(file.Text)))
             {
                 try
                 {
-                    var scriptResult = await Task.Run(async () => await CompilerService.GetScriptAssembly(code));
+                    var scriptResult = await Task.Run(async () => await CompilerService.GetProjectAssembly(
+                        project.Name,
+                        project.GetCSharpFiles().Select(static file => (file.Path, file.Text))));
                     diagnosticsMessage = FormatCompilerDiagnostics(scriptResult.Diagnostics);
 
                     if (scriptResult.Success && scriptResult.Assembly is { })
@@ -440,7 +704,9 @@ public partial class MainViewModel : ViewModelBase
             if (scriptAssembly is { })
             {
                 var types = scriptAssembly.GetTypes();
-                var type = types.FirstOrDefault(x => x.Name == "SampleView");
+                var type = ResolveRootType(xamlText, scriptAssembly)
+                    ?? types.FirstOrDefault(x => x.Name == "SampleView")
+                    ?? types.FirstOrDefault(x => x.Name == Path.GetFileNameWithoutExtension(xamlFile.Name));
                 if (type != null)
                 {
                     var rootInstance = Activator.CreateInstance(type);
@@ -449,6 +715,14 @@ public partial class MainViewModel : ViewModelBase
                     if (control is { })
                     {
                         ShowControl((Control)control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
+                    }
+                }
+                else
+                {
+                    var control = LoadRuntimeXaml(xamlText, scriptAssembly, null, xamlDiagnostics) as Control;
+                    if (control is { })
+                    {
+                        ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
                     }
                 }
             }
@@ -519,6 +793,27 @@ public partial class MainViewModel : ViewModelBase
         };
 
         return AvaloniaRuntimeXamlLoader.Load(document, configuration);
+    }
+
+    private static Type? ResolveRootType(string xaml, Assembly assembly)
+    {
+        try
+        {
+            var document = XDocument.Parse(xaml, LoadOptions.SetLineInfo);
+            var className = document.Root?.Attributes()
+                .FirstOrDefault(static attribute =>
+                    attribute.Name.LocalName == "Class" &&
+                    attribute.Name.NamespaceName == "http://schemas.microsoft.com/winfx/2006/xaml")
+                ?.Value;
+
+            return string.IsNullOrWhiteSpace(className)
+                ? null
+                : assembly.GetType(className, throwOnError: false, ignoreCase: false);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? FormatCompilerDiagnostics(IEnumerable<Diagnostic> diagnostics)
@@ -612,7 +907,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task OpenXamlFile()
     {
-        if (CurrentSample is null)
+        if (ActiveXamlFile is null)
         {
             return;
         }
@@ -638,8 +933,8 @@ public partial class MainViewModel : ViewModelBase
                 await using var stream = await _openXamlFile.OpenReadAsync();
                 using var reader = new StreamReader(stream);
                 var fileContent = await reader.ReadToEndAsync();
-                CurrentSample.Xaml.Text = fileContent;
-                AutoRun(CurrentSample);
+                ActiveXamlFile.Text = fileContent;
+                RunActiveDocument();
                 reader.Dispose();
             }
             catch (Exception exception)
@@ -651,7 +946,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task SaveXamlFile()
     {
-        if (CurrentSample is null)
+        if (ActiveXamlFile is null)
         {
             return;
         }
@@ -679,7 +974,8 @@ public partial class MainViewModel : ViewModelBase
                     _openXamlFile = file;
                     await using var stream = await _openXamlFile.OpenWriteAsync();
                     await using var writer = new StreamWriter(stream);
-                    await writer.WriteAsync(CurrentSample.Xaml.Text);
+                    await writer.WriteAsync(ActiveXamlFile.Text);
+                    ActiveXamlFile.MarkClean();
                 }
                 catch (Exception exception)
                 {
@@ -691,13 +987,14 @@ public partial class MainViewModel : ViewModelBase
         {
             await using var stream = await _openXamlFile.OpenWriteAsync();
             await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(CurrentSample.Xaml.Text);
+            await writer.WriteAsync(ActiveXamlFile.Text);
+            ActiveXamlFile.MarkClean();
         }
     }
 
     private async Task OpenCodeFile()
     {
-        if (CurrentSample is null)
+        if (ActiveCodeFile is null)
         {
             return;
         }
@@ -723,8 +1020,8 @@ public partial class MainViewModel : ViewModelBase
                 await using var stream = await _openCodeFile.OpenReadAsync();
                 using var reader = new StreamReader(stream);
                 var fileContent = await reader.ReadToEndAsync();
-                CurrentSample.Code.Text = fileContent;
-                AutoRun(CurrentSample);
+                ActiveCodeFile.Text = fileContent;
+                RunActiveDocument();
             }
             catch (Exception exception)
             {
@@ -735,7 +1032,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task SaveCodeFile()
     {
-        if (CurrentSample is null)
+        if (ActiveCodeFile is null)
         {
             return;
         }
@@ -763,7 +1060,8 @@ public partial class MainViewModel : ViewModelBase
                     _openCodeFile = file;
                     await using var stream = await _openCodeFile.OpenWriteAsync();
                     await using var writer = new StreamWriter(stream);
-                    await writer.WriteAsync(CurrentSample.Code.Text);
+                    await writer.WriteAsync(ActiveCodeFile.Text);
+                    ActiveCodeFile.MarkClean();
                 }
                 catch (Exception exception)
                 {
@@ -775,7 +1073,8 @@ public partial class MainViewModel : ViewModelBase
         {
             await using var stream = await _openCodeFile.OpenWriteAsync();
             await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(CurrentSample.Code.Text);
+            await writer.WriteAsync(ActiveCodeFile.Text);
+            ActiveCodeFile.MarkClean();
         }
     }
 }
