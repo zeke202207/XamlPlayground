@@ -53,7 +53,7 @@ public partial class MainViewModel : ViewModelBase
 
     public MainViewModel(string? initialGist)
     {
-        _editorFontSize = 12;
+        _editorFontSize = 14;
         _samples = GetSamples(".xml");
         _enableAutoRun = true;
         _isDarkTheme = IsApplicationDarkTheme();
