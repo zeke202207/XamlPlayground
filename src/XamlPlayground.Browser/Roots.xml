@@ -40,8 +40,20 @@
   <!-- AvaloniaEdit -->
 
   <assembly fullname="AvaloniaEdit" preserve="All" />
+  <assembly fullname="AvaloniaEdit.TextMate" preserve="All" />
+  <assembly fullname="TextMateSharp" preserve="All" />
+  <assembly fullname="TextMateSharp.Grammars" preserve="All" />
+  <assembly fullname="Onigwrap" preserve="All" />
 
-  <!-- AvaloniaEdit -->
+  <!-- Dock -->
+
+  <assembly fullname="Dock.Avalonia" preserve="All" />
+  <assembly fullname="Dock.Avalonia.Themes.Fluent" preserve="All" />
+  <assembly fullname="Dock.Model" preserve="All" />
+  <assembly fullname="Dock.Model.Mvvm" preserve="All" />
+  <assembly fullname="Dock.Settings" preserve="All" />
+
+  <!-- GitHub -->
 
   <assembly fullname="Octokit" preserve="All" />
 

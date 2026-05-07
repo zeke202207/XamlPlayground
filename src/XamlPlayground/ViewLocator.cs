@@ -1,7 +1,9 @@
-using System;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using XamlPlayground.ViewModels;
+using XamlPlayground.ViewModels.Docking;
+using XamlPlayground.Views;
+using XamlPlayground.Views.Docking;
 
 namespace XamlPlayground;
 
@@ -9,21 +11,24 @@ public partial class ViewLocator : IDataTemplate
 {
     public Control Build(object? data)
     {
-        var name = data?.GetType().FullName?.Replace("ViewModel", "View");
-        var type = name is null ? null : Type.GetType(name);
+        if (data is MainViewModel)
+        {
+            return new MainView();
+        }
 
-        if (type != null)
+        return data switch
         {
-            return (Control)Activator.CreateInstance(type)!;
-        }
-        else
-        {
-            return new TextBlock { Text = "Not Found: " + name };
-        }
+            XamlEditorDockViewModel => new XamlEditorDockView(),
+            CodeEditorDockViewModel => new CodeEditorDockView(),
+            PreviewDockViewModel => new PreviewDockView(),
+            DiagnosticToolDockViewModel => new DiagnosticsDockView(),
+            ErrorsDockViewModel => new ErrorsDockView(),
+            _ => new TextBlock { Text = "Not Found: " + data?.GetType().FullName }
+        };
     }
 
     public bool Match(object? data)
     {
-        return data is ViewModelBase;
+        return data is ViewModelBase || data?.GetType().Namespace == typeof(XamlEditorDockViewModel).Namespace;
     }
 }

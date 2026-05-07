@@ -3,6 +3,8 @@ using System.Runtime.Versioning;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Browser;
+using Dock.Model.Core;
+using Dock.Settings;
 using XamlPlayground;
 using XamlPlayground.Services;
 
@@ -33,5 +35,9 @@ internal partial class Program
 
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
-            .WithInterFont();
+            .WithInterFont()
+            .UseManagedWindows()
+            .UseFloatingWindowHostMode(DockFloatingWindowHostMode.Managed)
+            .ShowDockablePreviewOnDrag()
+            .SetDragPreviewOpacity(0.6);
 }

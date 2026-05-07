@@ -1,0 +1,20 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="160"
+             x:Class="XamlPlayground.Views.Docking.ErrorsDockView"
+             x:CompileBindings="True" x:DataType="vm:ErrorsDockViewModel">
+  <TextBox Text="{Binding Shell.LastErrorMessage, Mode=OneWay}"
+           IsReadOnly="True"
+           AcceptsReturn="True"
+           TextWrapping="Wrap"
+           ScrollViewer.VerticalScrollBarVisibility="Auto"
+           ScrollViewer.HorizontalScrollBarVisibility="Auto"
+           Background="{DynamicResource ErrorPanelBackgroundBrush}"
+           Foreground="{DynamicResource ErrorPanelForegroundBrush}"
+           BorderBrush="{DynamicResource ErrorPanelBorderBrush}"
+           Padding="6"
+           PlaceholderText="No errors" />
+</UserControl>

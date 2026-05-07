@@ -30,6 +30,8 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Browser" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Dock.Model" Version="$(DockVersion)" />
+    <PackageReference Include="Dock.Settings" Version="$(DockVersion)" />
   </ItemGroup>
 
   <ItemGroup>

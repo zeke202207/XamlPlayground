@@ -209,7 +209,7 @@ public static class CompilerService
         return new Uri(new Uri(BaseUri!, UriKind.Absolute), relativePath).ToString();
     }
 
-    public static async Task<(Assembly? Assembly, AssemblyLoadContext? Context)> GetScriptAssembly(string code)
+    public static async Task<ScriptCompilationResult> GetScriptAssembly(string code)
     {
         var references = await GetMetadataReferences();
 
@@ -229,7 +229,7 @@ public static class CompilerService
                 Console.WriteLine(error);
             }
 
-            return (null, null);
+            return new ScriptCompilationResult(null, null, result.Diagnostics);
         }
 
         ms.Seek(0, SeekOrigin.Begin);
@@ -237,6 +237,14 @@ public static class CompilerService
         var context = new AssemblyLoadContext(name: Path.GetRandomFileName(), isCollectible: true);
         var assembly = context.LoadFromStream(ms);
 
-        return (assembly, context);
+        return new ScriptCompilationResult(assembly, context, result.Diagnostics);
     }
+}
+
+public sealed record ScriptCompilationResult(
+    Assembly? Assembly,
+    AssemblyLoadContext? Context,
+    IReadOnlyList<Diagnostic> Diagnostics)
+{
+    public bool Success => Assembly is not null;
 }

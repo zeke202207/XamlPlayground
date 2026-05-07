@@ -17,7 +17,14 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Xml;
 using System.Xml.Linq;
+using Avalonia.Styling;
+using Dock.Avalonia.Themes;
+using Dock.Avalonia.Themes.Fluent;
+using Dock.Model.Controls;
+using Dock.Model.Core;
+using Microsoft.CodeAnalysis;
 using XamlPlayground.Services;
+using XamlPlayground.ViewModels.Docking;
 using Avalonia.Threading;
 
 namespace XamlPlayground.ViewModels;
@@ -25,14 +32,19 @@ namespace XamlPlayground.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private static readonly TimeSpan AutoRunDelay = TimeSpan.FromMilliseconds(300);
+    private const string PlaygroundXamlDocument = "Main.axaml";
 
     [ObservableProperty] private ObservableCollection<SampleViewModel> _samples;
     [ObservableProperty] private SampleViewModel? _currentSample;
     [ObservableProperty] private Control? _control;
     [ObservableProperty] private AvaloniaObject? _diagnosticsRoot;
+    [ObservableProperty] private IFactory? _dockFactory;
+    [ObservableProperty] private IRootDock? _dockLayout;
     [ObservableProperty] private bool _enableAutoRun;
+    [ObservableProperty] private bool _isDarkTheme;
     [ObservableProperty] private string? _lastErrorMessage;
     [ObservableProperty] private int _editorFontSize;
+    private readonly IDockThemeManager _dockThemeManager;
     private bool _update;
     private (Assembly? Assembly, AssemblyLoadContext? Context)? _previous;
     private IStorageFile? _openXamlFile;
@@ -44,6 +56,8 @@ public partial class MainViewModel : ViewModelBase
         _editorFontSize = 12;
         _samples = GetSamples(".xml");
         _enableAutoRun = true;
+        _isDarkTheme = IsApplicationDarkTheme();
+        _dockThemeManager = new DockFluentThemeManager();
 
         NewFileCommand = new RelayCommand(NewFile);
         OpenXamlFileCommand = new AsyncRelayCommand(async () => await OpenXamlFile());
@@ -51,7 +65,9 @@ public partial class MainViewModel : ViewModelBase
         OpenCodeFileCommand = new AsyncRelayCommand(async () => await OpenCodeFile());
         SaveCodeFileCommand = new AsyncRelayCommand(async () => await SaveCodeFile());
         RunCommand = new RelayCommand(() => Run(_currentSample?.Xaml.Text, _currentSample?.Code.Text));
+        ToggleThemeCommand = new RelayCommand(ToggleTheme);
         GistCommand = new AsyncRelayCommand<string?>(Gist);
+        InitializeDockLayout();
 
         if (!string.IsNullOrEmpty(initialGist))
         {
@@ -67,6 +83,8 @@ public partial class MainViewModel : ViewModelBase
     
     public ICommand RunCommand { get; }
 
+    public ICommand ToggleThemeCommand { get; }
+
     public ICommand GistCommand { get; }
 
     public ICommand NewFileCommand { get; }
@@ -79,6 +97,10 @@ public partial class MainViewModel : ViewModelBase
 
     public ICommand SaveCodeFileCommand { get; }
 
+    public bool IsLightTheme => !IsDarkTheme;
+
+    public string ThemeToggleToolTip => IsDarkTheme ? "Switch to light theme" : "Switch to dark theme";
+
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
@@ -88,6 +110,108 @@ public partial class MainViewModel : ViewModelBase
         {
             Open(sampleViewModel);
         }
+    }
+
+    partial void OnIsDarkThemeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsLightTheme));
+        OnPropertyChanged(nameof(ThemeToggleToolTip));
+    }
+
+    partial void OnLastErrorMessageChanged(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            DockFactory is not PlaygroundDockFactory factory)
+        {
+            return;
+        }
+
+        factory.ActivateErrors();
+    }
+
+    private void ToggleTheme()
+    {
+        IsDarkTheme = !IsDarkTheme;
+        ApplyTheme();
+    }
+
+    private void ApplyTheme()
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            ApplyThemeCore();
+            return;
+        }
+
+        Dispatcher.UIThread.Invoke(ApplyThemeCore);
+    }
+
+    private void ApplyThemeCore()
+    {
+        var themeVariant = IsDarkTheme ? ThemeVariant.Dark : ThemeVariant.Light;
+
+        if (Avalonia.Application.Current is { } application)
+        {
+            application.RequestedThemeVariant = themeVariant;
+        }
+
+        if (Avalonia.Application.Current is not XamlPlayground.App)
+        {
+            return;
+        }
+
+        try
+        {
+            _dockThemeManager.Switch(IsDarkTheme ? 1 : 0);
+
+            var presetIndex = FindDockRiderPresetIndex(IsDarkTheme);
+            if (presetIndex >= 0)
+            {
+                _dockThemeManager.SwitchPreset(presetIndex);
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+    }
+
+    private static bool IsApplicationDarkTheme()
+    {
+        return Dispatcher.UIThread.CheckAccess()
+               && Avalonia.Application.Current?.RequestedThemeVariant == ThemeVariant.Dark;
+    }
+
+    private int FindDockRiderPresetIndex(bool dark)
+    {
+        var presetNames = _dockThemeManager.PresetNames;
+        var themeName = dark ? "Dark" : "Light";
+
+        for (var i = 0; i < presetNames.Count; i++)
+        {
+            var name = presetNames[i];
+            if (IsRiderPreset(name)
+                && name.Contains(themeName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        for (var i = 0; i < presetNames.Count; i++)
+        {
+            if (presetNames[i].Contains(themeName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool IsRiderPreset(string name)
+    {
+        var normalized = new string(name.Where(char.IsLetterOrDigit).ToArray());
+        return normalized.Contains("Rider", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<(string Xaml, string Code)> GetGistContent(string id)
@@ -166,6 +290,16 @@ public partial class MainViewModel : ViewModelBase
         }
 
         return samples;
+    }
+
+    private void InitializeDockLayout()
+    {
+        var factory = new PlaygroundDockFactory(this);
+        var layout = factory.CreateLayout();
+        factory.InitLayout(layout);
+
+        DockFactory = factory;
+        DockLayout = layout;
     }
 
     private string GetUntitledSampleName()
@@ -248,6 +382,9 @@ public partial class MainViewModel : ViewModelBase
             return;
 
         _update = true;
+        var diagnosticsMessage = default(string);
+        var xamlDiagnostics = new List<RuntimeXamlDiagnostic>();
+
         try
         {
             // Control = null;
@@ -264,7 +401,7 @@ public partial class MainViewModel : ViewModelBase
                     GC.WaitForPendingFinalizers();
                 }
             }
- #endif
+#endif
             Assembly? scriptAssembly = null;
             if (!TryValidateXml(xaml, out var xmlErrorMessage))
             {
@@ -277,20 +414,24 @@ public partial class MainViewModel : ViewModelBase
             {
                 try
                 {
-                    _previous = await Task.Run(async () => await CompilerService.GetScriptAssembly(code));
-                    if (_previous?.Assembly is { })
+                    var scriptResult = await Task.Run(async () => await CompilerService.GetScriptAssembly(code));
+                    diagnosticsMessage = FormatCompilerDiagnostics(scriptResult.Diagnostics);
+
+                    if (scriptResult.Success && scriptResult.Assembly is { })
                     {
-                        scriptAssembly = _previous?.Assembly;
+                        _previous = new ValueTuple<Assembly?, AssemblyLoadContext?>(scriptResult.Assembly, scriptResult.Context);
+                        scriptAssembly = scriptResult.Assembly;
                         Console.WriteLine($"Compiled assembly: {scriptAssembly?.GetName().Name}");
                     }
                     else
                     {
-                        throw new Exception("Failed to compile code.");
+                        LastErrorMessage = diagnosticsMessage ?? "Failed to compile code.";
+                        return;
                     }
                 }
                 catch (Exception exception)
                 {
-                    LastErrorMessage = exception.Message;
+                    LastErrorMessage = FormatException(exception);
                     Console.WriteLine(exception);
                     return;
                 }
@@ -304,31 +445,28 @@ public partial class MainViewModel : ViewModelBase
                 {
                     var rootInstance = Activator.CreateInstance(type);
 
-                    await using var stream = new MemoryStream();
-                    await using var writer = new StreamWriter(stream);
-                    await writer.WriteAsync(xamlText);
-                    await writer.FlushAsync();
-                    stream.Position = 0;
-
-                    var control = AvaloniaRuntimeXamlLoader.Load(stream, scriptAssembly, rootInstance);
+                    var control = LoadRuntimeXaml(xamlText, scriptAssembly, rootInstance, xamlDiagnostics);
                     if (control is { })
                     {
-                        ShowControl((Control)control);
+                        ShowControl((Control)control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
                     }
                 }
             }
             else
             {
-                var control = AvaloniaRuntimeXamlLoader.Parse<Control?>(xamlText, null);
+                var control = LoadRuntimeXaml(xamlText, null, null, xamlDiagnostics) as Control;
                 if (control is { })
                 {
-                    ShowControl(control);
+                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
                 }
             }
         }
         catch (Exception exception)
         {
-            LastErrorMessage = exception.Message;
+            LastErrorMessage = CombineDiagnostics(
+                diagnosticsMessage,
+                FormatXamlDiagnostics(xamlDiagnostics),
+                FormatException(exception));
             Console.WriteLine(exception);
         }
         finally
@@ -358,7 +496,108 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    private void ShowControl(Control control)
+    private static object LoadRuntimeXaml(
+        string xaml,
+        Assembly? localAssembly,
+        object? rootInstance,
+        ICollection<RuntimeXamlDiagnostic> diagnostics)
+    {
+        var document = new RuntimeXamlLoaderDocument(rootInstance, xaml)
+        {
+            Document = PlaygroundXamlDocument
+        };
+
+        var configuration = new RuntimeXamlLoaderConfiguration
+        {
+            LocalAssembly = localAssembly,
+            CreateSourceInfo = true,
+            DiagnosticHandler = diagnostic =>
+            {
+                diagnostics.Add(diagnostic);
+                return diagnostic.Severity;
+            }
+        };
+
+        return AvaloniaRuntimeXamlLoader.Load(document, configuration);
+    }
+
+    private static string? FormatCompilerDiagnostics(IEnumerable<Diagnostic> diagnostics)
+    {
+        var lines = diagnostics
+            .Where(static diagnostic => diagnostic.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning)
+            .Select(FormatCompilerDiagnostic)
+            .Distinct()
+            .ToArray();
+
+        return lines.Length == 0 ? null : string.Join(Environment.NewLine, lines);
+    }
+
+    private static string FormatCompilerDiagnostic(Diagnostic diagnostic)
+    {
+        var location = diagnostic.Location.GetLineSpan();
+        var line = location.IsValid ? location.StartLinePosition.Line + 1 : (int?)null;
+        var column = location.IsValid ? location.StartLinePosition.Character + 1 : (int?)null;
+        var position = line is null
+            ? string.Empty
+            : $" Line {line}, position {column}";
+
+        return $"C# {diagnostic.Severity}{position}: {diagnostic.Id}: {diagnostic.GetMessage()}";
+    }
+
+    private static string? FormatXamlDiagnostics(IEnumerable<RuntimeXamlDiagnostic> diagnostics)
+    {
+        var lines = diagnostics
+            .Select(FormatXamlDiagnostic)
+            .Distinct()
+            .ToArray();
+
+        return lines.Length == 0 ? null : string.Join(Environment.NewLine, lines);
+    }
+
+    private static string FormatXamlDiagnostic(RuntimeXamlDiagnostic diagnostic)
+    {
+        var document = string.IsNullOrWhiteSpace(diagnostic.Document)
+            ? PlaygroundXamlDocument
+            : diagnostic.Document;
+        var position = diagnostic.LineNumber is { } lineNumber
+            ? $" Line {lineNumber}, position {diagnostic.LinePosition ?? 1}"
+            : string.Empty;
+
+        return $"XAML {diagnostic.Severity} {document}{position}: {diagnostic.Id}: {diagnostic.Title}";
+    }
+
+    private static string? CombineDiagnostics(params string?[] messages)
+    {
+        var lines = messages
+            .Where(static message => !string.IsNullOrWhiteSpace(message))
+            .Select(static message => message!.Trim())
+            .Distinct()
+            .ToArray();
+
+        return lines.Length == 0 ? null : string.Join(Environment.NewLine, lines);
+    }
+
+    private static string FormatException(Exception exception)
+    {
+        if (exception is AggregateException aggregateException)
+        {
+            var messages = aggregateException.Flatten()
+                .InnerExceptions
+                .Select(static innerException => innerException.Message)
+                .Where(static message => !string.IsNullOrWhiteSpace(message))
+                .Distinct()
+                .ToArray();
+
+            if (messages.Length > 0)
+            {
+                return string.Join(Environment.NewLine, messages);
+            }
+        }
+
+        return exception.Message;
+    }
+
+    private void ShowControl(Control control, string? diagnosticsMessage)
     {
         var scope = new Border
         {
@@ -368,7 +607,7 @@ public partial class MainViewModel : ViewModelBase
 
         Control = scope;
         DiagnosticsRoot = scope;
-        LastErrorMessage = null;
+        LastErrorMessage = diagnosticsMessage;
     }
 
     private async Task OpenXamlFile()

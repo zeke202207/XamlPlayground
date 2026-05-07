@@ -1,0 +1,14 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:controls="clr-namespace:XamlPlayground.Controls"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="500"
+             x:Class="XamlPlayground.Views.Docking.PreviewDockView"
+             x:CompileBindings="True" x:DataType="vm:PreviewDockViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                VerticalScrollBarVisibility="Auto">
+    <controls:ExclusiveContentControl Source="{Binding Shell.Control}" />
+  </ScrollViewer>
+</UserControl>

@@ -1,16 +1,156 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="using:XamlPlayground"
+             xmlns:ae="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:dockCore="using:Dock.Model.Core"
+             xmlns:dockFluent="using:Dock.Avalonia.Themes.Fluent"
+             xmlns:dockVm="using:XamlPlayground.ViewModels.Docking"
+             xmlns:dockViews="using:XamlPlayground.Views.Docking"
+             xmlns:recycling="clr-namespace:Avalonia.Controls.Recycling;assembly=Dock.Controls.Recycling"
              Name="XamlPlayground"
              RequestedThemeVariant="Light"
              x:Class="XamlPlayground.App">
   <Application.DataTemplates>
+    <DataTemplate DataType="dockVm:XamlEditorDockViewModel">
+      <dockViews:XamlEditorDockView />
+    </DataTemplate>
+    <DataTemplate DataType="dockVm:CodeEditorDockViewModel">
+      <dockViews:CodeEditorDockView />
+    </DataTemplate>
+    <DataTemplate DataType="dockVm:PreviewDockViewModel">
+      <dockViews:PreviewDockView />
+    </DataTemplate>
+    <DataTemplate DataType="dockVm:DiagnosticToolDockViewModel">
+      <dockViews:DiagnosticsDockView />
+    </DataTemplate>
+    <DataTemplate DataType="dockVm:ErrorsDockViewModel">
+      <dockViews:ErrorsDockView />
+    </DataTemplate>
     <local:ViewLocator />
   </Application.DataTemplates>
+  <Application.Resources>
+    <ResourceDictionary>
+      <recycling:ControlRecycling x:Key="DockControlRecycling"
+                                  TryToUseIdAsKey="True" />
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <ResourceDictionary.MergedDictionaries>
+            <ResourceInclude Source="avares://Dock.Avalonia.Themes.Fluent/Presets/Ide/RiderLight.axaml" />
+          </ResourceDictionary.MergedDictionaries>
+          <SolidColorBrush x:Key="AppHeaderBackgroundBrush" Color="#1F2937" />
+          <SolidColorBrush x:Key="AppHeaderForegroundBrush" Color="#F8FAFC" />
+          <SolidColorBrush x:Key="AppHeaderSecondaryForegroundBrush" Color="#CBD5E1" />
+          <SolidColorBrush x:Key="AppHeaderButtonBackgroundBrush" Color="#2F3A4A" />
+          <SolidColorBrush x:Key="AppHeaderButtonPointerOverBackgroundBrush" Color="#37465A" />
+          <SolidColorBrush x:Key="AppHeaderButtonPressedBackgroundBrush" Color="#44546A" />
+          <SolidColorBrush x:Key="AppHeaderButtonBorderBrush" Color="#334155" />
+          <SolidColorBrush x:Key="AppHeaderSeparatorBrush" Color="#64748B" />
+          <SolidColorBrush x:Key="EditorBackgroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="EditorForegroundBrush" Color="#000000" />
+          <SolidColorBrush x:Key="EditorLineNumbersForegroundBrush" Color="#2B91AF" />
+          <SolidColorBrush x:Key="EditorCurrentLineBackgroundBrush" Color="#F3F8FF" />
+          <SolidColorBrush x:Key="EditorSelectionBrush" Color="#ADD6FF" />
+          <SolidColorBrush x:Key="EditorSelectionForegroundBrush" Color="#000000" />
+          <SolidColorBrush x:Key="EditorCaretBrush" Color="#000000" />
+          <SolidColorBrush x:Key="EditorBorderBrush" Color="#D4D4D4" />
+          <SolidColorBrush x:Key="ErrorPanelBackgroundBrush" Color="#FFF7F7" />
+          <SolidColorBrush x:Key="ErrorPanelForegroundBrush" Color="#7A0000" />
+          <SolidColorBrush x:Key="ErrorPanelBorderBrush" Color="#D14343" />
+
+          <SolidColorBrush x:Key="DockSurfaceWorkbenchBrush" Color="#F3F3F3" />
+          <SolidColorBrush x:Key="DockSurfaceSidebarBrush" Color="#F6F6F6" />
+          <SolidColorBrush x:Key="DockSurfaceEditorBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="DockSurfacePanelBrush" Color="#EFEFEF" />
+          <SolidColorBrush x:Key="DockSurfaceHeaderBrush" Color="#E7E7E7" />
+          <SolidColorBrush x:Key="DockSurfaceHeaderActiveBrush" Color="#E7E7E7" />
+          <SolidColorBrush x:Key="DockTabBackgroundBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="DockTabHoverBackgroundBrush" Color="#EDEFF3" />
+          <SolidColorBrush x:Key="DockTabActiveBackgroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="DockTabForegroundBrush" Color="#2C2C2C" />
+          <SolidColorBrush x:Key="DockTabSelectedForegroundBrush" Color="#0F4FA8" />
+          <SolidColorBrush x:Key="DockTabActiveForegroundBrush" Color="#111827" />
+          <SolidColorBrush x:Key="DockDocumentTabSelectedForegroundBrush" Color="#0F4FA8" />
+          <SolidColorBrush x:Key="DockDocumentTabPointerOverForegroundBrush" Color="#111827" />
+          <SolidColorBrush x:Key="DockChromeButtonForegroundBrush" Color="#4B4B4B" />
+          <SolidColorBrush x:Key="DockChromeButtonHoverBackgroundBrush" Color="#DDE2EA" />
+          <SolidColorBrush x:Key="DockChromeButtonPressedBackgroundBrush" Color="#CDD5E1" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <ResourceDictionary.MergedDictionaries>
+            <ResourceInclude Source="avares://Dock.Avalonia.Themes.Fluent/Presets/Ide/RiderDark.axaml" />
+          </ResourceDictionary.MergedDictionaries>
+          <SolidColorBrush x:Key="AppHeaderBackgroundBrush" Color="#1F2937" />
+          <SolidColorBrush x:Key="AppHeaderForegroundBrush" Color="#F8FAFC" />
+          <SolidColorBrush x:Key="AppHeaderSecondaryForegroundBrush" Color="#CBD5E1" />
+          <SolidColorBrush x:Key="AppHeaderButtonBackgroundBrush" Color="#263445" />
+          <SolidColorBrush x:Key="AppHeaderButtonPointerOverBackgroundBrush" Color="#314256" />
+          <SolidColorBrush x:Key="AppHeaderButtonPressedBackgroundBrush" Color="#3B4E66" />
+          <SolidColorBrush x:Key="AppHeaderButtonBorderBrush" Color="#405166" />
+          <SolidColorBrush x:Key="AppHeaderSeparatorBrush" Color="#475569" />
+          <SolidColorBrush x:Key="EditorBackgroundBrush" Color="#1E1E1E" />
+          <SolidColorBrush x:Key="EditorForegroundBrush" Color="#D4D4D4" />
+          <SolidColorBrush x:Key="EditorLineNumbersForegroundBrush" Color="#858585" />
+          <SolidColorBrush x:Key="EditorCurrentLineBackgroundBrush" Color="#2A2D2E" />
+          <SolidColorBrush x:Key="EditorSelectionBrush" Color="#264F78" />
+          <SolidColorBrush x:Key="EditorSelectionForegroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="EditorCaretBrush" Color="#AEAFAD" />
+          <SolidColorBrush x:Key="EditorBorderBrush" Color="#3C3C3C" />
+          <SolidColorBrush x:Key="ErrorPanelBackgroundBrush" Color="#3A1F23" />
+          <SolidColorBrush x:Key="ErrorPanelForegroundBrush" Color="#FFCDD2" />
+          <SolidColorBrush x:Key="ErrorPanelBorderBrush" Color="#8F454D" />
+
+          <SolidColorBrush x:Key="DockSurfaceWorkbenchBrush" Color="#2B2D30" />
+          <SolidColorBrush x:Key="DockSurfaceSidebarBrush" Color="#2A2C2F" />
+          <SolidColorBrush x:Key="DockSurfaceEditorBrush" Color="#1F2124" />
+          <SolidColorBrush x:Key="DockSurfacePanelBrush" Color="#2B2D30" />
+          <SolidColorBrush x:Key="DockSurfaceHeaderBrush" Color="#313338" />
+          <SolidColorBrush x:Key="DockSurfaceHeaderActiveBrush" Color="#313338" />
+          <SolidColorBrush x:Key="DockTabBackgroundBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="DockTabHoverBackgroundBrush" Color="#34373D" />
+          <SolidColorBrush x:Key="DockTabActiveBackgroundBrush" Color="#2B2D30" />
+          <SolidColorBrush x:Key="DockTabForegroundBrush" Color="#BBBBBB" />
+          <SolidColorBrush x:Key="DockTabSelectedForegroundBrush" Color="#73B7FF" />
+          <SolidColorBrush x:Key="DockTabActiveForegroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="DockDocumentTabSelectedForegroundBrush" Color="#BBBBBB" />
+          <SolidColorBrush x:Key="DockDocumentTabPointerOverForegroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="DockChromeButtonForegroundBrush" Color="#B7B7B7" />
+          <SolidColorBrush x:Key="DockChromeButtonHoverBackgroundBrush" Color="#3A3D41" />
+          <SolidColorBrush x:Key="DockChromeButtonPressedBackgroundBrush" Color="#44484E" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
   <Application.Styles>
     <FluentTheme />
+    <dockFluent:DockFluentTheme DensityStyle="Compact" />
     <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
     <StyleInclude Source="avares://XamlPlayground/Controls/AdaptiveControl.axaml" />
+    <Style Selector="ae|TextEditor.theme-aware">
+      <Setter Property="Background" Value="{DynamicResource EditorBackgroundBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource EditorForegroundBrush}" />
+      <Setter Property="LineNumbersForeground" Value="{DynamicResource EditorLineNumbersForegroundBrush}" />
+    </Style>
+    <Style Selector="DockControl">
+      <Setter Property="(recycling:ControlRecyclingDataTemplate.ControlRecycling)"
+              Value="{StaticResource DockControlRecycling}" />
+    </Style>
+    <Style Selector="DocumentControl">
+      <Setter Property="HeaderTemplate">
+        <DataTemplate DataType="dockCore:IDockable">
+          <TextBlock Text="{Binding Title}"
+                     VerticalAlignment="Center"
+                     Padding="2" />
+        </DataTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="ToolControl">
+      <Setter Property="HeaderTemplate">
+        <DataTemplate DataType="dockCore:IDockable">
+          <TextBlock Text="{Binding Title}"
+                     Padding="2" />
+        </DataTemplate>
+      </Setter>
+    </Style>
     <Style Selector="Label.text > AccessText">
       <Setter Property="ClipToBounds" Value="False" />
       <Setter Property="TextWrapping" Value="Wrap" />
