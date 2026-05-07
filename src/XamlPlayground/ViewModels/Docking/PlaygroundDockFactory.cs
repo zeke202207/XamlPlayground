@@ -7,6 +7,7 @@ using Dock.Model.Core;
 using Dock.Model.Mvvm;
 using Dock.Model.Mvvm.Controls;
 using Dock.Settings;
+using XamlPlayground;
 
 namespace XamlPlayground.ViewModels.Docking;
 
@@ -67,7 +68,7 @@ public sealed class PlaygroundDockFactory : Factory
             _resources,
             _assets,
             _errors);
-        bottomDock.ActiveDockable = _combinedTree;
+        bottomDock.ActiveDockable = Utilities.IsBrowser() ? _errors : _combinedTree;
         _bottomDock = bottomDock;
 
         var centerDock = CreateProportionalDock();

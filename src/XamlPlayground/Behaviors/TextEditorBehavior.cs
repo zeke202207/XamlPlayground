@@ -15,6 +15,7 @@ using AvaloniaEdit.Editing;
 using AvaloniaEdit.Folding;
 using AvaloniaEdit.Highlighting;
 using TextMateSharp.Grammars;
+using XamlPlayground;
 using XamlPlayground.Services.Editing;
 using XamlPlayground.Services.IntelliSense;
 
@@ -475,7 +476,14 @@ public class TextEditorBehavior : Behavior<TextEditor>
         CloseCompletionWindow();
         CloseInsightWindow();
         CloseQuickInfo();
-        UpdateFoldings();
+        if (Utilities.IsBrowser())
+        {
+            ScheduleFoldingUpdate();
+        }
+        else
+        {
+            UpdateFoldings();
+        }
     }
 
     private void ApplySyntaxHighlighting()
@@ -486,6 +494,13 @@ public class TextEditorBehavior : Behavior<TextEditor>
         }
 
         var extension = NormalizeTextMateExtension(Extension);
+        if (Utilities.IsBrowser())
+        {
+            DisposeTextMateInstallation();
+            _textEditor.SyntaxHighlighting = HighlightingManager.Instance.GetDefinitionByExtension(extension ?? Extension);
+            return;
+        }
+
         if (extension is null)
         {
             DisposeTextMateInstallation();
