@@ -6,6 +6,11 @@ namespace XamlPlayground.Tests;
 
 public sealed class IntelliSenseServiceTests
 {
+    public IntelliSenseServiceTests()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+    }
+
     [Fact]
     public async Task CSharpCompletion_UsesRoslynSemanticModel_ForMemberAccess()
     {
