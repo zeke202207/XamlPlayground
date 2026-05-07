@@ -672,13 +672,15 @@ public partial class MainViewModel : ViewModelBase
             }
             var xamlText = xamlFile.Text;
 
-            if (project is { } && project.GetCSharpFiles().Any(static file => !string.IsNullOrWhiteSpace(file.Text)))
+            var codeFiles = project?.GetCSharpFileSnapshot() ?? Array.Empty<(string Path, string Text)>();
+
+            if (project is { } && codeFiles.Length > 0)
             {
                 try
                 {
                     var scriptResult = await Task.Run(async () => await CompilerService.GetProjectAssembly(
                         project.Name,
-                        project.GetCSharpFiles().Select(static file => (file.Path, file.Text))));
+                        codeFiles));
                     diagnosticsMessage = FormatCompilerDiagnostics(scriptResult.Diagnostics);
 
                     if (scriptResult.Success && scriptResult.Assembly is { })

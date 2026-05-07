@@ -39,6 +39,14 @@ public sealed class InMemoryProject
         return Files.Where(static file => file.IsCSharp);
     }
 
+    public (string Path, string Text)[] GetCSharpFileSnapshot()
+    {
+        return GetCSharpFiles()
+            .Select(static file => (file.Path, file.Text))
+            .Where(static file => !string.IsNullOrWhiteSpace(file.Text))
+            .ToArray();
+    }
+
     public IEnumerable<InMemoryProjectFile> GetXamlFiles()
     {
         return Files.Where(static file => file.IsXaml);
