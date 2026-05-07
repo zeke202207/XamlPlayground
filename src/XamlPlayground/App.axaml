@@ -62,15 +62,15 @@
           <SolidColorBrush x:Key="DockSurfaceEditorBrush" Color="#FFFFFF" />
           <SolidColorBrush x:Key="DockSurfacePanelBrush" Color="#EFEFEF" />
           <SolidColorBrush x:Key="DockSurfaceHeaderBrush" Color="#E7E7E7" />
-          <SolidColorBrush x:Key="DockSurfaceHeaderActiveBrush" Color="#E7E7E7" />
+          <SolidColorBrush x:Key="DockSurfaceHeaderActiveBrush" Color="#DCE8FF" />
           <SolidColorBrush x:Key="DockTabBackgroundBrush" Color="#00000000" />
           <SolidColorBrush x:Key="DockTabHoverBackgroundBrush" Color="#EDEFF3" />
-          <SolidColorBrush x:Key="DockTabActiveBackgroundBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="DockTabActiveBackgroundBrush" Color="#E7E7E7" />
           <SolidColorBrush x:Key="DockTabForegroundBrush" Color="#2C2C2C" />
-          <SolidColorBrush x:Key="DockTabSelectedForegroundBrush" Color="#0F4FA8" />
-          <SolidColorBrush x:Key="DockTabActiveForegroundBrush" Color="#111827" />
-          <SolidColorBrush x:Key="DockDocumentTabSelectedForegroundBrush" Color="#0F4FA8" />
-          <SolidColorBrush x:Key="DockDocumentTabPointerOverForegroundBrush" Color="#111827" />
+          <SolidColorBrush x:Key="DockTabSelectedForegroundBrush" Color="#1F5FBF" />
+          <SolidColorBrush x:Key="DockTabActiveForegroundBrush" Color="#0F4FA8" />
+          <SolidColorBrush x:Key="DockDocumentTabSelectedForegroundBrush" Color="#1F5FBF" />
+          <SolidColorBrush x:Key="DockDocumentTabPointerOverForegroundBrush" Color="#0F4FA8" />
           <SolidColorBrush x:Key="DockChromeButtonForegroundBrush" Color="#4B4B4B" />
           <SolidColorBrush x:Key="DockChromeButtonHoverBackgroundBrush" Color="#DDE2EA" />
           <SolidColorBrush x:Key="DockChromeButtonPressedBackgroundBrush" Color="#CDD5E1" />
@@ -104,7 +104,7 @@
           <SolidColorBrush x:Key="DockSurfaceEditorBrush" Color="#1F2124" />
           <SolidColorBrush x:Key="DockSurfacePanelBrush" Color="#2B2D30" />
           <SolidColorBrush x:Key="DockSurfaceHeaderBrush" Color="#313338" />
-          <SolidColorBrush x:Key="DockSurfaceHeaderActiveBrush" Color="#313338" />
+          <SolidColorBrush x:Key="DockSurfaceHeaderActiveBrush" Color="#35537A" />
           <SolidColorBrush x:Key="DockTabBackgroundBrush" Color="#00000000" />
           <SolidColorBrush x:Key="DockTabHoverBackgroundBrush" Color="#34373D" />
           <SolidColorBrush x:Key="DockTabActiveBackgroundBrush" Color="#2B2D30" />
