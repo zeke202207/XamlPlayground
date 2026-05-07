@@ -38,4 +38,14 @@ internal static class Templates
         "<UserControl xmlns=\"https://github.com/avaloniaui\">\n" +
         "    <Button Name=\"button\" Content=\"Click Me\" HorizontalAlignment=\"Center\" />\n" +
         "</UserControl>";
+
+    public static string s_newCode = string.Empty;
+
+    public static string s_newXaml =
+        "<UserControl xmlns=\"https://github.com/avaloniaui\"\n" +
+        "             xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">\n" +
+        "    <TextBlock Text=\"Hello, world!\"\n" +
+        "               HorizontalAlignment=\"Center\"\n" +
+        "               VerticalAlignment=\"Center\" />\n" +
+        "</UserControl>";
 }

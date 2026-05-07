@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Threading;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
@@ -8,12 +7,10 @@ namespace XamlPlayground.Tests;
 
 public sealed class SampleXamlTests
 {
-    private static int s_avaloniaInitialized;
-
     [Fact]
     public void Samples_Load_WithXamlXRuntimeCompiler()
     {
-        EnsureAvaloniaInitialized();
+        TestApplication.EnsureAvaloniaInitialized();
 
         var failures = new List<string>();
 
@@ -40,19 +37,10 @@ public sealed class SampleXamlTests
             string.Join(Environment.NewLine, failures));
     }
 
-    private static void EnsureAvaloniaInitialized()
-    {
-        if (Interlocked.Exchange(ref s_avaloniaInitialized, 1) != 0)
-        {
-            return;
-        }
-
-        TestApplication.BuildAvaloniaApp().SetupWithoutStarting();
-    }
-
     private static IEnumerable<(string Name, string Xaml)> EnumerateSamples()
     {
         yield return ("Code", GetTemplate("s_xaml"));
+        yield return ("New", GetTemplate("s_newXaml"));
 
         var assembly = typeof(App).Assembly;
         foreach (var resourceName in assembly

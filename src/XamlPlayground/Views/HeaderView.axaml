@@ -68,6 +68,8 @@
         <Menu VerticalAlignment="Center">
 
           <MenuItem Header="File" Classes="main">
+            <MenuItem Header="New" Command="{Binding NewFileCommand}" />
+            <Separator />
             <MenuItem Header="Open Xaml..." Command="{Binding OpenXamlFileCommand}" />
             <MenuItem Header="Save Xaml As..." Command="{Binding SaveXamlFileCommand}" />
             <Separator />

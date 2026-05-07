@@ -45,6 +45,7 @@ public partial class MainViewModel : ViewModelBase
         _samples = GetSamples(".xml");
         _enableAutoRun = true;
 
+        NewFileCommand = new RelayCommand(NewFile);
         OpenXamlFileCommand = new AsyncRelayCommand(async () => await OpenXamlFile());
         SaveXamlFileCommand = new AsyncRelayCommand(async () => await SaveXamlFile());
         OpenCodeFileCommand = new AsyncRelayCommand(async () => await OpenCodeFile());
@@ -67,6 +68,8 @@ public partial class MainViewModel : ViewModelBase
     public ICommand RunCommand { get; }
 
     public ICommand GistCommand { get; }
+
+    public ICommand NewFileCommand { get; }
 
     public ICommand OpenXamlFileCommand { get; }
 
@@ -163,6 +166,33 @@ public partial class MainViewModel : ViewModelBase
         }
 
         return samples;
+    }
+
+    private string GetUntitledSampleName()
+    {
+        const string name = "Untitled";
+        if (!Samples.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal)))
+        {
+            return name;
+        }
+
+        var index = 2;
+        while (Samples.Any(x => string.Equals(x.Name, $"{name} {index}", StringComparison.Ordinal)))
+        {
+            index++;
+        }
+
+        return $"{name} {index}";
+    }
+
+    private void NewFile()
+    {
+        _openXamlFile = null;
+        _openCodeFile = null;
+
+        var sample = new SampleViewModel(GetUntitledSampleName(), Templates.s_newXaml, Templates.s_newCode, Open, AutoRun);
+        Samples.Insert(0, sample);
+        CurrentSample = sample;
     }
 
     private void Open(SampleViewModel sampleViewModel)
