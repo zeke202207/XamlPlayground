@@ -15,6 +15,7 @@ using AvaloniaEdit.Editing;
 using AvaloniaEdit.Folding;
 using AvaloniaEdit.Highlighting;
 using TextMateSharp.Grammars;
+using XamlPlayground.Services.Editing;
 using XamlPlayground.Services.IntelliSense;
 
 namespace XamlPlayground.Behaviors;
@@ -36,6 +37,8 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private OverloadInsightWindow? _insightWindow;
     private AvaloniaEdit.TextMate.TextMate.Installation? _textMateInstallation;
     private RegistryOptions? _textMateRegistryOptions;
+    private TextDocument? _subscribedDocument;
+    private bool _isApplyingXamlEdit;
     private int _completionRequestVersion;
     private int _quickInfoRequestVersion;
 
@@ -65,6 +68,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         _textEditor.DocumentChanged += TextEditorOnDocumentChanged;
         _textEditor.PointerHover += TextEditorOnPointerHover;
         _textEditor.PointerHoverStopped += TextEditorOnPointerHoverStopped;
+        SubscribeToDocument(_textEditor.Document);
 
         InstallFoldingManager();
         _foldingTimer = new DispatcherTimer { Interval = FoldingUpdateDelay };
@@ -95,6 +99,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         }
 
         UninstallFoldingManager();
+        SubscribeToDocument(null);
         CloseCompletionWindow();
         CloseInsightWindow();
         CloseQuickInfo();
@@ -105,6 +110,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         _xmlFoldingStrategy = null;
         _csharpFoldingStrategy = null;
         _intelliSenseService = null;
+        _subscribedDocument = null;
         _textEditor = null;
 
         base.OnDetaching();
@@ -211,6 +217,15 @@ public class TextEditorBehavior : Behavior<TextEditor>
             return;
         }
 
+        if (e.Key == Key.Enter &&
+            IsXmlExtension(Extension) &&
+            modifiers == KeyModifiers.None &&
+            TryInsertXamlElementBreak())
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.A)
         {
             var hasOtherModifiers = (modifiers & ~(KeyModifiers.Control | KeyModifiers.Meta)) != 0;
@@ -226,13 +241,22 @@ public class TextEditorBehavior : Behavior<TextEditor>
     {
         if (_textEditor is null ||
             _textEditor.IsReadOnly ||
-            string.IsNullOrEmpty(e.Text) ||
-            _intelliSenseService is null)
+            string.IsNullOrEmpty(e.Text))
         {
             return;
         }
 
         var trigger = e.Text[^1];
+        if (IsXmlExtension(Extension))
+        {
+            TryHandleXamlTextEntered(e.Text);
+        }
+
+        if (_intelliSenseService is null)
+        {
+            return;
+        }
+
         if (trigger is '(' or ',')
         {
             await ShowSignatureHelpAsync();
@@ -305,14 +329,119 @@ public class TextEditorBehavior : Behavior<TextEditor>
     {
         _foldingTimer?.Stop();
         UninstallFoldingManager();
+        SubscribeToDocument(e.NewDocument);
         InstallFoldingManager();
         UpdateFoldings();
+    }
+
+    private void DocumentOnChanged(object? sender, DocumentChangeEventArgs e)
+    {
+        if (_isApplyingXamlEdit ||
+            _textEditor is null ||
+            !IsXmlExtension(Extension))
+        {
+            return;
+        }
+
+        var caretOffset = _textEditor.CaretOffset;
+        var editOffset = e.Offset + e.InsertionLength;
+
+        try
+        {
+            _isApplyingXamlEdit = true;
+            if (XamlEditorTypingService.TrySynchronizeTagRename(_textEditor.Document, editOffset, ref caretOffset))
+            {
+                _textEditor.CaretOffset = Math.Clamp(caretOffset, 0, _textEditor.Document.TextLength);
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+        finally
+        {
+            _isApplyingXamlEdit = false;
+        }
     }
 
     private void FoldingTimerOnTick(object? sender, EventArgs e)
     {
         _foldingTimer?.Stop();
         UpdateFoldings();
+    }
+
+    private void SubscribeToDocument(TextDocument? document)
+    {
+        if (ReferenceEquals(_subscribedDocument, document))
+        {
+            return;
+        }
+
+        if (_subscribedDocument is not null)
+        {
+            _subscribedDocument.Changed -= DocumentOnChanged;
+        }
+
+        _subscribedDocument = document;
+
+        if (_subscribedDocument is not null)
+        {
+            _subscribedDocument.Changed += DocumentOnChanged;
+        }
+    }
+
+    private bool TryInsertXamlElementBreak()
+    {
+        if (_textEditor?.Document is not { } document)
+        {
+            return false;
+        }
+
+        try
+        {
+            _isApplyingXamlEdit = true;
+            if (!XamlEditorTypingService.TryInsertElementBreak(document, _textEditor.CaretOffset, out var newCaretOffset))
+            {
+                return false;
+            }
+
+            _textEditor.CaretOffset = Math.Clamp(newCaretOffset, 0, document.TextLength);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+            return false;
+        }
+        finally
+        {
+            _isApplyingXamlEdit = false;
+        }
+    }
+
+    private void TryHandleXamlTextEntered(string text)
+    {
+        if (_textEditor?.Document is not { } document)
+        {
+            return;
+        }
+
+        try
+        {
+            _isApplyingXamlEdit = true;
+            if (XamlEditorTypingService.TryHandleTextEntered(document, _textEditor.CaretOffset, text, out var newCaretOffset))
+            {
+                _textEditor.CaretOffset = Math.Clamp(newCaretOffset, 0, document.TextLength);
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+        finally
+        {
+            _isApplyingXamlEdit = false;
+        }
     }
 
     private void ApplyExtensionMode()
