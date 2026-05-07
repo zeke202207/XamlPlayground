@@ -1,0 +1,21 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:dock="using:Dock.Avalonia.Controls"
+             xmlns:diagViews="using:Avalonia.Diagnostics.Views"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="260"
+             x:Class="XamlPlayground.Views.Docking.DiagnosticsTreeDockView"
+             x:CompileBindings="True" x:DataType="vm:DiagnosticTreeDockViewModel">
+  <Grid RowDefinitions="*,Auto">
+    <dock:DockControl Grid.Row="0"
+                      Layout="{Binding DockLayout}"
+                      Factory="{Binding DockFactory}"
+                      InitializeFactory="False"
+                      InitializeLayout="False"
+                      EnableManagedWindowLayer="True" />
+    <diagViews:DevToolsStatusBarView Grid.Row="1"
+                                     Session="{Binding Session}" />
+  </Grid>
+</UserControl>

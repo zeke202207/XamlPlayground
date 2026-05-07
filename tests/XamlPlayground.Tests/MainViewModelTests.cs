@@ -102,22 +102,27 @@ public sealed class MainViewModelTests
         var xamlEditor = Assert.Single(dockables.OfType<XamlEditorDockViewModel>());
         var codeEditor = Assert.Single(dockables.OfType<CodeEditorDockViewModel>());
         var preview = Assert.Single(dockables.OfType<PreviewDockViewModel>());
+        var diagnosticTreeTools = dockables.OfType<DiagnosticTreeDockViewModel>().ToList();
         var diagnosticTools = dockables.OfType<DiagnosticToolDockViewModel>().ToList();
         var errors = Assert.Single(dockables.OfType<ErrorsDockViewModel>());
 
         Assert.Same(viewModel, xamlEditor.Shell);
         Assert.Same(viewModel, codeEditor.Shell);
         Assert.Same(viewModel, preview.Shell);
+        Assert.All(diagnosticTreeTools, diagnosticTool => Assert.Same(viewModel, diagnosticTool.Shell));
         Assert.All(diagnosticTools, diagnosticTool => Assert.Same(viewModel, diagnosticTool.Shell));
         Assert.Same(viewModel, errors.Shell);
         Assert.Collection(
+            diagnosticTreeTools,
+            diagnosticTool => AssertDiagnosticTreeTool(diagnosticTool, "DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree),
+            diagnosticTool => AssertDiagnosticTreeTool(diagnosticTool, "DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree),
+            diagnosticTool => AssertDiagnosticTreeTool(diagnosticTool, "DiagnosticsVisualTree", "Visual Tree", DevToolsViewKind.VisualTree));
+        Assert.Collection(
             diagnosticTools,
-            diagnosticTool => AssertDiagnosticTool(diagnosticTool, "DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree),
-            diagnosticTool => AssertDiagnosticTool(diagnosticTool, "DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree),
-            diagnosticTool => AssertDiagnosticTool(diagnosticTool, "DiagnosticsVisualTree", "Visual Tree", DevToolsViewKind.VisualTree),
             diagnosticTool => AssertDiagnosticTool(diagnosticTool, "DiagnosticsEvents", "Events", DevToolsViewKind.Events),
             diagnosticTool => AssertDiagnosticTool(diagnosticTool, "DiagnosticsResources", "Resources", DevToolsViewKind.Resources),
             diagnosticTool => AssertDiagnosticTool(diagnosticTool, "DiagnosticsAssets", "Assets", DevToolsViewKind.Assets));
+        Assert.All(diagnosticTreeTools, AssertDiagnosticTreeSegments);
 
         var factory = Assert.IsType<PlaygroundDockFactory>(viewModel.DockFactory);
         Assert.NotNull(factory.ContextLocator);
@@ -125,12 +130,12 @@ public sealed class MainViewModelTests
         Assert.Same(xamlEditor, contextLocator["XamlEditor"]());
         Assert.Same(codeEditor, contextLocator["CodeEditor"]());
         Assert.Same(preview, contextLocator["Preview"]());
-        Assert.Same(diagnosticTools[0], contextLocator["DiagnosticsCombinedTree"]());
-        Assert.Same(diagnosticTools[1], contextLocator["DiagnosticsLogicalTree"]());
-        Assert.Same(diagnosticTools[2], contextLocator["DiagnosticsVisualTree"]());
-        Assert.Same(diagnosticTools[3], contextLocator["DiagnosticsEvents"]());
-        Assert.Same(diagnosticTools[4], contextLocator["DiagnosticsResources"]());
-        Assert.Same(diagnosticTools[5], contextLocator["DiagnosticsAssets"]());
+        Assert.Same(diagnosticTreeTools[0], contextLocator["DiagnosticsCombinedTree"]());
+        Assert.Same(diagnosticTreeTools[1], contextLocator["DiagnosticsLogicalTree"]());
+        Assert.Same(diagnosticTreeTools[2], contextLocator["DiagnosticsVisualTree"]());
+        Assert.Same(diagnosticTools[0], contextLocator["DiagnosticsEvents"]());
+        Assert.Same(diagnosticTools[1], contextLocator["DiagnosticsResources"]());
+        Assert.Same(diagnosticTools[2], contextLocator["DiagnosticsAssets"]());
         Assert.Same(errors, contextLocator["Errors"]());
     }
 
@@ -268,6 +273,20 @@ public sealed class MainViewModelTests
         Dispatcher.UIThread.RunJobs();
     }
 
+    private static void AssertDiagnosticTreeTool(
+        DiagnosticTreeDockViewModel diagnosticTool,
+        string id,
+        string title,
+        DevToolsViewKind viewKind)
+    {
+        Assert.Equal(id, diagnosticTool.Id);
+        Assert.Equal(title, diagnosticTool.Title);
+        Assert.Equal(viewKind, diagnosticTool.ViewKind);
+        Assert.NotNull(diagnosticTool.DockFactory);
+        Assert.NotNull(diagnosticTool.DockLayout);
+        Assert.NotNull(diagnosticTool.Session);
+    }
+
     private static void AssertDiagnosticTool(
         DiagnosticToolDockViewModel diagnosticTool,
         string id,
@@ -277,6 +296,34 @@ public sealed class MainViewModelTests
         Assert.Equal(id, diagnosticTool.Id);
         Assert.Equal(title, diagnosticTool.Title);
         Assert.Equal(viewKind, diagnosticTool.ViewKind);
+    }
+
+    private static void AssertDiagnosticTreeSegments(DiagnosticTreeDockViewModel diagnosticTool)
+    {
+        var segments = Enumerate(diagnosticTool.DockLayout)
+            .OfType<DiagnosticSegmentDockViewModel>()
+            .ToList();
+
+        Assert.Collection(
+            segments,
+            segment => AssertDiagnosticSegment(segment, $"{diagnosticTool.Id}Tree", "Tree", diagnosticTool.ViewKind, DevToolsTreeSegmentKind.Tree, diagnosticTool.Session),
+            segment => AssertDiagnosticSegment(segment, $"{diagnosticTool.Id}Properties", "Properties", diagnosticTool.ViewKind, DevToolsTreeSegmentKind.Properties, diagnosticTool.Session),
+            segment => AssertDiagnosticSegment(segment, $"{diagnosticTool.Id}LayoutStyles", "Layout / Styles", diagnosticTool.ViewKind, DevToolsTreeSegmentKind.LayoutStyles, diagnosticTool.Session));
+    }
+
+    private static void AssertDiagnosticSegment(
+        DiagnosticSegmentDockViewModel diagnosticSegment,
+        string id,
+        string title,
+        DevToolsViewKind viewKind,
+        DevToolsTreeSegmentKind segmentKind,
+        DevToolsSession session)
+    {
+        Assert.Equal(id, diagnosticSegment.Id);
+        Assert.Equal(title, diagnosticSegment.Title);
+        Assert.Equal(viewKind, diagnosticSegment.ViewKind);
+        Assert.Equal(segmentKind, diagnosticSegment.SegmentKind);
+        Assert.Same(session, diagnosticSegment.Session);
     }
 
     private static IEnumerable<IDockable> Enumerate(IDockable dockable)

@@ -21,6 +21,8 @@ public partial class ViewLocator : IDataTemplate
             XamlEditorDockViewModel => new XamlEditorDockView(),
             CodeEditorDockViewModel => new CodeEditorDockView(),
             PreviewDockViewModel => new PreviewDockView(),
+            DiagnosticTreeDockViewModel => new DiagnosticsTreeDockView(),
+            DiagnosticSegmentDockViewModel => new DiagnosticSegmentDockView(),
             DiagnosticToolDockViewModel => new DiagnosticsDockView(),
             ErrorsDockViewModel => new ErrorsDockView(),
             _ => new TextBlock { Text = "Not Found: " + data?.GetType().FullName }

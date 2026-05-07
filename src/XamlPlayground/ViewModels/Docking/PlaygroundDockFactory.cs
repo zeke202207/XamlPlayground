@@ -18,9 +18,9 @@ public sealed class PlaygroundDockFactory : Factory
     private XamlEditorDockViewModel? _xamlEditor;
     private CodeEditorDockViewModel? _codeEditor;
     private PreviewDockViewModel? _preview;
-    private DiagnosticToolDockViewModel? _combinedTree;
-    private DiagnosticToolDockViewModel? _logicalTree;
-    private DiagnosticToolDockViewModel? _visualTree;
+    private DiagnosticTreeDockViewModel? _combinedTree;
+    private DiagnosticTreeDockViewModel? _logicalTree;
+    private DiagnosticTreeDockViewModel? _visualTree;
     private DiagnosticToolDockViewModel? _events;
     private DiagnosticToolDockViewModel? _resources;
     private DiagnosticToolDockViewModel? _assets;
@@ -37,9 +37,9 @@ public sealed class PlaygroundDockFactory : Factory
         _xamlEditor = new XamlEditorDockViewModel(_shell);
         _codeEditor = new CodeEditorDockViewModel(_shell);
         _preview = new PreviewDockViewModel(_shell);
-        _combinedTree = CreateDiagnosticsTool("DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree);
-        _logicalTree = CreateDiagnosticsTool("DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree);
-        _visualTree = CreateDiagnosticsTool("DiagnosticsVisualTree", "Visual Tree", DevToolsViewKind.VisualTree);
+        _combinedTree = CreateDiagnosticsTreeTool("DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree);
+        _logicalTree = CreateDiagnosticsTreeTool("DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree);
+        _visualTree = CreateDiagnosticsTreeTool("DiagnosticsVisualTree", "Visual Tree", DevToolsViewKind.VisualTree);
         _events = CreateDiagnosticsTool("DiagnosticsEvents", "Events", DevToolsViewKind.Events);
         _resources = CreateDiagnosticsTool("DiagnosticsResources", "Resources", DevToolsViewKind.Resources);
         _assets = CreateDiagnosticsTool("DiagnosticsAssets", "Assets", DevToolsViewKind.Assets);
@@ -183,5 +183,13 @@ public sealed class PlaygroundDockFactory : Factory
         DevToolsViewKind viewKind)
     {
         return new DiagnosticToolDockViewModel(_shell, id, title, viewKind);
+    }
+
+    private DiagnosticTreeDockViewModel CreateDiagnosticsTreeTool(
+        string id,
+        string title,
+        DevToolsViewKind viewKind)
+    {
+        return new DiagnosticTreeDockViewModel(_shell, id, title, viewKind);
     }
 }
