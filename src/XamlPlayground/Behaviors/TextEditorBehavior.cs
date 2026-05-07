@@ -1,12 +1,18 @@
 ﻿using System;
+using System.ComponentModel;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.Xaml.Interactivity;
 using AvaloniaEdit;
+using AvaloniaEdit.CodeCompletion;
 using AvaloniaEdit.Document;
+using AvaloniaEdit.Editing;
 using AvaloniaEdit.Folding;
 using AvaloniaEdit.Highlighting;
+using XamlPlayground.Services.IntelliSense;
 
 namespace XamlPlayground.Behaviors;
 
@@ -22,6 +28,11 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private DispatcherTimer? _foldingTimer;
     private XmlFoldingStrategy? _xmlFoldingStrategy;
     private CSharpFoldingStrategy? _csharpFoldingStrategy;
+    private IEditorIntelliSenseService? _intelliSenseService;
+    private CompletionWindow? _completionWindow;
+    private OverloadInsightWindow? _insightWindow;
+    private int _completionRequestVersion;
+    private int _quickInfoRequestVersion;
 
     public string? Extension
     {
@@ -42,8 +53,11 @@ public class TextEditorBehavior : Behavior<TextEditor>
 
         _textEditor.TextArea.SelectionCornerRadius = 0;
         _textEditor.TextArea.KeyDown += TextAreaOnKeyDown;
+        _textEditor.TextArea.TextEntered += TextAreaOnTextEntered;
         _textEditor.TextChanged += TextEditorOnTextChanged;
         _textEditor.DocumentChanged += TextEditorOnDocumentChanged;
+        _textEditor.PointerHover += TextEditorOnPointerHover;
+        _textEditor.PointerHoverStopped += TextEditorOnPointerHoverStopped;
 
         InstallFoldingManager();
         _foldingTimer = new DispatcherTimer { Interval = FoldingUpdateDelay };
@@ -57,8 +71,11 @@ public class TextEditorBehavior : Behavior<TextEditor>
         if (_textEditor is { } textEditor)
         {
             textEditor.TextArea.KeyDown -= TextAreaOnKeyDown;
+            textEditor.TextArea.TextEntered -= TextAreaOnTextEntered;
             textEditor.TextChanged -= TextEditorOnTextChanged;
             textEditor.DocumentChanged -= TextEditorOnDocumentChanged;
+            textEditor.PointerHover -= TextEditorOnPointerHover;
+            textEditor.PointerHoverStopped -= TextEditorOnPointerHoverStopped;
         }
 
         if (_foldingTimer is { } foldingTimer)
@@ -68,11 +85,15 @@ public class TextEditorBehavior : Behavior<TextEditor>
         }
 
         UninstallFoldingManager();
+        CloseCompletionWindow();
+        CloseInsightWindow();
+        CloseQuickInfo();
 
         _foldingTimer = null;
         _foldingManager = null;
         _xmlFoldingStrategy = null;
         _csharpFoldingStrategy = null;
+        _intelliSenseService = null;
         _textEditor = null;
 
         base.OnDetaching();
@@ -88,24 +109,122 @@ public class TextEditorBehavior : Behavior<TextEditor>
         }
     }
 
-    private void TextAreaOnKeyDown(object? sender, KeyEventArgs e)
+    private async void TextAreaOnKeyDown(object? sender, KeyEventArgs e)
     {
-        if (_textEditor is null || e.Key != Key.A)
+        if (_textEditor is null)
         {
             return;
         }
 
         var modifiers = e.KeyModifiers;
-        var isSelectAllGesture = modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Meta);
-        var hasOtherModifiers = (modifiers & ~(KeyModifiers.Control | KeyModifiers.Meta)) != 0;
+        var hasControlOrMeta = modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Meta);
 
-        if (!isSelectAllGesture || hasOtherModifiers)
+        if (e.Key == Key.Escape)
+        {
+            CloseCompletionWindow();
+            CloseInsightWindow();
+            CloseQuickInfo();
+            return;
+        }
+
+        if (e.Key == Key.Space && hasControlOrMeta)
+        {
+            if (modifiers.HasFlag(KeyModifiers.Shift))
+            {
+                await ShowSignatureHelpAsync();
+            }
+            else
+            {
+                await ShowCompletionAsync(explicitInvocation: true, triggerCharacter: null);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.A)
+        {
+            var hasOtherModifiers = (modifiers & ~(KeyModifiers.Control | KeyModifiers.Meta)) != 0;
+            if (hasControlOrMeta && !hasOtherModifiers)
+            {
+                _textEditor.SelectAll();
+                e.Handled = true;
+            }
+        }
+    }
+
+    private async void TextAreaOnTextEntered(object? sender, TextInputEventArgs e)
+    {
+        if (_textEditor is null ||
+            _textEditor.IsReadOnly ||
+            string.IsNullOrEmpty(e.Text) ||
+            _intelliSenseService is null)
         {
             return;
         }
 
-        _textEditor.SelectAll();
-        e.Handled = true;
+        var trigger = e.Text[^1];
+        if (trigger is '(' or ',')
+        {
+            await ShowSignatureHelpAsync();
+        }
+        else if (trigger is ')' or ';' or '}')
+        {
+            CloseInsightWindow();
+        }
+
+        if (_completionWindow is not null && trigger != '.')
+        {
+            return;
+        }
+
+        await ShowCompletionAsync(explicitInvocation: false, trigger);
+    }
+
+    private async void TextEditorOnPointerHover(object? sender, PointerEventArgs e)
+    {
+        if (_textEditor?.Document is null || _intelliSenseService is null)
+        {
+            return;
+        }
+
+        var textEditor = _textEditor;
+        var position = textEditor.GetPositionFromPoint(e.GetPosition(textEditor));
+        if (position is null)
+        {
+            return;
+        }
+
+        var line = Math.Clamp(position.Value.Line, 1, textEditor.Document.LineCount);
+        var documentLine = textEditor.Document.GetLineByNumber(line);
+        var column = Math.Clamp(position.Value.Column, 1, documentLine.Length + 1);
+        var offset = textEditor.Document.GetOffset(line, column);
+        var requestVersion = ++_quickInfoRequestVersion;
+
+        try
+        {
+            var quickInfo = await _intelliSenseService.GetQuickInfoAsync(
+                textEditor.Document.Text,
+                offset,
+                default);
+
+            if (requestVersion != _quickInfoRequestVersion || quickInfo is null || _textEditor is null)
+            {
+                return;
+            }
+
+            ToolTip.SetTip(_textEditor, quickInfo.Text);
+            ToolTip.SetIsOpen(_textEditor, true);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+    }
+
+    private void TextEditorOnPointerHoverStopped(object? sender, PointerEventArgs e)
+    {
+        CloseQuickInfo();
     }
 
     private void TextEditorOnTextChanged(object? sender, EventArgs e)
@@ -140,19 +259,166 @@ public class TextEditorBehavior : Behavior<TextEditor>
         {
             _xmlFoldingStrategy ??= new XmlFoldingStrategy();
             _csharpFoldingStrategy = null;
+            _intelliSenseService = new XamlIntelliSenseService();
         }
         else if (IsCSharpExtension(Extension))
         {
             _csharpFoldingStrategy ??= new CSharpFoldingStrategy();
             _xmlFoldingStrategy = null;
+            _intelliSenseService = new CSharpIntelliSenseService();
         }
         else
         {
             _xmlFoldingStrategy = null;
             _csharpFoldingStrategy = null;
+            _intelliSenseService = null;
         }
 
+        CloseCompletionWindow();
+        CloseInsightWindow();
+        CloseQuickInfo();
         UpdateFoldings();
+    }
+
+    private async System.Threading.Tasks.Task ShowCompletionAsync(bool explicitInvocation, char? triggerCharacter)
+    {
+        if (_textEditor?.Document is null || _intelliSenseService is null)
+        {
+            return;
+        }
+
+        var textEditor = _textEditor;
+        var requestVersion = ++_completionRequestVersion;
+
+        try
+        {
+            var result = await _intelliSenseService.GetCompletionsAsync(
+                textEditor.Document.Text,
+                textEditor.CaretOffset,
+                explicitInvocation,
+                triggerCharacter,
+                default);
+
+            if (requestVersion != _completionRequestVersion || result is null || result.Items.Count == 0 || _textEditor is null)
+            {
+                if (explicitInvocation)
+                {
+                    CloseCompletionWindow();
+                }
+
+                return;
+            }
+
+            CloseCompletionWindow();
+
+            var completionWindow = new CompletionWindow(textEditor.TextArea)
+            {
+                StartOffset = Math.Clamp(result.ReplacementStart, 0, textEditor.Document.TextLength),
+                EndOffset = Math.Clamp(result.ReplacementEnd, 0, textEditor.Document.TextLength),
+                CloseAutomatically = true,
+                CloseWhenCaretAtBeginning = false
+            };
+
+            completionWindow.CompletionList.IsFiltering = true;
+            foreach (var item in result.Items)
+            {
+                completionWindow.CompletionList.CompletionData.Add(new EditorCompletionData(item));
+            }
+
+            completionWindow.Closed += CompletionWindowOnClosed;
+            _completionWindow = completionWindow;
+            completionWindow.Show();
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+    }
+
+    private async System.Threading.Tasks.Task ShowSignatureHelpAsync()
+    {
+        if (_textEditor?.Document is null || _intelliSenseService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var signatureHelp = await _intelliSenseService.GetSignatureHelpAsync(
+                _textEditor.Document.Text,
+                _textEditor.CaretOffset,
+                default);
+
+            if (signatureHelp is null || signatureHelp.Items.Count == 0 || _textEditor is null)
+            {
+                CloseInsightWindow();
+                return;
+            }
+
+            if (_insightWindow is null)
+            {
+                _insightWindow = new OverloadInsightWindow(_textEditor.TextArea);
+                _insightWindow.Closed += InsightWindowOnClosed;
+                _insightWindow.Show();
+            }
+
+            _insightWindow.Provider = new EditorOverloadProvider(signatureHelp);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+    }
+
+    private void CompletionWindowOnClosed(object? sender, EventArgs e)
+    {
+        if (_completionWindow is not null)
+        {
+            _completionWindow.Closed -= CompletionWindowOnClosed;
+            _completionWindow = null;
+        }
+    }
+
+    private void InsightWindowOnClosed(object? sender, EventArgs e)
+    {
+        if (_insightWindow is not null)
+        {
+            _insightWindow.Closed -= InsightWindowOnClosed;
+            _insightWindow = null;
+        }
+    }
+
+    private void CloseCompletionWindow()
+    {
+        if (_completionWindow is null)
+        {
+            return;
+        }
+
+        _completionWindow.Closed -= CompletionWindowOnClosed;
+        _completionWindow.Close();
+        _completionWindow = null;
+    }
+
+    private void CloseInsightWindow()
+    {
+        if (_insightWindow is null)
+        {
+            return;
+        }
+
+        _insightWindow.Closed -= InsightWindowOnClosed;
+        _insightWindow.Close();
+        _insightWindow = null;
+    }
+
+    private void CloseQuickInfo()
+    {
+        _quickInfoRequestVersion++;
+        if (_textEditor is not null)
+        {
+            ToolTip.SetIsOpen(_textEditor, false);
+        }
     }
 
     private void ScheduleFoldingUpdate()
@@ -220,5 +486,79 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private static bool IsCSharpExtension(string? extension)
     {
         return string.Equals(extension, ".cs", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class EditorCompletionData : ICompletionData
+    {
+        private readonly EditorCompletionItem _item;
+
+        public EditorCompletionData(EditorCompletionItem item)
+        {
+            _item = item;
+        }
+
+        public IImage? Image => null;
+
+        public string Text => _item.Text;
+
+        public object Content => _item.Text;
+
+        public object Description => string.IsNullOrWhiteSpace(_item.Description)
+            ? _item.Kind.ToString()
+            : $"{_item.Kind}{Environment.NewLine}{_item.Description}";
+
+        public double Priority => _item.Priority;
+
+        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)
+        {
+            var document = textArea.Document;
+            var offset = Math.Clamp(completionSegment.Offset, 0, document.TextLength);
+            var length = Math.Clamp(completionSegment.Length, 0, document.TextLength - offset);
+            document.Replace(offset, length, _item.InsertionText);
+
+            var caretOffset = offset + (_item.CaretOffset ?? _item.InsertionText.Length);
+            textArea.Caret.Offset = Math.Clamp(caretOffset, 0, document.TextLength);
+        }
+    }
+
+    private sealed class EditorOverloadProvider : IOverloadProvider, INotifyPropertyChanged
+    {
+        private readonly EditorSignatureHelp _signatureHelp;
+        private int _selectedIndex;
+
+        public EditorOverloadProvider(EditorSignatureHelp signatureHelp)
+        {
+            _signatureHelp = signatureHelp;
+            _selectedIndex = Math.Clamp(signatureHelp.SelectedIndex, 0, Math.Max(0, signatureHelp.Items.Count - 1));
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public int SelectedIndex
+        {
+            get => _selectedIndex;
+            set
+            {
+                var selectedIndex = Math.Clamp(value, 0, Math.Max(0, Count - 1));
+                if (_selectedIndex == selectedIndex)
+                {
+                    return;
+                }
+
+                _selectedIndex = selectedIndex;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedIndex)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentIndexText)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentHeader)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentContent)));
+            }
+        }
+
+        public int Count => _signatureHelp.Items.Count;
+
+        public string CurrentIndexText => Count == 0 ? string.Empty : $"{SelectedIndex + 1} of {Count}";
+
+        public object CurrentHeader => Count == 0 ? string.Empty : _signatureHelp.Items[SelectedIndex].Header;
+
+        public object CurrentContent => Count == 0 ? string.Empty : _signatureHelp.Items[SelectedIndex].Content;
     }
 }

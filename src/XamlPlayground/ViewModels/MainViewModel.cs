@@ -15,6 +15,8 @@ using CommunityToolkit.Mvvm.Input;
 using Avalonia.Platform.Storage;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Xml;
+using System.Xml.Linq;
 using XamlPlayground.Services;
 using Avalonia.Threading;
 
@@ -22,6 +24,8 @@ namespace XamlPlayground.ViewModels;
 
 public partial class MainViewModel : ViewModelBase
 {
+    private static readonly TimeSpan AutoRunDelay = TimeSpan.FromMilliseconds(300);
+
     [ObservableProperty] private ObservableCollection<SampleViewModel> _samples;
     [ObservableProperty] private SampleViewModel? _currentSample;
     [ObservableProperty] private Control? _control;
@@ -205,7 +209,7 @@ public partial class MainViewModel : ViewModelBase
     private void Run(string? xaml, string? code)
     {
         _timer?.Dispose();
-        _timer = DispatcherTimer.RunOnce(() => _ = RunInternal(xaml, code), TimeSpan.FromMicroseconds(1000));
+        _timer = DispatcherTimer.RunOnce(() => _ = RunInternal(xaml, code), AutoRunDelay);
     }
 
     private async Task RunInternal(string? xaml, string? code)
@@ -232,6 +236,12 @@ public partial class MainViewModel : ViewModelBase
             }
  #endif
             Assembly? scriptAssembly = null;
+            if (!TryValidateXml(xaml, out var xmlErrorMessage))
+            {
+                LastErrorMessage = xmlErrorMessage;
+                return;
+            }
+            var xamlText = xaml!;
 
             if (code is { } && !string.IsNullOrWhiteSpace(code))
             {
@@ -266,7 +276,7 @@ public partial class MainViewModel : ViewModelBase
 
                     await using var stream = new MemoryStream();
                     await using var writer = new StreamWriter(stream);
-                    await writer.WriteAsync(xaml);
+                    await writer.WriteAsync(xamlText);
                     await writer.FlushAsync();
                     stream.Position = 0;
 
@@ -279,7 +289,7 @@ public partial class MainViewModel : ViewModelBase
             }
             else
             {
-                var control = AvaloniaRuntimeXamlLoader.Parse<Control?>(xaml, null);
+                var control = AvaloniaRuntimeXamlLoader.Parse<Control?>(xamlText, null);
                 if (control is { })
                 {
                     ShowControl(control);
@@ -294,6 +304,27 @@ public partial class MainViewModel : ViewModelBase
         finally
         {
             _update = false;
+        }
+    }
+
+    private static bool TryValidateXml(string? xaml, out string? errorMessage)
+    {
+        errorMessage = null;
+        if (string.IsNullOrWhiteSpace(xaml))
+        {
+            errorMessage = "XAML is empty.";
+            return false;
+        }
+
+        try
+        {
+            XDocument.Parse(xaml, LoadOptions.SetLineInfo);
+            return true;
+        }
+        catch (XmlException exception)
+        {
+            errorMessage = exception.Message;
+            return false;
         }
     }
 

@@ -16,6 +16,7 @@ namespace XamlPlayground.Services;
 public static class CompilerService
 {
     private static PortableExecutableReference[]? s_references;
+    private static Task? s_referenceLoadTask;
     private static IReadOnlyDictionary<string, string> s_browserReferenceAssets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     public static string? BaseUri { get; set; }
@@ -23,6 +24,7 @@ public static class CompilerService
     public static void SetBrowserReferenceAssets(string? assets)
     {
         s_references = null;
+        s_referenceLoadTask = null;
 
         if (string.IsNullOrWhiteSpace(assets))
         {
@@ -51,6 +53,17 @@ public static class CompilerService
         s_browserReferenceAssets = browserReferenceAssets;
     }
 
+    public static async Task<IReadOnlyList<PortableExecutableReference>> GetMetadataReferences()
+    {
+        if (s_references is null)
+        {
+            s_referenceLoadTask ??= LoadReferences();
+            await s_referenceLoadTask;
+        }
+
+        return s_references ?? Array.Empty<PortableExecutableReference>();
+    }
+
     private static async Task LoadReferences()
     {
         var assemblies = AppDomain.CurrentDomain.GetAssemblies();
@@ -70,11 +83,14 @@ public static class CompilerService
 
             Console.WriteLine($"Loading references BaseUri: {BaseUri}");
 
-            foreach(var reference in assemblies.Where(x => !x.IsDynamic))
+            foreach(var name in assemblies
+                        .Where(static assembly => !assembly.IsDynamic)
+                        .Select(static assembly => assembly.GetName().Name)
+                        .Where(static name => !string.IsNullOrWhiteSpace(name))
+                        .Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 try
                 {
-                    var name = reference.GetName().Name;
                     var metadataReference = await LoadBrowserReference(client, name);
                     if (metadataReference is null)
                     {
@@ -139,6 +155,12 @@ public static class CompilerService
         if (s_browserReferenceAssets.TryGetValue(name, out var asset))
         {
             yield return ResolveBrowserReferenceUri(asset);
+            yield break;
+        }
+
+        if (s_browserReferenceAssets.Count > 0)
+        {
+            yield break;
         }
 
         yield return ResolveBrowserReferenceUri($"_framework/{name}.dll");
@@ -149,9 +171,32 @@ public static class CompilerService
     {
         var normalized = virtualPath.Replace('\\', '/');
         var fileName = normalized[(normalized.LastIndexOf('/') + 1)..];
-        return fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+        var name = fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
             ? fileName[..^".dll".Length]
             : fileName;
+
+        var hashSeparator = name.LastIndexOf('.');
+        return hashSeparator > 0 && IsFingerprintSuffix(name[(hashSeparator + 1)..])
+            ? name[..hashSeparator]
+            : name;
+    }
+
+    private static bool IsFingerprintSuffix(string value)
+    {
+        if (value.Length != 10)
+        {
+            return false;
+        }
+
+        foreach (var ch in value)
+        {
+            if (!char.IsAsciiLetterLower(ch) && !char.IsDigit(ch))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static string ResolveBrowserReferenceUri(string asset)
@@ -166,16 +211,13 @@ public static class CompilerService
 
     public static async Task<(Assembly? Assembly, AssemblyLoadContext? Context)> GetScriptAssembly(string code)
     {
-        if (s_references is null)
-        {
-            await LoadReferences();
-        }
+        var references = await GetMetadataReferences();
 
         var stringText = SourceText.From(code, Encoding.UTF8);
         var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
         var parsedSyntaxTree = SyntaxFactory.ParseSyntaxTree(stringText, parseOptions);
         var compilationOptions = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary).WithOptimizationLevel(OptimizationLevel.Release);
-        var compilation = CSharpCompilation.Create(Path.GetRandomFileName(), new[] { parsedSyntaxTree }, s_references, compilationOptions);
+        var compilation = CSharpCompilation.Create(Path.GetRandomFileName(), new[] { parsedSyntaxTree }, references, compilationOptions);
 
         using var ms = new MemoryStream();
         var result = compilation.Emit(ms);
