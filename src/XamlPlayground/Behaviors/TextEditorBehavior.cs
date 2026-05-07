@@ -496,19 +496,17 @@ public class TextEditorBehavior : Behavior<TextEditor>
         var extension = NormalizeTextMateExtension(Extension);
         if (Utilities.IsBrowser())
         {
+            // TextMateSharp uses Onigwrap; in the published browser app this can block
+            // startup before the editor renders. The built-in highlighters are safe on WASM.
             DisposeTextMateInstallation();
-            _textEditor.SyntaxHighlighting = string.IsNullOrWhiteSpace(extension ?? Extension)
-                ? null
-                : HighlightingManager.Instance.GetDefinitionByExtension(extension ?? Extension);
+            ApplyBuiltInSyntaxHighlighting(extension ?? Extension);
             return;
         }
 
         if (extension is null)
         {
             DisposeTextMateInstallation();
-            _textEditor.SyntaxHighlighting = string.IsNullOrWhiteSpace(Extension)
-                ? null
-                : HighlightingManager.Instance.GetDefinitionByExtension(Extension);
+            ApplyBuiltInSyntaxHighlighting(Extension);
             return;
         }
 
@@ -538,7 +536,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
             DisposeTextMateInstallation();
         }
 
-        _textEditor.SyntaxHighlighting = HighlightingManager.Instance.GetDefinitionByExtension(Extension);
+        ApplyBuiltInSyntaxHighlighting(extension ?? Extension);
     }
 
     private void ApplyTextMateTheme()
@@ -593,9 +591,36 @@ public class TextEditorBehavior : Behavior<TextEditor>
         return null;
     }
 
-    private static void HandleTextMateException(Exception exception)
+    private void HandleTextMateException(Exception exception)
     {
         Console.WriteLine(exception);
+        if (_textEditor is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_textEditor is null)
+            {
+                return;
+            }
+
+            DisposeTextMateInstallation();
+            ApplyBuiltInSyntaxHighlighting(NormalizeTextMateExtension(Extension) ?? Extension);
+        });
+    }
+
+    private void ApplyBuiltInSyntaxHighlighting(string? extension)
+    {
+        if (_textEditor is null)
+        {
+            return;
+        }
+
+        _textEditor.SyntaxHighlighting = string.IsNullOrWhiteSpace(extension)
+            ? null
+            : HighlightingManager.Instance.GetDefinitionByExtension(extension);
     }
 
     private async System.Threading.Tasks.Task ShowCompletionAsync(bool explicitInvocation, char? triggerCharacter)
