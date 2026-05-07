@@ -30,7 +30,7 @@
   </UserControl.Styles>
   
   <Grid>
-    <TabControl TabStripPlacement="Bottom" Classes="code" BorderBrush="#283e74" BorderThickness="0,0,1,0">
+    <TabControl TabStripPlacement="Bottom" Classes="code" BorderBrush="{DynamicResource EditorBorderBrush}" BorderThickness="0,0,1,0">
       <TabControl.Styles>
         <Style Selector="TabControl">
           <Setter Property="Padding" Value="0" />
@@ -42,13 +42,12 @@
       </TabControl.Styles>
       <TabItem Header="Xaml">
         <ae:TextEditor Margin="0"
+                       Classes="theme-aware"
                        IsReadOnly="{OnFormFactor False, Mobile=True}"
-                       Document="{Binding CurrentSample.Xaml}"
-                       Background="WhiteSmoke"
+                       behaviors:TextEditorDocument.Document="{Binding CurrentSample.Xaml}"
                        HorizontalScrollBarVisibility="Auto"
                        VerticalScrollBarVisibility="Auto"
                        FontFamily="avares://XamlPlayground/Assets/Fonts#Roboto Mono"
-                       Foreground="Black"
                        ShowLineNumbers="True"
                        FontWeight="Normal"
                        FontSize="{Binding EditorFontSize}"
@@ -60,13 +59,12 @@
       </TabItem>
       <TabItem Header="Code">
         <ae:TextEditor Margin="0"
+                       Classes="theme-aware"
                        IsReadOnly="{OnFormFactor False, Mobile=True}"
-                       Document="{Binding CurrentSample.Code}"
-                       Background="WhiteSmoke"
+                       behaviors:TextEditorDocument.Document="{Binding CurrentSample.Code}"
                        HorizontalScrollBarVisibility="Auto"
                        VerticalScrollBarVisibility="Auto"
                        FontFamily="avares://XamlPlayground/Assets/Fonts#Roboto Mono"
-                       Foreground="Black"
                        ShowLineNumbers="True"
                        FontWeight="Normal"
                        FontSize="{Binding EditorFontSize}"

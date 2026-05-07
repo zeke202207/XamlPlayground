@@ -17,11 +17,16 @@
     <PackageReference Include="Avalonia.Markup.Xaml.Loader" Version="$(AvaloniaVersion)" />
     <PackageReference Include="Xaml.Behaviors.Avalonia" Version="$(AvaloniaBehaviorsVersion)" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="$(AvaloniaEditVersion)" />
+    <PackageReference Include="AvaloniaEdit.TextMate" Version="$(AvaloniaEditTextMateVersion)" />
+    <PackageReference Include="TextMateSharp.Grammars" Version="$(TextMateSharpGrammarsVersion)" />
     <PackageReference Include="Octokit" Version="$(OctokitVersion)" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="$(CommunityToolkitMvvmVersion)" />
     <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="$(MicrosoftCodeAnalysisVersion)" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="$(MicrosoftCodeAnalysisVersion)" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="$(MicrosoftCodeAnalysisVersion)" />
+    <PackageReference Include="Dock.Avalonia" Version="$(DockVersion)" />
+    <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="$(DockVersion)" />
+    <PackageReference Include="Dock.Model.Mvvm" Version="$(DockVersion)" />
   </ItemGroup>
 
   <ItemGroup>

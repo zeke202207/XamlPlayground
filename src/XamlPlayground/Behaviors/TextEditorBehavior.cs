@@ -4,7 +4,9 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Avalonia.Xaml.Interactivity;
 using AvaloniaEdit;
 using AvaloniaEdit.CodeCompletion;
@@ -12,6 +14,7 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Folding;
 using AvaloniaEdit.Highlighting;
+using TextMateSharp.Grammars;
 using XamlPlayground.Services.IntelliSense;
 
 namespace XamlPlayground.Behaviors;
@@ -31,6 +34,8 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private IEditorIntelliSenseService? _intelliSenseService;
     private CompletionWindow? _completionWindow;
     private OverloadInsightWindow? _insightWindow;
+    private AvaloniaEdit.TextMate.TextMate.Installation? _textMateInstallation;
+    private RegistryOptions? _textMateRegistryOptions;
     private int _completionRequestVersion;
     private int _quickInfoRequestVersion;
 
@@ -54,6 +59,8 @@ public class TextEditorBehavior : Behavior<TextEditor>
         _textEditor.TextArea.SelectionCornerRadius = 0;
         _textEditor.TextArea.KeyDown += TextAreaOnKeyDown;
         _textEditor.TextArea.TextEntered += TextAreaOnTextEntered;
+        _textEditor.AttachedToVisualTree += TextEditorOnAttachedToVisualTree;
+        _textEditor.PropertyChanged += TextEditorOnPropertyChanged;
         _textEditor.TextChanged += TextEditorOnTextChanged;
         _textEditor.DocumentChanged += TextEditorOnDocumentChanged;
         _textEditor.PointerHover += TextEditorOnPointerHover;
@@ -64,6 +71,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         _foldingTimer.Tick += FoldingTimerOnTick;
 
         ApplyExtensionMode();
+        ApplyEditorTheme();
     }
 
     protected override void OnDetaching()
@@ -72,6 +80,8 @@ public class TextEditorBehavior : Behavior<TextEditor>
         {
             textEditor.TextArea.KeyDown -= TextAreaOnKeyDown;
             textEditor.TextArea.TextEntered -= TextAreaOnTextEntered;
+            textEditor.AttachedToVisualTree -= TextEditorOnAttachedToVisualTree;
+            textEditor.PropertyChanged -= TextEditorOnPropertyChanged;
             textEditor.TextChanged -= TextEditorOnTextChanged;
             textEditor.DocumentChanged -= TextEditorOnDocumentChanged;
             textEditor.PointerHover -= TextEditorOnPointerHover;
@@ -88,6 +98,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         CloseCompletionWindow();
         CloseInsightWindow();
         CloseQuickInfo();
+        DisposeTextMateInstallation();
 
         _foldingTimer = null;
         _foldingManager = null;
@@ -107,6 +118,64 @@ public class TextEditorBehavior : Behavior<TextEditor>
         {
             ApplyExtensionMode();
         }
+    }
+
+    private void TextEditorOnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        ApplyEditorTheme();
+    }
+
+    private void TextEditorOnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property.Name == nameof(StyledElement.ActualThemeVariant))
+        {
+            ApplyTextMateTheme();
+            ApplyEditorTheme();
+            return;
+        }
+
+        if (e.Property.Name == nameof(TextEditor.Background) ||
+            e.Property.Name == nameof(TextEditor.Foreground))
+        {
+            ApplyEditorTheme();
+        }
+    }
+
+    private void ApplyEditorTheme()
+    {
+        if (_textEditor is not { } textEditor)
+        {
+            return;
+        }
+
+        textEditor.Options.HighlightCurrentLine = true;
+
+        if (FindBrush(textEditor, "EditorSelectionBrush") is { } selectionBrush)
+        {
+            textEditor.TextArea.SelectionBrush = selectionBrush;
+        }
+
+        if (FindBrush(textEditor, "EditorSelectionForegroundBrush") is { } selectionForegroundBrush)
+        {
+            textEditor.TextArea.SelectionForeground = selectionForegroundBrush;
+        }
+
+        if (FindBrush(textEditor, "EditorCaretBrush") is { } caretBrush)
+        {
+            textEditor.TextArea.Caret.CaretBrush = caretBrush;
+        }
+
+        if (FindBrush(textEditor, "EditorCurrentLineBackgroundBrush") is { } currentLineBackgroundBrush)
+        {
+            textEditor.TextArea.TextView.CurrentLineBackground = currentLineBackgroundBrush;
+        }
+    }
+
+    private static IBrush? FindBrush(TextEditor textEditor, string resourceKey)
+    {
+        return textEditor.TryFindResource(resourceKey, textEditor.ActualThemeVariant, out var value)
+            ? value as IBrush
+            : null;
     }
 
     private async void TextAreaOnKeyDown(object? sender, KeyEventArgs e)
@@ -253,7 +322,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
             return;
         }
 
-        _textEditor.SyntaxHighlighting = HighlightingManager.Instance.GetDefinitionByExtension(Extension);
+        ApplySyntaxHighlighting();
 
         if (IsXmlExtension(Extension))
         {
@@ -278,6 +347,107 @@ public class TextEditorBehavior : Behavior<TextEditor>
         CloseInsightWindow();
         CloseQuickInfo();
         UpdateFoldings();
+    }
+
+    private void ApplySyntaxHighlighting()
+    {
+        if (_textEditor is null)
+        {
+            return;
+        }
+
+        var extension = NormalizeTextMateExtension(Extension);
+        if (extension is null)
+        {
+            DisposeTextMateInstallation();
+            _textEditor.SyntaxHighlighting = HighlightingManager.Instance.GetDefinitionByExtension(Extension);
+            return;
+        }
+
+        try
+        {
+            _textMateRegistryOptions ??= new RegistryOptions(GetTextMateThemeName(_textEditor));
+
+            _textMateInstallation ??= AvaloniaEdit.TextMate.TextMate.InstallTextMate(
+                _textEditor,
+                _textMateRegistryOptions,
+                true,
+                HandleTextMateException);
+
+            ApplyTextMateTheme();
+
+            var scopeName = _textMateRegistryOptions.GetScopeByExtension(extension);
+            if (!string.IsNullOrWhiteSpace(scopeName))
+            {
+                _textMateInstallation.SetGrammar(scopeName);
+                _textEditor.SyntaxHighlighting = null;
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+            DisposeTextMateInstallation();
+        }
+
+        _textEditor.SyntaxHighlighting = HighlightingManager.Instance.GetDefinitionByExtension(Extension);
+    }
+
+    private void ApplyTextMateTheme()
+    {
+        if (_textEditor is null ||
+            _textMateInstallation is null ||
+            _textMateRegistryOptions is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _textMateInstallation.SetTheme(_textMateRegistryOptions.LoadTheme(GetTextMateThemeName(_textEditor)));
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+    }
+
+    private void DisposeTextMateInstallation()
+    {
+        if (_textMateInstallation is null)
+        {
+            return;
+        }
+
+        _textMateInstallation.Dispose();
+        _textMateInstallation = null;
+    }
+
+    private static ThemeName GetTextMateThemeName(TextEditor textEditor)
+    {
+        return textEditor.ActualThemeVariant == ThemeVariant.Dark
+            ? ThemeName.VisualStudioDark
+            : ThemeName.VisualStudioLight;
+    }
+
+    private static string? NormalizeTextMateExtension(string? extension)
+    {
+        if (IsXmlExtension(extension))
+        {
+            return ".xaml";
+        }
+
+        if (IsCSharpExtension(extension))
+        {
+            return ".cs";
+        }
+
+        return null;
+    }
+
+    private static void HandleTextMateException(Exception exception)
+    {
+        Console.WriteLine(exception);
     }
 
     private async System.Threading.Tasks.Task ShowCompletionAsync(bool explicitInvocation, char? triggerCharacter)
