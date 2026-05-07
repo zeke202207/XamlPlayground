@@ -34,6 +34,7 @@ public sealed class MainViewModelTests
         var project = viewModel.ActiveProject;
         Assert.NotNull(project);
         var previousFileCount = project.Files.Count;
+        viewModel.Control = new Button();
 
         viewModel.NewFileCommand.Execute(null);
 
@@ -47,6 +48,54 @@ public sealed class MainViewModelTests
         Assert.Contains("UserControl1", userControl.Text, StringComparison.Ordinal);
         Assert.Contains("partial class UserControl1", codeBehind.Text, StringComparison.Ordinal);
         Assert.Same(userControl, viewModel.ActiveXamlFile);
+        Assert.Null(viewModel.Control);
+    }
+
+    [Fact]
+    public async Task RuntimePreviewLoader_LoadsXClassUserControlWithCodeBehindRepeatedly()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var (projectName, codeFiles, userControlText, userControlName, userControlPath) = Dispatcher.UIThread.Invoke(() =>
+        {
+            var solutionFactory = new InMemorySolutionFactory(_ => { });
+            var solution = solutionFactory.CreateSolution(
+                "Demo",
+                Assert.Single(AvaloniaProjectTemplates.All, template => template.ShortName == "avalonia.xplat"));
+            var project = Assert.Single(solution.Projects);
+            var userControlFile = solutionFactory.AddUserControl(project);
+
+            return (
+                project.Name,
+                project.GetCSharpFileSnapshot(),
+                userControlFile.Text,
+                userControlFile.Name,
+                userControlFile.Path);
+        });
+
+        var compileResult = await CompilerService.GetProjectAssembly(projectName, codeFiles);
+
+        Assert.True(
+            compileResult.Success,
+            string.Join(Environment.NewLine, compileResult.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            for (var i = 0; i < 2; i++)
+            {
+                var diagnostics = new List<RuntimeXamlDiagnostic>();
+                var control = RuntimeXamlPreviewLoader.LoadControl(
+                    userControlText,
+                    compileResult.Assembly,
+                    Path.GetFileNameWithoutExtension(userControlName),
+                    userControlPath,
+                    diagnostics);
+
+                var userControl = Assert.IsAssignableFrom<UserControl>(control);
+                Assert.Equal("Demo.Views.UserControl1", userControl.GetType().FullName);
+                Assert.DoesNotContain(diagnostics, static diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+            }
+        });
     }
 
     [Fact]

@@ -57,6 +57,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly IDockThemeManager _dockThemeManager;
     private readonly InMemorySolutionFactory _solutionFactory;
     private bool _update;
+    private bool _rerunRequested;
     private bool _openingSample;
     private (Assembly? Assembly, AssemblyLoadContext? Context)? _previous;
     private IStorageFile? _openXamlFile;
@@ -573,6 +574,8 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        var previousPreviewFile = ActiveXamlFile;
+
         if (file.IsXaml)
         {
             ActiveXamlFile = file;
@@ -585,6 +588,17 @@ public partial class MainViewModel : ViewModelBase
         }
 
         WorkspaceStatus = $"{project.Name}: {file.Path}";
+
+        if (!_openingSample &&
+            EnableAutoRun &&
+            CanPreviewXamlFile(ActiveXamlFile) &&
+            !ReferenceEquals(previousPreviewFile, ActiveXamlFile))
+        {
+            Control = null;
+            DiagnosticsRoot = null;
+            LastErrorMessage = null;
+            RunActiveDocument();
+        }
     }
 
     private static List<FilePickerFileType> GetXamlFileTypes()
@@ -633,7 +647,10 @@ public partial class MainViewModel : ViewModelBase
     private async Task RunInternal()
     {
         if (_update)
+        {
+            _rerunRequested = true;
             return;
+        }
 
         _update = true;
         var diagnosticsMessage = default(string);
@@ -662,6 +679,12 @@ public partial class MainViewModel : ViewModelBase
             if (xamlFile is null)
             {
                 LastErrorMessage = "No XAML document is active.";
+                return;
+            }
+
+            if (!CanPreviewXamlFile(xamlFile))
+            {
+                LastErrorMessage = $"{xamlFile.Path} cannot be previewed.";
                 return;
             }
 
@@ -705,32 +728,25 @@ public partial class MainViewModel : ViewModelBase
 
             if (scriptAssembly is { })
             {
-                var types = scriptAssembly.GetTypes();
-                var type = ResolveRootType(xamlText, scriptAssembly)
-                    ?? types.FirstOrDefault(x => x.Name == "SampleView")
-                    ?? types.FirstOrDefault(x => x.Name == Path.GetFileNameWithoutExtension(xamlFile.Name));
-                if (type != null)
+                var control = RuntimeXamlPreviewLoader.LoadControl(
+                    xamlText,
+                    scriptAssembly,
+                    Path.GetFileNameWithoutExtension(xamlFile.Name),
+                    xamlFile.Path,
+                    xamlDiagnostics);
+                if (control is { })
                 {
-                    var rootInstance = Activator.CreateInstance(type);
-
-                    var control = LoadRuntimeXaml(xamlText, scriptAssembly, rootInstance, xamlDiagnostics);
-                    if (control is { })
-                    {
-                        ShowControl((Control)control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
-                    }
-                }
-                else
-                {
-                    var control = LoadRuntimeXaml(xamlText, scriptAssembly, null, xamlDiagnostics) as Control;
-                    if (control is { })
-                    {
-                        ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
-                    }
+                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
                 }
             }
             else
             {
-                var control = LoadRuntimeXaml(xamlText, null, null, xamlDiagnostics) as Control;
+                var control = RuntimeXamlPreviewLoader.LoadControl(
+                    xamlText,
+                    null,
+                    null,
+                    xamlFile.Path,
+                    xamlDiagnostics);
                 if (control is { })
                 {
                     ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
@@ -748,7 +764,18 @@ public partial class MainViewModel : ViewModelBase
         finally
         {
             _update = false;
+            if (_rerunRequested)
+            {
+                _rerunRequested = false;
+                RunActiveDocument();
+            }
         }
+    }
+
+    private static bool CanPreviewXamlFile(InMemoryProjectFile? file)
+    {
+        return file?.Kind == ProjectFileKind.Xaml &&
+               !file.Path.Equals("App.axaml", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryValidateXml(string? xaml, out string? errorMessage)
@@ -769,52 +796,6 @@ public partial class MainViewModel : ViewModelBase
         {
             errorMessage = exception.Message;
             return false;
-        }
-    }
-
-    private static object LoadRuntimeXaml(
-        string xaml,
-        Assembly? localAssembly,
-        object? rootInstance,
-        ICollection<RuntimeXamlDiagnostic> diagnostics)
-    {
-        var document = new RuntimeXamlLoaderDocument(rootInstance, xaml)
-        {
-            Document = PlaygroundXamlDocument
-        };
-
-        var configuration = new RuntimeXamlLoaderConfiguration
-        {
-            LocalAssembly = localAssembly,
-            CreateSourceInfo = true,
-            DiagnosticHandler = diagnostic =>
-            {
-                diagnostics.Add(diagnostic);
-                return diagnostic.Severity;
-            }
-        };
-
-        return AvaloniaRuntimeXamlLoader.Load(document, configuration);
-    }
-
-    private static Type? ResolveRootType(string xaml, Assembly assembly)
-    {
-        try
-        {
-            var document = XDocument.Parse(xaml, LoadOptions.SetLineInfo);
-            var className = document.Root?.Attributes()
-                .FirstOrDefault(static attribute =>
-                    attribute.Name.LocalName == "Class" &&
-                    attribute.Name.NamespaceName == "http://schemas.microsoft.com/winfx/2006/xaml")
-                ?.Value;
-
-            return string.IsNullOrWhiteSpace(className)
-                ? null
-                : assembly.GetType(className, throwOnError: false, ignoreCase: false);
-        }
-        catch
-        {
-            return null;
         }
     }
 
