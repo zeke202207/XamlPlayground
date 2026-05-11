@@ -672,7 +672,7 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
 
         if (selector.Path is { } path)
         {
-            return elements.FirstOrDefault(element => PathEquals(GetElementPath(element), path));
+            return FindElementByPath(root, path);
         }
 
         if (!string.IsNullOrWhiteSpace(selector.TypeName))
@@ -689,7 +689,7 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
     {
         var path = new Stack<int>();
         var current = element;
-        while (current.Parent is { } parent)
+        while (GetVisualParent(current) is { } parent)
         {
             var siblings = GetDirectChildElements(parent).ToArray();
             var currentNode = current.AsNode;
@@ -706,6 +706,39 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
         }
 
         return path.ToArray();
+    }
+
+    private static IXmlElementSyntax? FindElementByPath(IXmlElementSyntax root, IReadOnlyList<int> path)
+    {
+        var current = root;
+        foreach (var index in path)
+        {
+            var children = GetDirectChildElements(current).ToArray();
+            if (index < 0 || index >= children.Length)
+            {
+                return null;
+            }
+
+            current = children[index];
+        }
+
+        return current;
+    }
+
+    private static IXmlElementSyntax? GetVisualParent(IXmlElementSyntax element)
+    {
+        var parent = element.Parent;
+        while (parent is not null && IsMemberElement(parent))
+        {
+            if (!IsVisualContentMemberElement(parent))
+            {
+                return null;
+            }
+
+            parent = parent.Parent;
+        }
+
+        return parent;
     }
 
     private static bool PathEquals(IReadOnlyList<int> left, IReadOnlyList<int> right)

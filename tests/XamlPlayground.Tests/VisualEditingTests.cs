@@ -126,6 +126,38 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MutationEngine_ResolvesAnonymousVisualContentPropertyDescendantPaths()
+    {
+        var engine = new XamlMutationEngine();
+        var xaml = """
+                   <StackPanel xmlns="https://github.com/avaloniaui">
+                     <ContentControl>
+                       <ContentControl.Content>
+                         <Button Content="Save" />
+                       </ContentControl.Content>
+                     </ContentControl>
+                   </StackPanel>
+                   """;
+
+        var snapshot = engine.Analyze(xaml);
+        var changed = engine.SetProperty(xaml, XamlElementSelector.ByPath(0, 0), "Content", "Apply");
+
+        Assert.Empty(snapshot.Diagnostics);
+        Assert.Collection(
+            snapshot.Elements,
+            root => Assert.Equal(Array.Empty<int>(), root.Path),
+            contentControl => Assert.Equal(new[] { 0 }, contentControl.Path),
+            button =>
+            {
+                Assert.Equal("Button", button.TypeName);
+                Assert.Equal(new[] { 0, 0 }, button.Path);
+                Assert.Equal("Save", button.Attributes["Content"]);
+            });
+        Assert.Empty(changed.Diagnostics);
+        Assert.Contains("<Button Content=\"Apply\" />", changed.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MutationEngine_SetsAddsAndRemovesProperties()
     {
         var engine = new XamlMutationEngine();
