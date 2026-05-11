@@ -158,6 +158,64 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MutationEngine_InsertsIntoEmptyVisualContentPropertyElements()
+    {
+        var engine = new XamlMutationEngine();
+        var xaml = """
+                   <ContentControl xmlns="https://github.com/avaloniaui">
+                     <ContentControl.Content>
+                     </ContentControl.Content>
+                   </ContentControl>
+                   """;
+
+        var inserted = engine.InsertChild(xaml, XamlElementSelector.ByPath(), "<Button Content=\"Save\" />");
+
+        Assert.Empty(inserted.Diagnostics);
+        Assert.Contains(
+            """
+              <ContentControl.Content>
+                <Button Content="Save" />
+              </ContentControl.Content>
+            """,
+            NormalizeLineEndings(inserted.Text),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "</ContentControl.Content>\n  <Button Content=\"Save\" />",
+            NormalizeLineEndings(inserted.Text),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MutationEngine_DuplicatesVisualContentPropertyChildrenInsideWrapper()
+    {
+        var engine = new XamlMutationEngine();
+        var xaml = """
+                   <StackPanel xmlns="https://github.com/avaloniaui">
+                     <StackPanel.Children>
+                       <Button Content="Save" />
+                     </StackPanel.Children>
+                   </StackPanel>
+                   """;
+
+        var duplicated = engine.DuplicateElement(xaml, XamlElementSelector.ByPath(0));
+
+        Assert.Empty(duplicated.Diagnostics);
+        Assert.Contains(
+            """
+              <StackPanel.Children>
+                <Button Content="Save" />
+                <Button Content="Save" />
+              </StackPanel.Children>
+            """,
+            NormalizeLineEndings(duplicated.Text),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "</StackPanel.Children>\n  <Button Content=\"Save\" />",
+            NormalizeLineEndings(duplicated.Text),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MutationEngine_SetsAddsAndRemovesProperties()
     {
         var engine = new XamlMutationEngine();

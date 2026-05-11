@@ -131,6 +131,14 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
             }
 
             var childElements = GetDirectChildElements(parent).ToArray();
+            var visualContentMember = FindDirectVisualContentMemberElement(parent);
+            if (childElements.Length == 0 &&
+                visualContentMember is not null &&
+                IsEmptyElementContent(xaml, visualContentMember))
+            {
+                return InsertChildIntoEmptyElementContent(xaml, visualContentMember, child, newLine);
+            }
+
             if (childIndex is { } index)
             {
                 if (index >= 0 && index < childElements.Length)
@@ -147,6 +155,12 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
                     element.StartTag.GreaterThanToken.End,
                     element.EndTag.Span.Start - element.StartTag.GreaterThanToken.End,
                     $"{newLine}{indentedChild}{newLine}{parentIndent}");
+            }
+
+            if (visualContentMember is not null &&
+                childElements.Length > 0)
+            {
+                return AppendChildToElementContent(xaml, visualContentMember, child, newLine);
             }
 
             var endTagLineStart = GetLineStart(xaml, element.EndTag.Span.Start);
@@ -237,7 +251,8 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
             }
 
             var target = FindElement(document.RootSyntax, selector);
-            if (target?.Parent is not { } parent)
+            if (target is null ||
+                GetVisualParent(target) is not { } parent)
             {
                 return CreateResult(xaml, "The root element cannot be duplicated.");
             }
@@ -803,6 +818,88 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
     {
         return GetDirectElementContent(element).FirstOrDefault(child =>
             string.Equals(child.NameNode.FullName, elementName, StringComparison.Ordinal));
+    }
+
+    private static IXmlElementSyntax? FindDirectVisualContentMemberElement(IXmlElementSyntax element)
+    {
+        return GetDirectElementContent(element).FirstOrDefault(static child =>
+            IsMemberElement(child) &&
+            IsVisualContentMemberElement(child));
+    }
+
+    private static bool IsEmptyElementContent(string xaml, IXmlElementSyntax element)
+    {
+        return element.AsNode switch
+        {
+            XmlEmptyElementSyntax => true,
+            XmlElementSyntax normalElement => IsWhitespaceOnly(
+                xaml,
+                normalElement.StartTag.GreaterThanToken.End,
+                normalElement.EndTag.Span.Start),
+            _ => false
+        };
+    }
+
+    private static string InsertChildIntoEmptyElementContent(
+        string xaml,
+        IXmlElementSyntax element,
+        string child,
+        string newLine)
+    {
+        var parentIndent = GetLineIndent(xaml, element.AsNode.Span.Start);
+        var childIndent = GetChildIndent(xaml, element, parentIndent);
+        var indentedChild = IndentBlock(child, childIndent, newLine);
+
+        if (element.AsNode is XmlEmptyElementSyntax emptyElement)
+        {
+            var replacement = $">{newLine}{indentedChild}{newLine}{parentIndent}</{emptyElement.Name}>";
+            var closeStart = GetEmptyElementCloseStart(xaml, emptyElement);
+            return ReplaceRange(
+                xaml,
+                closeStart,
+                emptyElement.SlashGreaterThanToken.End - closeStart,
+                replacement);
+        }
+
+        if (element.AsNode is not XmlElementSyntax normalElement)
+        {
+            return xaml;
+        }
+
+        return ReplaceRange(
+            xaml,
+            normalElement.StartTag.GreaterThanToken.End,
+            normalElement.EndTag.Span.Start - normalElement.StartTag.GreaterThanToken.End,
+            $"{newLine}{indentedChild}{newLine}{parentIndent}");
+    }
+
+    private static string AppendChildToElementContent(
+        string xaml,
+        IXmlElementSyntax element,
+        string child,
+        string newLine)
+    {
+        if (element.AsNode is XmlEmptyElementSyntax)
+        {
+            return InsertChildIntoEmptyElementContent(xaml, element, child, newLine);
+        }
+
+        if (element.AsNode is not XmlElementSyntax normalElement)
+        {
+            return xaml;
+        }
+
+        var parentIndent = GetLineIndent(xaml, element.AsNode.Span.Start);
+        var childIndent = GetChildIndent(xaml, element, parentIndent);
+        var indentedChild = IndentBlock(child, childIndent, newLine);
+        var endTagLineStart = GetLineStart(xaml, normalElement.EndTag.Span.Start);
+        if (endTagLineStart > normalElement.StartTag.GreaterThanToken.End &&
+            IsWhitespaceOnly(xaml, endTagLineStart, normalElement.EndTag.Span.Start))
+        {
+            return xaml.Insert(endTagLineStart, $"{indentedChild}{newLine}");
+        }
+
+        return xaml.Insert(normalElement.EndTag.Span.Start, $"{newLine}{indentedChild}{newLine}{parentIndent}");
     }
 
     private static bool IsMemberElement(IXmlElementSyntax element)
