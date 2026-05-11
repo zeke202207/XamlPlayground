@@ -348,9 +348,10 @@
 
       <DataTemplate DataType="vm:ControlThemePartsDockViewModel"
                     x:DataType="vm:ControlThemePartsDockViewModel">
-        <Grid RowDefinitions="*,*"
+        <Grid RowDefinitions="*,Auto,*,*"
               RowSpacing="6">
-          <ListBox ItemsSource="{Binding Shell.ThemeTemplateParts}">
+          <ListBox ItemsSource="{Binding Shell.ThemeTemplateParts}"
+                   SelectedItem="{Binding Shell.SelectedThemeTemplatePart, Mode=TwoWay}">
             <ListBox.ItemTemplate>
               <DataTemplate DataType="visualVm:ThemeTemplatePartViewModel"
                             x:DataType="visualVm:ThemeTemplatePartViewModel">
@@ -360,7 +361,50 @@
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
-          <ListBox Grid.Row="1"
+          <Grid Grid.Row="1"
+                RowDefinitions="Auto,Auto"
+                RowSpacing="6">
+            <ListBox ItemsSource="{Binding Shell.ThemePreviewStates}"
+                     SelectedItem="{Binding Shell.SelectedThemePreviewState, Mode=TwoWay}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto">
+              <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ListBox.ItemsPanel>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="visualVm:ThemePreviewStateViewModel"
+                              x:DataType="visualVm:ThemePreviewStateViewModel">
+                  <TextBlock Text="{Binding Title}"
+                             Margin="4,2" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <Grid Grid.Row="1"
+                  ColumnDefinitions="*,*,Auto"
+                  ColumnSpacing="6">
+              <TextBox Text="{Binding Shell.ThemeTemplatePartSetterPropertyName, Mode=TwoWay}"
+                       PlaceholderText="Part property" />
+              <TextBox Grid.Column="1"
+                       Text="{Binding Shell.ThemeTemplatePartSetterValue, Mode=TwoWay}"
+                       PlaceholderText="Value" />
+              <Button Grid.Column="2"
+                      Content="Set"
+                      Command="{Binding Shell.ApplyThemeTemplatePartSetterCommand}" />
+            </Grid>
+          </Grid>
+          <ListBox Grid.Row="2"
+                   ItemsSource="{Binding Shell.ThemeTemplatePartSelectors}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="visualVm:ThemeTemplatePartSelectorViewModel"
+                            x:DataType="visualVm:ThemeTemplatePartSelectorViewModel">
+                <TextBlock Text="{Binding Title}"
+                           Margin="0,3"
+                           TextTrimming="CharacterEllipsis" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <ListBox Grid.Row="3"
                    ItemsSource="{Binding Shell.ThemeTemplateBindings}">
             <ListBox.ItemTemplate>
               <DataTemplate DataType="visualVm:ThemeTemplateBindingViewModel"

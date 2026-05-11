@@ -296,6 +296,37 @@ public sealed class ThemeResourceDiagnosticViewModel : ViewModelBase
     public string Title => $"{Severity}: {Message}";
 }
 
+public sealed class ThemeResourceDeleteChangeViewModel : ViewModelBase
+{
+    public ThemeResourceDeleteChangeViewModel(
+        string filePath,
+        string changeKind,
+        int removedLineCount,
+        int addedLineCount,
+        string diff)
+    {
+        FilePath = filePath;
+        ChangeKind = changeKind;
+        RemovedLineCount = removedLineCount;
+        AddedLineCount = addedLineCount;
+        Diff = diff;
+    }
+
+    public string FilePath { get; }
+
+    public string ChangeKind { get; }
+
+    public int RemovedLineCount { get; }
+
+    public int AddedLineCount { get; }
+
+    public string Diff { get; }
+
+    public string Title => $"{ChangeKind}: {FilePath}";
+
+    public string Summary => $"{RemovedLineCount} removed, {AddedLineCount} added";
+}
+
 public sealed class ThemePreviewStateViewModel : ViewModelBase
 {
     public ThemePreviewStateViewModel(string state, bool hasSelectors)
@@ -355,6 +386,37 @@ public sealed class ThemeTemplatePartViewModel : ViewModelBase
     public string Title => Line is { } line
         ? $"{Name} - {Type} : line {line}"
         : $"{Name} - {Type}";
+}
+
+public sealed class ThemeTemplatePartSelectorViewModel : ViewModelBase
+{
+    public ThemeTemplatePartSelectorViewModel(
+        string partName,
+        string partType,
+        string state,
+        string selector,
+        int? line)
+    {
+        PartName = partName;
+        PartType = partType;
+        State = state;
+        Selector = selector;
+        Line = line;
+    }
+
+    public string PartName { get; }
+
+    public string PartType { get; }
+
+    public string State { get; }
+
+    public string Selector { get; }
+
+    public int? Line { get; }
+
+    public string Title => Line is { } line
+        ? $"{Selector} : line {line}"
+        : Selector;
 }
 
 public sealed class ThemeTemplateBindingViewModel : ViewModelBase

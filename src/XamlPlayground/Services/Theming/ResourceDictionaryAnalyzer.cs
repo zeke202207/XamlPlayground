@@ -138,7 +138,7 @@ public static class ResourceDictionaryAnalyzer
             yield return new ThemeResourceDefinition(
                 key,
                 element.Name.LocalName,
-                element.Attribute("TargetType")?.Value,
+                element.Attribute("TargetType")?.Value ?? element.Attribute("DataType")?.Value,
                 document.Path,
                 GetLineNumber(element));
         }

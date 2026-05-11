@@ -12,6 +12,7 @@ public sealed record ControlThemeAnalysis(
     string TargetType,
     IReadOnlyList<ControlThemeTemplatePart> Parts,
     IReadOnlyList<ControlThemeTemplateBinding> TemplateBindings,
+    IReadOnlyList<ControlThemeTemplatePartSelector> PartSelectors,
     IReadOnlyList<ControlThemeStateSelector> StateSelectors,
     IReadOnlyList<string> AvailableStates)
 {
@@ -20,6 +21,7 @@ public sealed record ControlThemeAnalysis(
         string.Empty,
         Array.Empty<ControlThemeTemplatePart>(),
         Array.Empty<ControlThemeTemplateBinding>(),
+        Array.Empty<ControlThemeTemplatePartSelector>(),
         Array.Empty<ControlThemeStateSelector>(),
         Array.Empty<string>());
 }
@@ -33,6 +35,13 @@ public sealed record ControlThemeTemplateBinding(
     string Property,
     int Line,
     string Snippet);
+
+public sealed record ControlThemeTemplatePartSelector(
+    string PartName,
+    string PartType,
+    string State,
+    string Selector,
+    int? Line);
 
 public sealed record ControlThemeStateSelector(
     string State,
@@ -80,6 +89,7 @@ public static class ControlThemeAnalyzer
             return ControlThemeAnalysis.Empty;
         }
 
+        var parts = FindTemplateParts(theme).ToArray();
         var stateSelectors = FindStateSelectors(theme).ToArray();
         var availableStates = stateSelectors
             .Select(static selector => selector.State)
@@ -91,8 +101,9 @@ public static class ControlThemeAnalyzer
         return new ControlThemeAnalysis(
             themeKey,
             FluentControlThemeCatalog.GetLocalName(theme.Attribute("TargetType")?.Value ?? string.Empty),
-            FindTemplateParts(theme).ToArray(),
+            parts,
             FindTemplateBindings(theme).ToArray(),
+            FindTemplatePartSelectors(theme, parts).ToArray(),
             stateSelectors,
             availableStates);
     }
@@ -148,6 +159,60 @@ public static class ControlThemeAnalyzer
                     GetLineNumber(style));
             }
         }
+    }
+
+    private static IEnumerable<ControlThemeTemplatePartSelector> FindTemplatePartSelectors(
+        XElement theme,
+        IReadOnlyList<ControlThemeTemplatePart> parts)
+    {
+        if (parts.Count == 0)
+        {
+            yield break;
+        }
+
+        foreach (var style in theme.Descendants().Where(static element => element.Name.LocalName == "Style"))
+        {
+            var selector = style.Attribute("Selector")?.Value;
+            if (string.IsNullOrWhiteSpace(selector))
+            {
+                continue;
+            }
+
+            foreach (var part in parts)
+            {
+                if (!SelectorTargetsTemplatePart(selector, part))
+                {
+                    continue;
+                }
+
+                yield return new ControlThemeTemplatePartSelector(
+                    part.Name,
+                    part.Type,
+                    ResolveSelectorState(selector),
+                    selector,
+                    GetLineNumber(style));
+            }
+        }
+    }
+
+    private static bool SelectorTargetsTemplatePart(string selector, ControlThemeTemplatePart part)
+    {
+        var partNameSelector = $"#{part.Name}";
+        if (selector.Contains(partNameSelector, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var typedPartSelector = $"{part.Type}#{part.Name}";
+        return selector.Contains(typedPartSelector, StringComparison.Ordinal);
+    }
+
+    private static string ResolveSelectorState(string selector)
+    {
+        var match = PseudoClassRegex.Match(selector);
+        return match.Success
+            ? match.Groups["state"].Value
+            : "normal";
     }
 
     private static int? GetLineNumber(XObject value)

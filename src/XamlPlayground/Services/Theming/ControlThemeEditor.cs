@@ -24,6 +24,28 @@ public static class ControlThemeEditor
             return new ThemeResourceEditResult(false, xaml, "Select a non-normal state and a property.");
         }
 
+        return SetSelectorSetter(
+            xaml,
+            themeKey,
+            $"^:{state.TrimStart(':')}",
+            propertyName,
+            value);
+    }
+
+    public static ThemeResourceEditResult SetSelectorSetter(
+        string xaml,
+        string themeKey,
+        string selector,
+        string propertyName,
+        string value)
+    {
+        if (string.IsNullOrWhiteSpace(themeKey) ||
+            string.IsNullOrWhiteSpace(selector) ||
+            string.IsNullOrWhiteSpace(propertyName))
+        {
+            return new ThemeResourceEditResult(false, xaml, "Select a selector and a property.");
+        }
+
         var parse = TryParse(xaml);
         if (parse.Error is not null)
         {
@@ -36,7 +58,7 @@ public static class ControlThemeEditor
             return new ThemeResourceEditResult(false, xaml, $"ControlTheme '{themeKey}' was not found.");
         }
 
-        var selector = $"^:{state.TrimStart(':')}";
+        selector = selector.Trim();
         var style = theme
             .Elements()
             .FirstOrDefault(element =>
