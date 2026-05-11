@@ -172,11 +172,12 @@ public sealed class VisualEditingTests
 
         Assert.Empty(inserted.Diagnostics);
         Assert.Contains(
-            """
-              <ContentControl.Content>
-                <Button Content="Save" />
-              </ContentControl.Content>
-            """,
+            NormalizeLineEndings(
+                """
+                  <ContentControl.Content>
+                    <Button Content="Save" />
+                  </ContentControl.Content>
+                """),
             NormalizeLineEndings(inserted.Text),
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -201,12 +202,13 @@ public sealed class VisualEditingTests
 
         Assert.Empty(duplicated.Diagnostics);
         Assert.Contains(
-            """
-              <StackPanel.Children>
-                <Button Content="Save" />
-                <Button Content="Save" />
-              </StackPanel.Children>
-            """,
+            NormalizeLineEndings(
+                """
+                  <StackPanel.Children>
+                    <Button Content="Save" />
+                    <Button Content="Save" />
+                  </StackPanel.Children>
+                """),
             NormalizeLineEndings(duplicated.Text),
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -1951,16 +1953,21 @@ public sealed class VisualEditingTests
                 var southEastThumb = Assert.Single(
                     preview.GetVisualDescendants().OfType<Border>(),
                     border => border.Name == "ResizeSouthEastThumb");
+                var designerOverlay = Assert.Single(
+                    preview.GetVisualDescendants().OfType<Canvas>(),
+                    canvas => canvas.Name == "DesignerOverlay");
+                var thumbTopLeft = southEastThumb.TranslatePoint(default, previewSurface);
+                Assert.NotNull(thumbTopLeft);
                 Assert.True(southEastThumb.IsHitTestVisible);
 
                 var pointer = new Avalonia.Input.Pointer(
                     Avalonia.Input.Pointer.GetNextFreeId(),
                     PointerType.Mouse,
                     isPrimary: true);
-                var start = new Point(0, 0);
+                var start = thumbTopLeft.Value + new Vector(southEastThumb.Bounds.Width / 2, southEastThumb.Bounds.Height / 2);
                 var end = start + new Vector(30, 14);
-                southEastThumb.RaiseEvent(CreatePointerPressedArgs(southEastThumb, preview, pointer, start));
-                preview.RaiseEvent(CreatePointerMovedArgs(preview, preview, pointer, end));
+                southEastThumb.RaiseEvent(CreatePointerPressedArgs(southEastThumb, previewSurface, pointer, start));
+                designerOverlay.RaiseEvent(CreatePointerMovedArgs(designerOverlay, previewSurface, pointer, end));
                 PumpLayout(window);
 
                 Assert.Equal(150, actionButton.Width);
@@ -1968,7 +1975,7 @@ public sealed class VisualEditingTests
                 Assert.DoesNotContain("Width=\"150\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
                 Assert.DoesNotContain("Height=\"54\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
 
-                preview.RaiseEvent(CreatePointerReleasedArgs(preview, preview, pointer, end));
+                designerOverlay.RaiseEvent(CreatePointerReleasedArgs(designerOverlay, previewSurface, pointer, end));
                 PumpLayout(window);
 
                 Assert.Contains("Width=\"150\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
