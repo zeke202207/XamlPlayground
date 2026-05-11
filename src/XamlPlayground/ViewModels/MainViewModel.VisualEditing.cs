@@ -117,6 +117,7 @@ public partial class MainViewModel
     [ObservableProperty] private ControlThemeDefinitionViewModel? _selectedControlTheme;
     [ObservableProperty] private ObservableCollection<FluentControlThemeTemplateViewModel> _fluentControlThemeTemplates = new();
     [ObservableProperty] private ObservableCollection<FluentControlThemeTemplateViewModel> _filteredFluentControlThemeTemplates = new();
+    [ObservableProperty] private FluentControlThemeTemplateViewModel? _selectedFluentControlThemeTemplate;
     [ObservableProperty] private string _controlThemeSearchText = string.Empty;
     [ObservableProperty] private string _controlThemeSourceStatus = "Fluent theme source not loaded.";
     [ObservableProperty] private string _controlThemeSelectedTargetType = "No control selected.";
@@ -404,6 +405,11 @@ public partial class MainViewModel
     {
         RefreshSelectedControlThemeAnalysis();
         NotifyControlThemeCommandsChanged();
+    }
+
+    partial void OnSelectedFluentControlThemeTemplateChanged(FluentControlThemeTemplateViewModel? value)
+    {
+        RefreshControlThemeSelectionState();
     }
 
     partial void OnControlThemeSearchTextChanged(string value)
@@ -2556,6 +2562,12 @@ public partial class MainViewModel
         RefreshThemeResourceFilters();
 
         SelectedControlTheme = SelectFilteredControlTheme(preferredThemeKey ?? SelectedControlTheme?.Key);
+        if (SelectedFluentControlThemeTemplate is not null &&
+            !FilteredFluentControlThemeTemplates.Contains(SelectedFluentControlThemeTemplate))
+        {
+            SelectedFluentControlThemeTemplate = null;
+        }
+
         if (SelectedThemeResource is null ||
             !FilteredThemeResources.Any(resource => ReferenceEquals(resource, SelectedThemeResource)))
         {
@@ -2673,7 +2685,9 @@ public partial class MainViewModel
         }
         else
         {
-            ControlThemeSelectedTargetType = "No control selected.";
+            ControlThemeSelectedTargetType = SelectedFluentControlThemeTemplate is { } template
+                ? $"Fluent template: {template.TargetType}"
+                : "No control selected.";
         }
 
         NotifyControlThemeCommandsChanged();
@@ -2934,21 +2948,28 @@ public partial class MainViewModel
 
     private bool CanCreateCustomControlTheme()
     {
-        return ActiveProject is not null &&
-               TryGetSelectedControlThemeTargetType(out var targetType) &&
-               _controlThemeCatalog.FindDefaultTemplate(targetType) is not null;
+        return ActiveProject is not null && TryResolveControlThemeTemplateForCreate(
+            out _,
+            out _,
+            out _);
     }
 
     private void CreateCustomControlTheme()
     {
-        if (ActiveProject is not { } project ||
-            !TryGetSelectedControlThemeTargetType(out var targetType))
+        if (ActiveProject is not { } project)
         {
-            ControlThemeStatus = "Select a preview control first.";
             return;
         }
 
-        var template = _controlThemeCatalog.FindDefaultTemplate(targetType);
+        if (!TryResolveControlThemeTemplateForCreate(
+                out var template,
+                out var targetType,
+                out var applyToSelectedControl))
+        {
+            ControlThemeStatus = "Select a preview control or Fluent source template first.";
+            return;
+        }
+
         if (template is null)
         {
             ControlThemeStatus = $"No Fluent ControlTheme template found for {targetType}.";
@@ -2971,16 +2992,48 @@ public partial class MainViewModel
         if (createdTheme is not null)
         {
             SelectedControlTheme = createdTheme;
-            ApplyControlTheme(createdTheme);
+            if (applyToSelectedControl)
+            {
+                ApplyControlTheme(createdTheme);
+            }
         }
 
-        if (ownerFile is not null)
+        if (applyToSelectedControl && ownerFile is not null)
         {
             EnterThemeEditScope(ownerFile, themeKey);
         }
 
         OpenWorkspaceFile(themeFile);
         ControlThemeStatus = $"Created {themeKey} from Fluent {targetType}. {ControlThemes.Count} custom theme(s) available.";
+    }
+
+    private bool TryResolveControlThemeTemplateForCreate(
+        [NotNullWhen(true)] out FluentControlThemeTemplate? template,
+        [NotNullWhen(true)] out string? targetType,
+        out bool applyToSelectedControl)
+    {
+        if (TryGetSelectedControlThemeTargetType(out targetType))
+        {
+            template = _controlThemeCatalog.FindDefaultTemplate(targetType);
+            applyToSelectedControl = template is not null;
+            return template is not null;
+        }
+
+        if (SelectedFluentControlThemeTemplate is not { } selectedTemplate)
+        {
+            template = null;
+            targetType = null;
+            applyToSelectedControl = false;
+            return false;
+        }
+
+        template = _controlThemeCatalog.Templates.FirstOrDefault(candidate =>
+            string.Equals(candidate.Key, selectedTemplate.Key, StringComparison.Ordinal) &&
+            string.Equals(FluentControlThemeCatalog.GetLocalName(candidate.TargetType), selectedTemplate.TargetType, StringComparison.Ordinal) &&
+            string.Equals(candidate.SourcePath, selectedTemplate.SourcePath, StringComparison.OrdinalIgnoreCase));
+        targetType = selectedTemplate.TargetType;
+        applyToSelectedControl = false;
+        return template is not null;
     }
 
     private void ClearControlThemeSearchFilter()

@@ -426,7 +426,8 @@
 
       <DataTemplate DataType="vm:ControlThemeFluentDockViewModel"
                     x:DataType="vm:ControlThemeFluentDockViewModel">
-        <ListBox ItemsSource="{Binding Shell.FilteredFluentControlThemeTemplates}">
+        <ListBox ItemsSource="{Binding Shell.FilteredFluentControlThemeTemplates}"
+                 SelectedItem="{Binding Shell.SelectedFluentControlThemeTemplate, Mode=TwoWay}">
           <ListBox.ItemTemplate>
             <DataTemplate DataType="visualVm:FluentControlThemeTemplateViewModel"
                           x:DataType="visualVm:FluentControlThemeTemplateViewModel">
