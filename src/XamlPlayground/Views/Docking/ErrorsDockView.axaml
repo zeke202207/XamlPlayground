@@ -6,7 +6,7 @@
              mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="160"
              x:Class="XamlPlayground.Views.Docking.ErrorsDockView"
              x:CompileBindings="True" x:DataType="vm:ErrorsDockViewModel">
-  <TextBox Text="{Binding Shell.LastErrorMessage, Mode=OneWay}"
+  <TextBox Text="{Binding LastErrorMessage, Mode=OneWay}"
            IsReadOnly="True"
            AcceptsReturn="True"
            TextWrapping="Wrap"

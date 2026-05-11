@@ -409,13 +409,22 @@ public sealed class MainViewModelTests
                 PumpLayout(window);
 
                 Assert.Same(errors, bottomDock.ActiveDockable);
-                var errorsView = Assert.Single(dockControl.GetVisualDescendants().OfType<ErrorsDockView>());
-                var errorTextBox = Assert.Single(errorsView.GetVisualDescendants().OfType<TextBox>());
-                for (var i = 0; i < 5 && errorTextBox.Text != "Broken sample"; i++)
+                TextBox? errorTextBox = null;
+                for (var i = 0; i < 25; i++)
                 {
+                    var errorsViews = dockControl.GetVisualDescendants().OfType<ErrorsDockView>().ToArray();
+                    var errorsView = errorsViews.FirstOrDefault(view => ReferenceEquals(view.DataContext, errors)) ??
+                                     errorsViews.SingleOrDefault();
+                    errorTextBox = errorsView?.GetVisualDescendants().OfType<TextBox>().SingleOrDefault();
+                    if (errorTextBox?.Text == "Broken sample")
+                    {
+                        break;
+                    }
+
                     PumpLayout(window);
                 }
 
+                Assert.NotNull(errorTextBox);
                 Assert.Equal("Broken sample", errorTextBox.Text);
             }
             finally

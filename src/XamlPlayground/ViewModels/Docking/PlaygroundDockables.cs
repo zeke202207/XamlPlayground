@@ -278,7 +278,7 @@ public sealed class DiagnosticToolDockViewModel : Tool
     public DevToolsViewKind ViewKind { get; }
 }
 
-public sealed class ErrorsDockViewModel : Tool
+public sealed class ErrorsDockViewModel : Tool, IDisposable
 {
     public ErrorsDockViewModel(MainViewModel shell)
     {
@@ -287,7 +287,23 @@ public sealed class ErrorsDockViewModel : Tool
         Title = "Errors";
         CanClose = false;
         KeepPinnedDockableVisible = true;
+        shell.PropertyChanged += ShellOnPropertyChanged;
     }
 
     public MainViewModel Shell { get; }
+
+    public string? LastErrorMessage => Shell.LastErrorMessage;
+
+    public void Dispose()
+    {
+        Shell.PropertyChanged -= ShellOnPropertyChanged;
+    }
+
+    private void ShellOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.LastErrorMessage))
+        {
+            OnPropertyChanged(nameof(LastErrorMessage));
+        }
+    }
 }
