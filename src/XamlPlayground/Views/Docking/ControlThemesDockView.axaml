@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:dock="using:Dock.Avalonia.Controls"
              xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
              xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
              mc:Ignorable="d" d:DesignWidth="280" d:DesignHeight="600"
@@ -135,8 +136,15 @@
                  Opacity="0.75" />
     </Border>
 
-    <TabControl Margin="6">
-      <TabItem Header="Custom">
+    <dock:DockControl Margin="6"
+                      Layout="{Binding DockLayout}"
+                      Factory="{Binding DockFactory}"
+                      InitializeFactory="False"
+                      InitializeLayout="False"
+                      EnableManagedWindowLayer="True">
+      <dock:DockControl.DataTemplates>
+      <DataTemplate DataType="vm:ControlThemeCustomDockViewModel"
+                    x:DataType="vm:ControlThemeCustomDockViewModel">
         <ListBox ItemsSource="{Binding Shell.FilteredControlThemes}"
                  SelectedItem="{Binding Shell.SelectedControlTheme, Mode=TwoWay}">
           <ListBox.ItemTemplate>
@@ -154,9 +162,10 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
-      </TabItem>
+      </DataTemplate>
 
-      <TabItem Header="Resources">
+      <DataTemplate DataType="vm:ControlThemeResourcesDockViewModel"
+                    x:DataType="vm:ControlThemeResourcesDockViewModel">
         <DockPanel>
           <StackPanel DockPanel.Dock="Top"
                       Orientation="Horizontal"
@@ -219,9 +228,10 @@
             </ListBox.ItemTemplate>
           </ListBox>
         </DockPanel>
-      </TabItem>
+      </DataTemplate>
 
-      <TabItem Header="Usages">
+      <DataTemplate DataType="vm:ControlThemeUsagesDockViewModel"
+                    x:DataType="vm:ControlThemeUsagesDockViewModel">
         <ListBox ItemsSource="{Binding Shell.SelectedThemeResourceUsages}">
           <ListBox.ItemTemplate>
             <DataTemplate DataType="visualVm:ThemeResourceUsageViewModel"
@@ -242,9 +252,10 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
-      </TabItem>
+      </DataTemplate>
 
-      <TabItem Header="Diagnostics">
+      <DataTemplate DataType="vm:ControlThemeDiagnosticsDockViewModel"
+                    x:DataType="vm:ControlThemeDiagnosticsDockViewModel">
         <ListBox ItemsSource="{Binding Shell.FilteredThemeResourceDiagnostics}">
           <ListBox.ItemTemplate>
             <DataTemplate DataType="visualVm:ThemeResourceDiagnosticViewModel"
@@ -261,9 +272,10 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
-      </TabItem>
+      </DataTemplate>
 
-      <TabItem Header="States">
+      <DataTemplate DataType="vm:ControlThemeStatesDockViewModel"
+                    x:DataType="vm:ControlThemeStatesDockViewModel">
         <Grid RowDefinitions="Auto,Auto,*"
               RowSpacing="6">
           <ListBox ItemsSource="{Binding Shell.ThemePreviewStates}"
@@ -306,9 +318,10 @@
             </ListBox.ItemTemplate>
           </ListBox>
         </Grid>
-      </TabItem>
+      </DataTemplate>
 
-      <TabItem Header="Variants">
+      <DataTemplate DataType="vm:ControlThemeVariantsDockViewModel"
+                    x:DataType="vm:ControlThemeVariantsDockViewModel">
         <DockPanel>
           <Button DockPanel.Dock="Top"
                   Margin="0,0,0,6"
@@ -331,9 +344,10 @@
             </ListBox.ItemTemplate>
           </ListBox>
         </DockPanel>
-      </TabItem>
+      </DataTemplate>
 
-      <TabItem Header="Parts">
+      <DataTemplate DataType="vm:ControlThemePartsDockViewModel"
+                    x:DataType="vm:ControlThemePartsDockViewModel">
         <Grid RowDefinitions="*,*"
               RowSpacing="6">
           <ListBox ItemsSource="{Binding Shell.ThemeTemplateParts}">
@@ -364,9 +378,10 @@
             </ListBox.ItemTemplate>
           </ListBox>
         </Grid>
-      </TabItem>
+      </DataTemplate>
 
-      <TabItem Header="Fluent">
+      <DataTemplate DataType="vm:ControlThemeFluentDockViewModel"
+                    x:DataType="vm:ControlThemeFluentDockViewModel">
         <ListBox ItemsSource="{Binding Shell.FilteredFluentControlThemeTemplates}">
           <ListBox.ItemTemplate>
             <DataTemplate DataType="visualVm:FluentControlThemeTemplateViewModel"
@@ -383,7 +398,8 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
-      </TabItem>
-    </TabControl>
+      </DataTemplate>
+      </dock:DockControl.DataTemplates>
+    </dock:DockControl>
   </DockPanel>
 </UserControl>

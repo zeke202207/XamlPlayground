@@ -251,6 +251,7 @@ public sealed class MainViewModelTests
             diagnosticTool => AssertDiagnosticTool(diagnosticTool, "DiagnosticsEvents", "Events", DevToolsViewKind.Events),
             diagnosticTool => AssertDiagnosticTool(diagnosticTool, "DiagnosticsResources", "Resources", DevToolsViewKind.Resources),
             diagnosticTool => AssertDiagnosticTool(diagnosticTool, "DiagnosticsAssets", "Assets", DevToolsViewKind.Assets));
+        AssertControlThemeTools(controlThemes);
         Assert.All(diagnosticTreeTools, AssertDiagnosticTreeSegments);
 
         var factory = Assert.IsType<PlaygroundDockFactory>(viewModel.DockFactory);
@@ -269,6 +270,50 @@ public sealed class MainViewModelTests
         Assert.Same(diagnosticTools[1], contextLocator["DiagnosticsResources"]());
         Assert.Same(diagnosticTools[2], contextLocator["DiagnosticsAssets"]());
         Assert.Same(errors, contextLocator["Errors"]());
+    }
+
+    [Fact]
+    public void ControlThemesDockView_RendersNestedDockTools()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            EnsureDockTestApplicationResources();
+
+            var viewModel = new MainViewModel(null);
+            var root = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+            var controlThemes = Assert.Single(Enumerate(root).OfType<ControlThemesDockViewModel>());
+            var view = new ControlThemesDockView
+            {
+                Width = 360,
+                Height = 640,
+                DataContext = controlThemes
+            };
+            var window = new Window
+            {
+                Width = 380,
+                Height = 680,
+                Content = view
+            };
+
+            try
+            {
+                window.Show();
+                PumpLayout(window);
+
+                Assert.Contains(
+                    view.GetVisualDescendants().OfType<DockControl>(),
+                    dockControl => ReferenceEquals(dockControl.Layout, controlThemes.DockLayout));
+                Assert.Contains(
+                    view.GetVisualDescendants().OfType<ListBox>(),
+                    listBox => ReferenceEquals(listBox.ItemsSource, viewModel.FilteredControlThemes));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
     }
 
     [Fact]
@@ -1031,6 +1076,49 @@ public sealed class MainViewModelTests
         Assert.Equal(id, diagnosticTool.Id);
         Assert.Equal(title, diagnosticTool.Title);
         Assert.Equal(viewKind, diagnosticTool.ViewKind);
+    }
+
+    private static void AssertControlThemeTools(ControlThemesDockViewModel controlThemes)
+    {
+        var root = Assert.IsAssignableFrom<IRootDock>(controlThemes.DockLayout);
+        Assert.NotNull(controlThemes.DockFactory);
+        Assert.Equal(DockFloatingWindowHostMode.Default, root.FloatingWindowHostMode);
+
+        var tools = Enumerate(root).OfType<ControlThemePanelDockViewModel>().ToList();
+        Assert.Collection(
+            tools,
+            tool => AssertControlThemeTool<ControlThemeCustomDockViewModel>(tool, "ControlThemeCustom", "Custom", controlThemes.Shell),
+            tool => AssertControlThemeTool<ControlThemeResourcesDockViewModel>(tool, "ControlThemeResources", "Resources", controlThemes.Shell),
+            tool => AssertControlThemeTool<ControlThemeUsagesDockViewModel>(tool, "ControlThemeUsages", "Usages", controlThemes.Shell),
+            tool => AssertControlThemeTool<ControlThemeDiagnosticsDockViewModel>(tool, "ControlThemeDiagnostics", "Diagnostics", controlThemes.Shell),
+            tool => AssertControlThemeTool<ControlThemeStatesDockViewModel>(tool, "ControlThemeStates", "States", controlThemes.Shell),
+            tool => AssertControlThemeTool<ControlThemeVariantsDockViewModel>(tool, "ControlThemeVariants", "Variants", controlThemes.Shell),
+            tool => AssertControlThemeTool<ControlThemePartsDockViewModel>(tool, "ControlThemeParts", "Parts", controlThemes.Shell),
+            tool => AssertControlThemeTool<ControlThemeFluentDockViewModel>(tool, "ControlThemeFluent", "Fluent", controlThemes.Shell));
+
+        var factory = Assert.IsType<ControlThemesDockFactory>(controlThemes.DockFactory);
+        Assert.NotNull(factory.ContextLocator);
+        Assert.Same(tools[0], factory.ContextLocator["ControlThemeCustom"]());
+        Assert.Same(tools[1], factory.ContextLocator["ControlThemeResources"]());
+        Assert.Same(tools[2], factory.ContextLocator["ControlThemeUsages"]());
+        Assert.Same(tools[3], factory.ContextLocator["ControlThemeDiagnostics"]());
+        Assert.Same(tools[4], factory.ContextLocator["ControlThemeStates"]());
+        Assert.Same(tools[5], factory.ContextLocator["ControlThemeVariants"]());
+        Assert.Same(tools[6], factory.ContextLocator["ControlThemeParts"]());
+        Assert.Same(tools[7], factory.ContextLocator["ControlThemeFluent"]());
+    }
+
+    private static void AssertControlThemeTool<TTool>(
+        ControlThemePanelDockViewModel tool,
+        string id,
+        string title,
+        MainViewModel shell)
+        where TTool : ControlThemePanelDockViewModel
+    {
+        Assert.IsType<TTool>(tool);
+        Assert.Equal(id, tool.Id);
+        Assert.Equal(title, tool.Title);
+        Assert.Same(shell, tool.Shell);
     }
 
     private static void AssertDiagnosticTreeSegments(DiagnosticTreeDockViewModel diagnosticTool)
