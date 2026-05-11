@@ -221,7 +221,10 @@ public sealed class VisualEditingTests
         var reordered = engine.ReorderElement(moved.Text, XamlElementSelector.ByName("A"), 0);
 
         Assert.Empty(moved.Diagnostics);
-        Assert.Contains("<StackPanel x:Name=\"Right\">\n    <Button x:Name=\"B\" />\n  </StackPanel>", moved.Text, StringComparison.Ordinal);
+        Assert.Contains(
+            "<StackPanel x:Name=\"Right\">\n    <Button x:Name=\"B\" />\n  </StackPanel>",
+            NormalizeLineEndings(moved.Text),
+            StringComparison.Ordinal);
         Assert.Empty(reordered.Diagnostics);
         Assert.Contains("<Button x:Name=\"A\" />", reordered.Text, StringComparison.Ordinal);
         Assert.Contains("<Button x:Name=\"B\" />", reordered.Text, StringComparison.Ordinal);
@@ -2803,6 +2806,11 @@ public sealed class VisualEditingTests
         {
             Source = new Uri("avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml")
         });
+    }
+
+    private static string NormalizeLineEndings(string text)
+    {
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
     private static string GetScreenshotPath(string fileName)
