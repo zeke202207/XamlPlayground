@@ -165,7 +165,9 @@ public partial class PreviewView : UserControl
         var properties = e.GetCurrentPoint(this).Properties;
         if (DataContext is not MainViewModel viewModel ||
             viewModel.Control is not { } previewRoot ||
-            (!properties.IsLeftButtonPressed && properties.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed))
+            (!properties.IsLeftButtonPressed &&
+             !properties.IsRightButtonPressed &&
+             properties.PointerUpdateKind is not PointerUpdateKind.LeftButtonPressed and not PointerUpdateKind.RightButtonPressed))
         {
             return;
         }
@@ -175,7 +177,65 @@ public partial class PreviewView : UserControl
             return;
         }
 
+        if (properties.IsRightButtonPressed || properties.PointerUpdateKind == PointerUpdateKind.RightButtonPressed)
+        {
+            HandleDesignerContextPointerPressed(viewModel, previewRoot, e);
+            return;
+        }
+
         HandleDesignerPointerPressed(viewModel, previewRoot, e);
+    }
+
+    private void HandleDesignerContextPointerPressed(
+        MainViewModel viewModel,
+        Control previewRoot,
+        PointerPressedEventArgs e)
+    {
+        var point = e.GetPosition(PreviewSurface);
+        TrySelectPreviewControlAt(
+            viewModel,
+            point,
+            previewRoot,
+            e.KeyModifiers,
+            e.ClickCount,
+            out _);
+
+        ShowDesignerContextMenu(viewModel);
+        DesignerOverlay.Focus();
+        e.Handled = true;
+    }
+
+    private void ShowDesignerContextMenu(MainViewModel viewModel)
+    {
+        var flyout = new MenuFlyout();
+        flyout.Items.Add(new MenuItem
+        {
+            Header = "Create Custom Template",
+            Command = viewModel.CreateCustomControlThemeCommand
+        });
+
+        var themeMenu = new MenuItem
+        {
+            Header = "Theme"
+        };
+        themeMenu.Items.Add(new MenuItem
+        {
+            Header = "Default",
+            Command = viewModel.RemoveControlThemeCommand
+        });
+
+        foreach (var theme in viewModel.GetControlThemesForSelectedVisualElement())
+        {
+            themeMenu.Items.Add(new MenuItem
+            {
+                Header = theme.Key,
+                Command = viewModel.ApplyControlThemeCommand,
+                CommandParameter = theme
+            });
+        }
+
+        flyout.Items.Add(themeMenu);
+        flyout.ShowAt(DesignerOverlay, showAtPointer: true);
     }
 
     private void HandleDesignerPointerPressed(

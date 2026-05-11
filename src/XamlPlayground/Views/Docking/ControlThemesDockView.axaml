@@ -1,0 +1,160 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             mc:Ignorable="d" d:DesignWidth="280" d:DesignHeight="600"
+             x:Class="XamlPlayground.Views.Docking.ControlThemesDockView"
+             x:CompileBindings="True" x:DataType="vm:ControlThemesDockViewModel">
+  <UserControl.Resources>
+    <StreamGeometry x:Key="ThemeCreateIcon">M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeOpenIcon">M10,4L12,6H20C21.1,6 22,6.9 22,8V18C22,19.1 21.1,20 20,20H4C2.9,20 2,19.1 2,18V6C2,4.9 2.9,4 4,4H10M4,8V18H20V8H4Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeApplyIcon">M9,16.2L4.8,12L3.4,13.4L9,19L21,7L19.6,5.6L9,16.2Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeDefaultIcon">M12,5C15.31,5 18,7.69 18,11C18,14.31 15.31,17 12,17C10.08,17 8.36,16.1 7.26,14.7L9.1,13.92C9.84,14.59 10.86,15 12,15C14.21,15 16,13.21 16,11C16,8.79 14.21,7 12,7H8.83L11.42,9.59L10,11L5,6L10,1L11.42,2.41L8.83,5H12Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeSaveProjectIcon">M17,3H5C3.9,3 3,3.9 3,5V19C3,20.1 3.9,21 5,21H19C20.1,21 21,20.1 21,19V7L17,3M12,19C10.34,19 9,17.66 9,16C9,14.34 10.34,13 12,13C13.66,13 15,14.34 15,16C15,17.66 13.66,19 12,19M6,5H15V10H6V5Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeLoadProjectIcon">M19,20H5C3.9,20 3,19.1 3,18V6C3,4.9 3.9,4 5,4H10L12,6H19C20.1,6 21,6.9 21,8V18C21,19.1 20.1,20 19,20M12,8V12H9L12,15L15,12H13V8H12Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeImportIcon">M5,20H19V18H5V20M19,9H15V3H9V9H5L12,16L19,9Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeExportIcon">M5,20H19V18H5V20M19,10L12,3L5,10H9V16H15V10H19Z</StreamGeometry>
+  </UserControl.Resources>
+  <UserControl.Styles>
+    <Style Selector="Button.theme-tool">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="MinWidth" Value="30" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
+    <StackPanel DockPanel.Dock="Top"
+                Spacing="6"
+                Margin="6">
+      <TextBlock Text="{Binding Shell.ControlThemeSelectedTargetType}"
+                 FontWeight="SemiBold"
+                 TextTrimming="CharacterEllipsis" />
+      <TextBlock Text="{Binding Shell.ControlThemeSourceStatus}"
+                 TextWrapping="Wrap"
+                 Opacity="0.65" />
+      <StackPanel Orientation="Horizontal"
+                  Spacing="4">
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Create custom template"
+                Command="{Binding Shell.CreateCustomControlThemeCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeCreateIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Open selected theme"
+                Command="{Binding Shell.OpenSelectedControlThemeCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeOpenIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Apply selected theme"
+                Command="{Binding Shell.ApplyControlThemeCommand}"
+                CommandParameter="{Binding Shell.SelectedControlTheme}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeApplyIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Restore default theme"
+                Command="{Binding Shell.RemoveControlThemeCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeDefaultIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Import theme files"
+                Command="{Binding Shell.ImportControlThemeFilesCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeImportIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Export selected theme"
+                Command="{Binding Shell.ExportSelectedControlThemeCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeExportIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Save theme project"
+                Command="{Binding Shell.SaveControlThemeProjectCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeSaveProjectIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Load theme project"
+                Command="{Binding Shell.LoadControlThemeProjectCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeLoadProjectIcon}" />
+        </Button>
+      </StackPanel>
+      <TextBox PlaceholderText="Search themes"
+               Text="{Binding Shell.ControlThemeSearchText, Mode=TwoWay}"
+               MinHeight="30" />
+    </StackPanel>
+
+    <Border DockPanel.Dock="Bottom"
+            BorderThickness="0,1,0,0"
+            BorderBrush="{DynamicResource EditorBorderBrush}"
+            Padding="6">
+      <TextBlock Text="{Binding Shell.ControlThemeStatus}"
+                 TextWrapping="Wrap"
+                 Opacity="0.75" />
+    </Border>
+
+    <Grid RowDefinitions="Auto,*,Auto,*"
+          Margin="6"
+          RowSpacing="6">
+      <TextBlock Text="Custom themes"
+                 FontWeight="SemiBold" />
+      <ListBox Grid.Row="1"
+               ItemsSource="{Binding Shell.FilteredControlThemes}"
+               SelectedItem="{Binding Shell.SelectedControlTheme, Mode=TwoWay}">
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="visualVm:ControlThemeDefinitionViewModel"
+                        x:DataType="visualVm:ControlThemeDefinitionViewModel">
+            <StackPanel Spacing="2"
+                        Margin="0,3">
+              <TextBlock Text="{Binding Key}"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding FilePath}"
+                         FontSize="11"
+                         Opacity="0.65"
+                         TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <TextBlock Grid.Row="2"
+                 Text="Fluent source templates"
+                 FontWeight="SemiBold" />
+      <ListBox Grid.Row="3"
+               ItemsSource="{Binding Shell.FilteredFluentControlThemeTemplates}">
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="visualVm:FluentControlThemeTemplateViewModel"
+                        x:DataType="visualVm:FluentControlThemeTemplateViewModel">
+            <StackPanel Spacing="2"
+                        Margin="0,3">
+              <TextBlock Text="{Binding Title}"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding SourcePath}"
+                         FontSize="11"
+                         Opacity="0.65"
+                         TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </Grid>
+  </DockPanel>
+</UserControl>

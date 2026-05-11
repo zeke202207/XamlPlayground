@@ -22,6 +22,7 @@ public sealed class PlaygroundDockFactory : Factory
     private VisualStructureDockViewModel? _visualStructure;
     private VisualPropertiesDockViewModel? _visualProperties;
     private VisualToolboxDockViewModel? _visualToolbox;
+    private ControlThemesDockViewModel? _controlThemes;
     private PreviewDockViewModel? _preview;
     private DiagnosticTreeDockViewModel? _combinedTree;
     private DiagnosticTreeDockViewModel? _logicalTree;
@@ -43,6 +44,7 @@ public sealed class PlaygroundDockFactory : Factory
         _visualStructure = new VisualStructureDockViewModel(_shell);
         _visualProperties = new VisualPropertiesDockViewModel(_shell);
         _visualToolbox = new VisualToolboxDockViewModel(_shell);
+        _controlThemes = new ControlThemesDockViewModel(_shell);
         _preview = new PreviewDockViewModel(_shell);
         _combinedTree = CreateDiagnosticsTreeTool("DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree);
         _logicalTree = CreateDiagnosticsTreeTool("DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree);
@@ -112,7 +114,8 @@ public sealed class PlaygroundDockFactory : Factory
             _solutionExplorer,
             _visualStructure,
             _visualProperties,
-            _visualToolbox);
+            _visualToolbox,
+            _controlThemes);
         solutionDock.ActiveDockable = _solutionExplorer;
 
         var mainDock = CreateProportionalDock();
@@ -165,6 +168,7 @@ public sealed class PlaygroundDockFactory : Factory
             ["VisualStructure"] = () => _visualStructure,
             ["VisualProperties"] = () => _visualProperties,
             ["VisualToolbox"] = () => _visualToolbox,
+            ["ControlThemes"] = () => _controlThemes,
             ["Preview"] = () => _preview,
             ["DiagnosticsCombinedTree"] = () => _combinedTree,
             ["DiagnosticsLogicalTree"] = () => _logicalTree,

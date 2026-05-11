@@ -164,3 +164,39 @@ public sealed class VisualEditorAvailablePropertyViewModel : ViewModelBase
 
     public string Kind => Property.ValueKind.ToString();
 }
+
+public sealed class ControlThemeDefinitionViewModel : ViewModelBase
+{
+    public ControlThemeDefinitionViewModel(string key, string targetType, string filePath)
+    {
+        Key = key;
+        TargetType = targetType;
+        FilePath = filePath;
+    }
+
+    public string Key { get; }
+
+    public string TargetType { get; }
+
+    public string FilePath { get; }
+
+    public string Title => $"{Key} ({TargetType})";
+}
+
+public sealed class FluentControlThemeTemplateViewModel : ViewModelBase
+{
+    public FluentControlThemeTemplateViewModel(string key, string targetType, string sourcePath)
+    {
+        Key = key;
+        TargetType = targetType;
+        SourcePath = sourcePath;
+    }
+
+    public string Key { get; }
+
+    public string TargetType { get; }
+
+    public string SourcePath { get; }
+
+    public string Title => $"{TargetType} - {Key}";
+}

@@ -4,17 +4,24 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.DataGridHierarchical;
+using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using XamlPlayground.Services;
+using XamlPlayground.Services.Theming;
 using XamlPlayground.Services.VisualEditing;
 using XamlPlayground.ViewModels.VisualEditing;
+using XamlPlayground.ViewModels.Workspace;
+using XamlPlayground.Workspace;
 
 namespace XamlPlayground.ViewModels;
 
@@ -23,6 +30,7 @@ public partial class MainViewModel
     private IXamlMutationEngine _visualMutationEngine = null!;
     private XamlToolboxInsertionService _visualToolboxInsertion = null!;
     private ControlEditorRegistry _visualEditorRegistry = null!;
+    private FluentControlThemeCatalog _controlThemeCatalog = null!;
     private IVisualTreeSnapshotService _visualTreeSnapshotService = null!;
     private VisualEditorSelectionService _visualSelectionService = null!;
     private XamlDocumentSnapshot? _visualEditorDocument;
@@ -100,6 +108,15 @@ public partial class MainViewModel
     [ObservableProperty] private int _visualEditorSourceSelectionVersion;
     [ObservableProperty] private string _visualEditorSelectedElementTitle = "No selection";
     [ObservableProperty] private string _visualEditorStatus = "No XAML document selected.";
+    [ObservableProperty] private ObservableCollection<ControlThemeDefinitionViewModel> _controlThemes = new();
+    [ObservableProperty] private ObservableCollection<ControlThemeDefinitionViewModel> _filteredControlThemes = new();
+    [ObservableProperty] private ControlThemeDefinitionViewModel? _selectedControlTheme;
+    [ObservableProperty] private ObservableCollection<FluentControlThemeTemplateViewModel> _fluentControlThemeTemplates = new();
+    [ObservableProperty] private ObservableCollection<FluentControlThemeTemplateViewModel> _filteredFluentControlThemeTemplates = new();
+    [ObservableProperty] private string _controlThemeSearchText = string.Empty;
+    [ObservableProperty] private string _controlThemeSourceStatus = "Fluent theme source not loaded.";
+    [ObservableProperty] private string _controlThemeSelectedTargetType = "No control selected.";
+    [ObservableProperty] private string _controlThemeStatus = "No custom control themes.";
 
     public bool VisualEditorPreviewContentHitTestVisible => !VisualEditorDesignerMode;
 
@@ -159,11 +176,28 @@ public partial class MainViewModel
 
     public ICommand UnwrapVisualEditorSelectionCommand { get; private set; } = null!;
 
+    public ICommand CreateCustomControlThemeCommand { get; private set; } = null!;
+
+    public ICommand ApplyControlThemeCommand { get; private set; } = null!;
+
+    public ICommand RemoveControlThemeCommand { get; private set; } = null!;
+
+    public ICommand OpenSelectedControlThemeCommand { get; private set; } = null!;
+
+    public ICommand ImportControlThemeFilesCommand { get; private set; } = null!;
+
+    public ICommand ExportSelectedControlThemeCommand { get; private set; } = null!;
+
+    public ICommand SaveControlThemeProjectCommand { get; private set; } = null!;
+
+    public ICommand LoadControlThemeProjectCommand { get; private set; } = null!;
+
     private void InitializeVisualEditing()
     {
         _visualMutationEngine = new XamlMutationEngine();
         _visualToolboxInsertion = new XamlToolboxInsertionService(_visualMutationEngine);
         _visualEditorRegistry = new ControlEditorRegistry();
+        _controlThemeCatalog = new FluentControlThemeCatalog();
         _visualTreeSnapshotService = new AvaloniaVisualTreeSnapshotService();
         _visualSelectionService = new VisualEditorSelectionService(_visualMutationEngine, new XamlVisualTreeMapper());
 
@@ -178,8 +212,18 @@ public partial class MainViewModel
         InsertSelectedToolboxItemCommand = new RelayCommand(InsertSelectedToolboxItem);
         WrapVisualEditorSelectionCommand = new RelayCommand(WrapVisualEditorSelection);
         UnwrapVisualEditorSelectionCommand = new RelayCommand(UnwrapVisualEditorSelection);
+        CreateCustomControlThemeCommand = new RelayCommand(CreateCustomControlTheme, CanCreateCustomControlTheme);
+        ApplyControlThemeCommand = new RelayCommand<ControlThemeDefinitionViewModel?>(ApplyControlTheme, CanApplyControlTheme);
+        RemoveControlThemeCommand = new RelayCommand(RemoveControlTheme, CanRemoveControlTheme);
+        OpenSelectedControlThemeCommand = new RelayCommand(OpenSelectedControlTheme, () => SelectedControlTheme is not null);
+        ImportControlThemeFilesCommand = new AsyncRelayCommand(ImportControlThemeFiles, () => ActiveProject is not null);
+        ExportSelectedControlThemeCommand = new AsyncRelayCommand(ExportSelectedControlTheme, () => SelectedControlTheme is not null);
+        SaveControlThemeProjectCommand = new AsyncRelayCommand(SaveControlThemeProject, CanSaveControlThemeProject);
+        LoadControlThemeProjectCommand = new AsyncRelayCommand(LoadControlThemeProject, () => ActiveProject is not null);
 
         LoadVisualEditorToolbox();
+        LoadFluentControlThemeTemplates();
+        RefreshControlThemes();
     }
 
     partial void OnSelectedVisualEditorNodeChanged(VisualEditorNodeViewModel? value)
@@ -283,6 +327,16 @@ public partial class MainViewModel
         {
             _isSynchronizingVisualEditorPropertySelection = false;
         }
+    }
+
+    partial void OnSelectedControlThemeChanged(ControlThemeDefinitionViewModel? value)
+    {
+        NotifyControlThemeCommandsChanged();
+    }
+
+    partial void OnControlThemeSearchTextChanged(string value)
+    {
+        RefreshControlThemeFilters();
     }
 
     partial void OnVisualEditorPropertyFilterChanged(string value)
@@ -431,6 +485,7 @@ public partial class MainViewModel
         VisualEditorSelectedElementTitle = "No selection";
         VisualEditorCurrentContainerTitle = "No container";
         VisualEditorStatus = status;
+        RefreshControlThemeSelectionState();
     }
 
     private void SelectVisualEditorElement(XamlElementSnapshot? element)
@@ -453,6 +508,7 @@ public partial class MainViewModel
             VisualEditorPreviewCurrentContainerVisible = false;
             ClearVisualEditorSourceSelection();
             VisualEditorStatus = _visualEditorDocument?.Diagnostics.FirstOrDefault() ?? "No XAML element selected.";
+            RefreshControlThemeSelectionState();
             return;
         }
 
@@ -508,6 +564,7 @@ public partial class MainViewModel
             VisualEditorPropertiesView?.MoveCurrentTo(SelectedVisualEditorProperty);
         }
         VisualEditorStatus = $"{element.TypeName}: {element.Attributes.Count} attribute(s), {element.ChildElementCount} child element(s)";
+        RefreshControlThemeSelectionState();
     }
 
     private IReadOnlyList<VisualEditorPropertyViewModel> BuildVisualEditorPropertyRows(XamlElementSnapshot element)
@@ -2017,8 +2074,518 @@ public partial class MainViewModel
         ApplyVisualEditorMutation(_visualMutationEngine.UnwrapElement(xamlFile.Text, selector));
     }
 
+    private void LoadFluentControlThemeTemplates()
+    {
+        FluentControlThemeTemplates = new ObservableCollection<FluentControlThemeTemplateViewModel>(
+            _controlThemeCatalog.Templates
+                .Select(static template => new FluentControlThemeTemplateViewModel(
+                    template.Key,
+                    FluentControlThemeCatalog.GetLocalName(template.TargetType),
+                    template.SourcePath)));
+        RefreshControlThemeFilters();
+
+        ControlThemeSourceStatus = _controlThemeCatalog.SourceRoot is null
+            ? "Fluent theme source not found. Initialize external/Avalonia or set XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH."
+            : $"Fluent source: {_controlThemeCatalog.SourceRoot}";
+    }
+
+    private void RefreshControlThemes()
+    {
+        var previousKey = SelectedControlTheme?.Key;
+        var themes = ActiveProject is null
+            ? Array.Empty<ControlThemeDefinition>()
+            : ControlThemeResourceBuilder.FindCustomThemes(
+                ActiveProject
+                    .GetXamlFiles()
+                    .Where(static file => file.Kind == ProjectFileKind.Resource)
+                    .Select(static file => (file.Path, file.Text)));
+
+        ControlThemes = new ObservableCollection<ControlThemeDefinitionViewModel>(
+            themes.Select(static theme => new ControlThemeDefinitionViewModel(
+                theme.Key,
+                theme.TargetType,
+                theme.FilePath)));
+
+        RefreshControlThemeFilters(previousKey);
+        NotifyControlThemeCommandsChanged();
+    }
+
+    private void RefreshControlThemeFilters(string? preferredThemeKey = null)
+    {
+        var query = ControlThemeSearchText?.Trim();
+        var customThemes = ControlThemes.AsEnumerable();
+        var fluentTemplates = FluentControlThemeTemplates.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            customThemes = customThemes.Where(theme => MatchesControlThemeSearch(theme, query));
+            fluentTemplates = fluentTemplates.Where(template => MatchesControlThemeSearch(template, query));
+        }
+
+        FilteredControlThemes = new ObservableCollection<ControlThemeDefinitionViewModel>(customThemes);
+        FilteredFluentControlThemeTemplates = new ObservableCollection<FluentControlThemeTemplateViewModel>(fluentTemplates);
+
+        SelectedControlTheme = SelectFilteredControlTheme(preferredThemeKey ?? SelectedControlTheme?.Key);
+        UpdateControlThemeStatus(query);
+
+        NotifyControlThemeCommandsChanged();
+    }
+
+    private ControlThemeDefinitionViewModel? SelectFilteredControlTheme(string? preferredThemeKey)
+    {
+        if (!string.IsNullOrWhiteSpace(preferredThemeKey))
+        {
+            var preferredTheme = FilteredControlThemes.FirstOrDefault(theme =>
+                string.Equals(theme.Key, preferredThemeKey, StringComparison.Ordinal));
+            if (preferredTheme is not null)
+            {
+                return preferredTheme;
+            }
+        }
+
+        return GetControlThemesForSelectedVisualElement(FilteredControlThemes).FirstOrDefault() ??
+               FilteredControlThemes.FirstOrDefault();
+    }
+
+    private void UpdateControlThemeStatus(string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            ControlThemeStatus = ControlThemes.Count == 0
+                ? "No custom control themes."
+                : $"{ControlThemes.Count} custom control theme(s).";
+            return;
+        }
+
+        ControlThemeStatus =
+            $"{FilteredControlThemes.Count} of {ControlThemes.Count} custom, " +
+            $"{FilteredFluentControlThemeTemplates.Count} of {FluentControlThemeTemplates.Count} Fluent source template(s).";
+    }
+
+    private static bool MatchesControlThemeSearch(ControlThemeDefinitionViewModel theme, string query)
+    {
+        return query
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .All(token =>
+                theme.Key.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                theme.TargetType.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                theme.FilePath.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                theme.Title.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool MatchesControlThemeSearch(FluentControlThemeTemplateViewModel template, string query)
+    {
+        return query
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .All(token =>
+                template.Key.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                template.TargetType.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                template.SourcePath.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                template.Title.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public IReadOnlyList<ControlThemeDefinitionViewModel> GetControlThemesForSelectedVisualElement()
+    {
+        return GetControlThemesForSelectedVisualElement(ControlThemes);
+    }
+
+    private IReadOnlyList<ControlThemeDefinitionViewModel> GetControlThemesForSelectedVisualElement(
+        IEnumerable<ControlThemeDefinitionViewModel> themes)
+    {
+        return TryGetSelectedControlThemeTargetType(out var targetType)
+            ? themes
+                .Where(theme => string.Equals(theme.TargetType, targetType, StringComparison.Ordinal))
+                .ToArray()
+            : Array.Empty<ControlThemeDefinitionViewModel>();
+    }
+
+    private void RefreshControlThemeSelectionState()
+    {
+        if (TryGetSelectedControlThemeTargetType(out var targetType))
+        {
+            ControlThemeSelectedTargetType = targetType;
+            if (SelectedControlTheme is null ||
+                !FilteredControlThemes.Contains(SelectedControlTheme) ||
+                !string.Equals(SelectedControlTheme.TargetType, targetType, StringComparison.Ordinal))
+            {
+                SelectedControlTheme = FilteredControlThemes.FirstOrDefault(theme =>
+                    string.Equals(theme.TargetType, targetType, StringComparison.Ordinal));
+            }
+        }
+        else
+        {
+            ControlThemeSelectedTargetType = "No control selected.";
+        }
+
+        NotifyControlThemeCommandsChanged();
+    }
+
+    private bool TryGetSelectedControlThemeTargetType([NotNullWhen(true)] out string? targetType)
+    {
+        targetType = null;
+        var element = FindElement(_visualEditorDocument, _visualEditorSelectedSelector);
+        if (element is null)
+        {
+            return false;
+        }
+
+        var localName = GetLocalName(element.TypeName);
+        if (ResolveControlType(localName) is null)
+        {
+            return false;
+        }
+
+        targetType = localName;
+        return true;
+    }
+
+    private bool CanCreateCustomControlTheme()
+    {
+        return ActiveProject is not null &&
+               TryGetSelectedControlThemeTargetType(out var targetType) &&
+               _controlThemeCatalog.FindDefaultTemplate(targetType) is not null;
+    }
+
+    private void CreateCustomControlTheme()
+    {
+        if (ActiveProject is not { } project ||
+            !TryGetSelectedControlThemeTargetType(out var targetType))
+        {
+            ControlThemeStatus = "Select a preview control first.";
+            return;
+        }
+
+        var template = _controlThemeCatalog.FindDefaultTemplate(targetType);
+        if (template is null)
+        {
+            ControlThemeStatus = $"No Fluent ControlTheme template found for {targetType}.";
+            return;
+        }
+
+        var themeKey = CreateUniqueControlThemeKey(project, targetType);
+        var xaml = ControlThemeResourceBuilder.CreateResourceDictionary(template, themeKey);
+        var themeFile = _solutionFactory.AddControlThemeResource(project, themeKey, xaml);
+
+        SolutionExplorerNodes = Solution is { } solution
+            ? BuildSolutionExplorer(solution)
+            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        RefreshControlThemes();
+
+        var createdTheme = ControlThemes.FirstOrDefault(theme =>
+            string.Equals(theme.Key, themeKey, StringComparison.Ordinal));
+        if (createdTheme is not null)
+        {
+            SelectedControlTheme = createdTheme;
+            ApplyControlTheme(createdTheme);
+        }
+
+        OpenWorkspaceFile(themeFile);
+        ControlThemeStatus = $"Created {themeKey} from Fluent {targetType}.";
+    }
+
+    private string CreateUniqueControlThemeKey(InMemoryProject project, string targetType)
+    {
+        var index = 1;
+        string key;
+        do
+        {
+            key = $"My{targetType}Theme{index}";
+            index++;
+        }
+        while (ControlThemes.Any(theme => string.Equals(theme.Key, key, StringComparison.Ordinal)) ||
+               project.FindFile($"Themes/{key}.axaml") is not null);
+
+        return key;
+    }
+
+    private bool CanApplyControlTheme(ControlThemeDefinitionViewModel? theme)
+    {
+        theme ??= SelectedControlTheme;
+        return theme is not null &&
+               ActiveXamlFile is { Kind: ProjectFileKind.Xaml } &&
+               TryGetSelectedControlThemeTargetType(out var targetType) &&
+               string.Equals(theme.TargetType, targetType, StringComparison.Ordinal);
+    }
+
+    private void ApplyControlTheme(ControlThemeDefinitionViewModel? theme)
+    {
+        theme ??= SelectedControlTheme;
+        if (theme is null ||
+            !TryGetVisualEditingContext(out var xamlFile, out var selector))
+        {
+            ControlThemeStatus = "Select a control and a theme first.";
+            return;
+        }
+
+        ApplyVisualEditorMutation(_visualMutationEngine.SetProperty(
+            xamlFile.Text,
+            selector,
+            "Theme",
+            $"{{StaticResource {theme.Key}}}"));
+        VisualEditorPropertyName = "Theme";
+        VisualEditorPropertyValue = $"{{StaticResource {theme.Key}}}";
+        ControlThemeStatus = $"Applied {theme.Key}.";
+    }
+
+    private bool CanRemoveControlTheme()
+    {
+        return ActiveXamlFile is { Kind: ProjectFileKind.Xaml } &&
+               TryGetSelectedControlThemeTargetType(out _);
+    }
+
+    private void RemoveControlTheme()
+    {
+        if (!TryGetVisualEditingContext(out var xamlFile, out var selector))
+        {
+            ControlThemeStatus = "Select a control first.";
+            return;
+        }
+
+        ApplyVisualEditorMutation(_visualMutationEngine.RemoveProperty(
+            xamlFile.Text,
+            selector,
+            "Theme"));
+        ControlThemeStatus = "Restored default theme.";
+    }
+
+    private void OpenSelectedControlTheme()
+    {
+        if (ActiveProject is null || SelectedControlTheme is null)
+        {
+            return;
+        }
+
+        var file = ActiveProject.FindFile(SelectedControlTheme.FilePath);
+        if (file is not null)
+        {
+            OpenWorkspaceFile(file);
+        }
+    }
+
+    private async Task ImportControlThemeFiles()
+    {
+        if (ActiveProject is not { } project || StorageProvider is null)
+        {
+            return;
+        }
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import theme file",
+            FileTypeFilter = GetThemeResourceFileTypes(),
+            AllowMultiple = true
+        });
+
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        var importedFiles = new List<InMemoryProjectFile>();
+        foreach (var file in files)
+        {
+            try
+            {
+                await using var stream = await file.OpenReadAsync();
+                using var reader = new StreamReader(stream);
+                var xaml = await reader.ReadToEndAsync();
+                importedFiles.Add(_solutionFactory.AddImportedThemeResource(project, file.Name, xaml));
+            }
+            catch (Exception exception)
+            {
+                ControlThemeStatus = $"Failed to import {file.Name}: {exception.Message}";
+                return;
+            }
+        }
+
+        RefreshWorkspaceAfterThemeFileChanges(importedFiles.FirstOrDefault());
+        var importedThemeCount = ControlThemeResourceBuilder.FindCustomThemes(
+                importedFiles.Select(static file => (file.Path, file.Text)))
+            .Count;
+        ControlThemeStatus = importedThemeCount == 0
+            ? $"Imported {importedFiles.Count} resource file(s). No custom ControlTheme was found."
+            : $"Imported {importedThemeCount} control theme(s) from {importedFiles.Count} file(s).";
+    }
+
+    private async Task ExportSelectedControlTheme()
+    {
+        if (ActiveProject is null ||
+            SelectedControlTheme is not { } selectedTheme ||
+            ActiveProject.FindFile(selectedTheme.FilePath) is not { } themeFile ||
+            StorageProvider is null)
+        {
+            return;
+        }
+
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export theme file",
+            FileTypeChoices = GetThemeResourceFileTypes(),
+            SuggestedFileName = themeFile.Name,
+            DefaultExtension = themeFile.Extension.TrimStart('.') is { Length: > 0 } extension ? extension : "axaml",
+            ShowOverwritePrompt = true
+        });
+
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var stream = await file.OpenWriteAsync();
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(themeFile.Text);
+            ControlThemeStatus = $"Exported {selectedTheme.Key}.";
+        }
+        catch (Exception exception)
+        {
+            ControlThemeStatus = $"Failed to export {selectedTheme.Key}: {exception.Message}";
+        }
+    }
+
+    private bool CanSaveControlThemeProject()
+    {
+        return ActiveProject is not null && GetControlThemeProjectFiles().Count > 0;
+    }
+
+    private async Task SaveControlThemeProject()
+    {
+        if (ActiveProject is not { } project || StorageProvider is null)
+        {
+            return;
+        }
+
+        var themeFiles = GetControlThemeProjectFiles();
+        if (themeFiles.Count == 0)
+        {
+            ControlThemeStatus = "No custom theme files to save.";
+            return;
+        }
+
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save theme project",
+            FileTypeChoices = GetThemeProjectFileTypes(),
+            SuggestedFileName = $"{project.Name}.xamltheme",
+            DefaultExtension = "xamltheme",
+            ShowOverwritePrompt = true
+        });
+
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var json = ThemeProjectStorage.Save(
+                project.Name,
+                themeFiles.Select(static themeFile => (themeFile.Path, themeFile.Text)));
+            await using var stream = await file.OpenWriteAsync();
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(json);
+            ControlThemeStatus = $"Saved {themeFiles.Count} theme file(s) to theme project.";
+        }
+        catch (Exception exception)
+        {
+            ControlThemeStatus = $"Failed to save theme project: {exception.Message}";
+        }
+    }
+
+    private async Task LoadControlThemeProject()
+    {
+        if (ActiveProject is not { } project || StorageProvider is null)
+        {
+            return;
+        }
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Load theme project",
+            FileTypeFilter = GetThemeProjectFileTypes(),
+            AllowMultiple = false
+        });
+
+        var file = files.FirstOrDefault();
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var stream = await file.OpenReadAsync();
+            using var reader = new StreamReader(stream);
+            var json = await reader.ReadToEndAsync();
+            var themeProject = ThemeProjectStorage.Load(json);
+            var loadedFiles = themeProject.Files
+                .Select(themeFile => _solutionFactory.AddOrUpdateResource(project, themeFile.Path, themeFile.Text))
+                .ToArray();
+
+            RefreshWorkspaceAfterThemeFileChanges(loadedFiles.FirstOrDefault());
+            ControlThemeStatus = $"Loaded {loadedFiles.Length} theme file(s) from {themeProject.Name}.";
+        }
+        catch (Exception exception)
+        {
+            ControlThemeStatus = $"Failed to load theme project: {exception.Message}";
+        }
+    }
+
+    private IReadOnlyList<InMemoryProjectFile> GetControlThemeProjectFiles()
+    {
+        if (ActiveProject is not { } project)
+        {
+            return Array.Empty<InMemoryProjectFile>();
+        }
+
+        var customThemeFilePaths = ControlThemeResourceBuilder.FindCustomThemes(
+                project.GetXamlFiles()
+                    .Where(static file => file.Kind == ProjectFileKind.Resource)
+                    .Select(static file => (file.Path, file.Text)))
+            .Select(static theme => theme.FilePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return project.GetXamlFiles()
+            .Where(static file => file.Kind == ProjectFileKind.Resource)
+            .Where(file =>
+                file.Path.StartsWith("Themes/", StringComparison.OrdinalIgnoreCase) ||
+                customThemeFilePaths.Contains(file.Path))
+            .OrderBy(static file => file.Path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private void RefreshWorkspaceAfterThemeFileChanges(InMemoryProjectFile? fileToOpen)
+    {
+        SolutionExplorerNodes = Solution is { } solution
+            ? BuildSolutionExplorer(solution)
+            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        RefreshControlThemes();
+
+        if (fileToOpen is not null)
+        {
+            OpenWorkspaceFile(fileToOpen);
+        }
+        else if (CanPreviewXamlFile(ActiveXamlFile))
+        {
+            RunActiveDocument();
+        }
+    }
+
+    private void NotifyControlThemeCommandsChanged()
+    {
+        (CreateCustomControlThemeCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (ApplyControlThemeCommand as RelayCommand<ControlThemeDefinitionViewModel?>)?.NotifyCanExecuteChanged();
+        (RemoveControlThemeCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (OpenSelectedControlThemeCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (ImportControlThemeFilesCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+        (ExportSelectedControlThemeCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+        (SaveControlThemeProjectCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+        (LoadControlThemeProjectCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+    }
+
     private bool TryGetVisualEditingContext(
-        out XamlPlayground.Workspace.InMemoryProjectFile xamlFile,
+        out InMemoryProjectFile xamlFile,
         out XamlElementSelector selector)
     {
         xamlFile = ActiveXamlFile!;

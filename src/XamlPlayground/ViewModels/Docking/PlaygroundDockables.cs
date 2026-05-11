@@ -165,6 +165,20 @@ public sealed class VisualToolboxDockViewModel : Tool
     public MainViewModel Shell { get; }
 }
 
+public sealed class ControlThemesDockViewModel : Tool
+{
+    public ControlThemesDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "ControlThemes";
+        Title = "Themes";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
 public sealed class DiagnosticTreeDockViewModel : Tool, IDisposable
 {
     public DiagnosticTreeDockViewModel(

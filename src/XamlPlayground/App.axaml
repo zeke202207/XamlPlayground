@@ -26,6 +26,9 @@
     <DataTemplate DataType="dockVm:VisualToolboxDockViewModel">
       <dockViews:VisualToolboxDockView />
     </DataTemplate>
+    <DataTemplate DataType="dockVm:ControlThemesDockViewModel">
+      <dockViews:ControlThemesDockView />
+    </DataTemplate>
     <DataTemplate DataType="dockVm:XamlEditorDockViewModel">
       <dockViews:XamlEditorDockView />
     </DataTemplate>
