@@ -126,10 +126,14 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.Contains(analysis.AvailableStates, state => state == "checked");
         Assert.Contains(analysis.StateSelectors, selector => selector.State == "pointerover");
         Assert.Contains(analysis.StateSelectors, selector => selector.State == "pressed");
+        Assert.Contains(analysis.PartSelectors, selector =>
+            selector.PartName == "PART_Chrome" &&
+            selector.PartType == "Border" &&
+            selector.State == "pointerover");
     }
 
     [Fact]
-    public void ControlThemeEditor_AddsStateSetterAndVariantPreview()
+    public void ControlThemeEditor_AddsStateAndTemplatePartSettersAndVariantPreview()
     {
         const string xaml = """
                             <ResourceDictionary xmlns="https://github.com/avaloniaui"
@@ -144,13 +148,22 @@ public sealed class ThemeResourceAnalyzerTests
             "pointerover",
             "Opacity",
             "0.8");
-        var previewEdit = ControlThemeEditor.SetDesignPreview(
+        var partEdit = ControlThemeEditor.SetSelectorSetter(
             stateEdit.Text,
+            "MyButtonTheme1",
+            "^ /template/ Border#PART_Chrome:pointerover",
+            "Background",
+            "{DynamicResource AccentBrush}");
+        var previewEdit = ControlThemeEditor.SetDesignPreview(
+            partEdit.Text,
             ControlThemeResourceBuilder.CreateVariantPreviewXaml("Button", "MyButtonTheme1"));
 
         Assert.True(stateEdit.Changed);
         Assert.Contains("Selector=\"^:pointerover\"", stateEdit.Text, System.StringComparison.Ordinal);
         Assert.Contains("Property=\"Opacity\" Value=\"0.8\"", stateEdit.Text, System.StringComparison.Ordinal);
+        Assert.True(partEdit.Changed);
+        Assert.Contains("Selector=\"^ /template/ Border#PART_Chrome:pointerover\"", partEdit.Text, System.StringComparison.Ordinal);
+        Assert.Contains("Property=\"Background\" Value=\"{DynamicResource AccentBrush}\"", partEdit.Text, System.StringComparison.Ordinal);
         Assert.True(previewEdit.Changed);
         Assert.Contains("RequestedThemeVariant=\"Light\"", previewEdit.Text, System.StringComparison.Ordinal);
         Assert.Contains("RequestedThemeVariant=\"Dark\"", previewEdit.Text, System.StringComparison.Ordinal);

@@ -682,7 +682,7 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void ThemeResourceCommands_RenameDuplicateAndWarnBeforeDeletingUsedResource()
+    public void ThemeResourceCommands_RenameDuplicateAndConfirmDeletingUsedResource()
     {
         TestApplication.EnsureAvaloniaInitialized();
 
@@ -727,11 +727,19 @@ public sealed class MainViewModelTests
             viewModel.SelectedThemeResource = Assert.Single(viewModel.ThemeResources, resource => resource.Key == "PrimaryButtonTheme");
             viewModel.DeleteSelectedThemeResourceCommand.Execute(null);
 
-            Assert.Contains("Press delete again", viewModel.ControlThemeStatus, StringComparison.Ordinal);
+            Assert.True(viewModel.IsThemeResourceDeleteDialogOpen);
+            Assert.Contains("Review deletion", viewModel.ThemeResourceDeleteDialogMessage, StringComparison.Ordinal);
+            Assert.Contains(viewModel.ThemeResourceDeleteChanges, change =>
+                change.FilePath == mainFile.Path &&
+                change.Diff.Contains("Theme=\"{StaticResource PrimaryButtonTheme}\"", StringComparison.Ordinal));
+            Assert.Contains(viewModel.ThemeResourceDeleteChanges, change =>
+                change.FilePath == themeFile.Path &&
+                change.Diff.Contains("x:Key=\"PrimaryButtonTheme\"", StringComparison.Ordinal));
             Assert.Contains("x:Key=\"PrimaryButtonTheme\"", themeFile.Text, StringComparison.Ordinal);
 
-            viewModel.DeleteSelectedThemeResourceCommand.Execute(null);
+            viewModel.ConfirmThemeResourceDeleteCommand.Execute(null);
 
+            Assert.False(viewModel.IsThemeResourceDeleteDialogOpen);
             Assert.DoesNotContain("Theme=\"{StaticResource PrimaryButtonTheme}\"", mainFile.Text, StringComparison.Ordinal);
             Assert.DoesNotContain("x:Key=\"PrimaryButtonTheme\"", themeFile.Text, StringComparison.Ordinal);
         }
@@ -756,8 +764,16 @@ public sealed class MainViewModelTests
             "Themes/Palette.axaml",
             """
             <ResourceDictionary xmlns="https://github.com/avaloniaui"
-                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                xmlns:sys="clr-namespace:System;assembly=System.Runtime">
               <SolidColorBrush x:Key="PickerBrush" Color="Red" />
+              <DataTemplate x:Key="PersonTemplate" DataType="sys:String">
+                <TextBlock Text="{Binding}" />
+              </DataTemplate>
+              <x:Array x:Key="SampleItems" Type="{x:Type sys:String}">
+                <sys:String>One</sys:String>
+              </x:Array>
+              <sys:Object x:Key="SampleData" />
             </ResourceDictionary>
             """,
             ProjectFileKind.Resource));
@@ -766,7 +782,11 @@ public sealed class MainViewModelTests
         mainFile.Text = """
                         <UserControl xmlns="https://github.com/avaloniaui"
                                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-                          <Button x:Name="ActionButton" Content="Save" />
+                          <StackPanel>
+                            <Button x:Name="ActionButton" Content="Save" />
+                            <ListBox x:Name="ItemsList" />
+                            <ContentControl x:Name="DataHost" />
+                          </StackPanel>
                         </UserControl>
                         """;
         var buttonStart = mainFile.Text.IndexOf("<Button", StringComparison.Ordinal);
@@ -784,6 +804,22 @@ public sealed class MainViewModelTests
         Assert.True(viewModel.OpenVisualEditorPropertyResourceCommand.CanExecute(null));
         viewModel.OpenVisualEditorPropertyResourceCommand.Execute(null);
         Assert.Equal("Themes/Palette.axaml", viewModel.ActiveXamlFile!.Path);
+
+        viewModel.ActiveXamlFile = mainFile;
+        var listBoxStart = mainFile.Text.IndexOf("<ListBox", StringComparison.Ordinal);
+        Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, listBoxStart, 0, listBoxStart));
+        viewModel.SelectedVisualEditorAvailableProperty =
+            viewModel.VisualEditorAvailableProperties.First(property => property.Name == "ItemsSource");
+        Assert.Contains("{StaticResource SampleItems}", viewModel.VisualEditorPropertyOptions);
+        viewModel.SelectedVisualEditorAvailableProperty =
+            viewModel.VisualEditorAvailableProperties.First(property => property.Name == "ItemTemplate");
+        Assert.Contains("{StaticResource PersonTemplate}", viewModel.VisualEditorPropertyOptions);
+
+        var contentStart = mainFile.Text.IndexOf("<ContentControl", StringComparison.Ordinal);
+        Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, contentStart, 0, contentStart));
+        viewModel.SelectedVisualEditorAvailableProperty =
+            viewModel.VisualEditorAvailableProperties.First(property => property.Name == "DataContext");
+        Assert.Contains("{StaticResource SampleData}", viewModel.VisualEditorPropertyOptions);
     }
 
     [Fact]
@@ -826,6 +862,24 @@ public sealed class MainViewModelTests
             Assert.Contains("Selector=\"^:pointerover\"", themeFile.Text, StringComparison.Ordinal);
             Assert.Contains("Property=\"Opacity\" Value=\"0.8\"", themeFile.Text, StringComparison.Ordinal);
             Assert.Contains(viewModel.ThemeVariants, variant => variant.Name == ThemeProjectStorage.BaseVariant);
+
+            viewModel.SelectedThemeTemplatePart = Assert.Single(
+                viewModel.ThemeTemplateParts,
+                part => part.Name == "PART_ContentPresenter");
+            viewModel.ThemeTemplatePartSetterPropertyName = "Opacity";
+            viewModel.ThemeTemplatePartSetterValue = "0.7";
+
+            Assert.True(viewModel.ApplyThemeTemplatePartSetterCommand.CanExecute(null));
+            viewModel.ApplyThemeTemplatePartSetterCommand.Execute(null);
+
+            Assert.Contains(
+                "Selector=\"^ /template/ ContentPresenter#PART_ContentPresenter:pointerover\"",
+                themeFile.Text,
+                StringComparison.Ordinal);
+            Assert.Contains("Property=\"Opacity\" Value=\"0.7\"", themeFile.Text, StringComparison.Ordinal);
+            Assert.Contains(viewModel.ThemeTemplatePartSelectors, selector =>
+                selector.PartName == "PART_ContentPresenter" &&
+                selector.State == "pointerover");
 
             Assert.True(viewModel.CreateThemeVariantPreviewCommand.CanExecute(null));
             viewModel.CreateThemeVariantPreviewCommand.Execute(null);
@@ -1000,7 +1054,8 @@ public sealed class MainViewModelTests
                 <Setter Property="Padding" Value="8" />
                 <Setter Property="Template">
                   <ControlTemplate>
-                    <ContentPresenter Content="{TemplateBinding Content}"
+                    <ContentPresenter x:Name="PART_ContentPresenter"
+                                      Content="{TemplateBinding Content}"
                                       Padding="{TemplateBinding Padding}" />
                   </ControlTemplate>
                 </Setter>
@@ -1016,7 +1071,8 @@ public sealed class MainViewModelTests
                 <Setter Property="Padding" Value="8" />
                 <Setter Property="Template">
                   <ControlTemplate>
-                    <ContentPresenter Content="{TemplateBinding Content}"
+                    <ContentPresenter x:Name="PART_ContentPresenter"
+                                      Content="{TemplateBinding Content}"
                                       Padding="{TemplateBinding Padding}" />
                   </ControlTemplate>
                 </Setter>
