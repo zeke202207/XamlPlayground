@@ -20,6 +20,9 @@ public partial class ViewLocator : IDataTemplate
         {
             WorkspaceFileDocumentDockViewModel => new WorkspaceFileEditorDockView(),
             SolutionExplorerDockViewModel => new SolutionExplorerDockView(),
+            VisualStructureDockViewModel => new VisualStructureDockView(),
+            VisualPropertiesDockViewModel => new VisualPropertiesDockView(),
+            VisualToolboxDockViewModel => new VisualToolboxDockView(),
             XamlEditorDockViewModel => new XamlEditorDockView(),
             CodeEditorDockViewModel => new CodeEditorDockView(),
             PreviewDockViewModel => new PreviewDockView(),

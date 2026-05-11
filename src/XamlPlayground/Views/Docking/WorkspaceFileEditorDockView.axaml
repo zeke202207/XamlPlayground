@@ -9,7 +9,8 @@
              mc:Ignorable="d" d:DesignWidth="500" d:DesignHeight="500"
              x:Class="XamlPlayground.Views.Docking.WorkspaceFileEditorDockView"
              x:CompileBindings="True" x:DataType="vm:WorkspaceFileDocumentDockViewModel">
-  <ae:TextEditor Margin="0"
+  <ae:TextEditor x:Name="Editor"
+                 Margin="0"
                  Classes="theme-aware"
                  IsReadOnly="{OnFormFactor False, Mobile=True}"
                  behaviors:TextEditorDocument.Document="{Binding File.Document}"

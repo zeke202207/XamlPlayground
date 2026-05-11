@@ -18,6 +18,7 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
         Title = file.Name;
         CanClose = true;
         file.PropertyChanged += FileOnPropertyChanged;
+        shell.PropertyChanged += ShellOnPropertyChanged;
     }
 
     public MainViewModel Shell { get; }
@@ -26,9 +27,18 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
 
     public string Extension => File.Extension;
 
+    public string? VisualEditorSourceSelectionFilePath => Shell.VisualEditorSourceSelectionFilePath;
+
+    public int VisualEditorSourceSelectionStart => Shell.VisualEditorSourceSelectionStart;
+
+    public int VisualEditorSourceSelectionLength => Shell.VisualEditorSourceSelectionLength;
+
+    public int VisualEditorSourceSelectionVersion => Shell.VisualEditorSourceSelectionVersion;
+
     public void Dispose()
     {
         File.PropertyChanged -= FileOnPropertyChanged;
+        Shell.PropertyChanged -= ShellOnPropertyChanged;
     }
 
     private void FileOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -36,6 +46,25 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
         if (e.PropertyName == nameof(InMemoryProjectFile.IsDirty))
         {
             Title = File.IsDirty ? $"{File.Name}*" : File.Name;
+        }
+    }
+
+    private void ShellOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(MainViewModel.VisualEditorSourceSelectionFilePath):
+                OnPropertyChanged(nameof(VisualEditorSourceSelectionFilePath));
+                break;
+            case nameof(MainViewModel.VisualEditorSourceSelectionStart):
+                OnPropertyChanged(nameof(VisualEditorSourceSelectionStart));
+                break;
+            case nameof(MainViewModel.VisualEditorSourceSelectionLength):
+                OnPropertyChanged(nameof(VisualEditorSourceSelectionLength));
+                break;
+            case nameof(MainViewModel.VisualEditorSourceSelectionVersion):
+                OnPropertyChanged(nameof(VisualEditorSourceSelectionVersion));
+                break;
         }
     }
 }
@@ -87,6 +116,48 @@ public sealed class SolutionExplorerDockViewModel : Tool
         Shell = shell;
         Id = "SolutionExplorer";
         Title = "Solution Explorer";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class VisualStructureDockViewModel : Tool
+{
+    public VisualStructureDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "VisualStructure";
+        Title = "Structure";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class VisualPropertiesDockViewModel : Tool
+{
+    public VisualPropertiesDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "VisualProperties";
+        Title = "Properties";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class VisualToolboxDockViewModel : Tool
+{
+    public VisualToolboxDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "VisualToolbox";
+        Title = "Toolbox";
         CanClose = false;
         KeepPinnedDockableVisible = true;
     }
