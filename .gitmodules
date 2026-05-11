@@ -1,3 +1,6 @@
 [submodule "external/ProDataGrid"]
 	path = external/ProDataGrid
 	url = https://github.com/wieslawsoltes/ProDataGrid.git
+[submodule "external/XmlParser-Roslyn"]
+	path = external/XmlParser-Roslyn
+	url = https://github.com/wieslawsoltes/XmlParser-Roslyn.git

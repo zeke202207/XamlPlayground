@@ -1,0 +1,166 @@
+using System;
+using System.Collections.ObjectModel;
+using XamlPlayground.Services.VisualEditing;
+
+namespace XamlPlayground.ViewModels.VisualEditing;
+
+public sealed class VisualEditorNodeViewModel : ViewModelBase
+{
+    public VisualEditorNodeViewModel(XamlElementSnapshot element)
+    {
+        Element = element;
+    }
+
+    public XamlElementSnapshot Element { get; }
+
+    public ObservableCollection<VisualEditorNodeViewModel> Children { get; } = new();
+
+    public string Title => string.IsNullOrWhiteSpace(Element.Name)
+        ? Element.TypeName
+        : $"{Element.TypeName} #{Element.Name}";
+
+    public string PathText => Element.Path.Count == 0
+        ? "root"
+        : string.Join(".", Element.Path);
+
+    public string TypeName => Element.TypeName;
+
+    public string Name => Element.Name ?? string.Empty;
+
+    public int ChildElementCount => Element.ChildElementCount;
+
+    public string Badge => Element.ChildElementCount > 0 ? "+" : "-";
+}
+
+public sealed class VisualEditorStructureRowViewModel : ViewModelBase
+{
+    public VisualEditorStructureRowViewModel(VisualEditorNodeViewModel node, int depth)
+    {
+        Node = node;
+        Depth = depth;
+    }
+
+    public VisualEditorNodeViewModel Node { get; }
+
+    public XamlElementSnapshot Element => Node.Element;
+
+    public int Depth { get; }
+
+    public double Indent => Depth * 14;
+
+    public string Title => Node.Title;
+
+    public string TypeName => Element.TypeName;
+
+    public string Name => Element.Name ?? string.Empty;
+
+    public string PathText => Node.PathText;
+
+    public int ChildElementCount => Element.ChildElementCount;
+}
+
+public sealed partial class VisualEditorPropertyViewModel : ViewModelBase
+{
+    private readonly Action<VisualEditorPropertyViewModel, string>? _valueChanged;
+    private bool _isUpdatingFromModel;
+    private bool _isSet;
+    private string _value;
+
+    public VisualEditorPropertyViewModel(
+        ControlEditorProperty property,
+        string value,
+        bool isSet,
+        string mutationName,
+        Action<VisualEditorPropertyViewModel, string>? valueChanged)
+    {
+        Property = property;
+        Name = property.PropertyName;
+        MutationName = mutationName;
+        Kind = property.ValueKind.ToString();
+        Category = property.Group ?? "Common";
+        _value = value;
+        _isSet = isSet;
+        _valueChanged = valueChanged;
+    }
+
+    public ControlEditorProperty Property { get; }
+
+    public string Name { get; }
+
+    public string MutationName { get; }
+
+    public string Kind { get; }
+
+    public string TypeName => Property.ValueType?.Name ?? Kind;
+
+    public string Category { get; }
+
+    public string Group => IsSet ? "Assigned Values" : Category;
+
+    public bool IsSet
+    {
+        get => _isSet;
+        private set
+        {
+            if (SetProperty(ref _isSet, value))
+            {
+                OnPropertyChanged(nameof(Priority));
+                OnPropertyChanged(nameof(Group));
+            }
+        }
+    }
+
+    public string Priority => IsSet ? "Local" : "Default";
+
+    public string Value
+    {
+        get => _value;
+        set
+        {
+            if (!SetProperty(ref _value, value))
+            {
+                return;
+            }
+
+            if (_isUpdatingFromModel)
+            {
+                return;
+            }
+
+            IsSet = true;
+            _valueChanged?.Invoke(this, value);
+        }
+    }
+
+    public void UpdateFromModel(string value, bool isSet)
+    {
+        try
+        {
+            _isUpdatingFromModel = true;
+            Value = value;
+            IsSet = isSet;
+        }
+        finally
+        {
+            _isUpdatingFromModel = false;
+        }
+    }
+}
+
+public sealed class VisualEditorAvailablePropertyViewModel : ViewModelBase
+{
+    public VisualEditorAvailablePropertyViewModel(ControlEditorProperty property)
+    {
+        Property = property;
+    }
+
+    public ControlEditorProperty Property { get; }
+
+    public string Name => Property.PropertyName;
+
+    public string DisplayName => Property.DisplayName;
+
+    public string Group => Property.Group ?? "Common";
+
+    public string Kind => Property.ValueKind.ToString();
+}

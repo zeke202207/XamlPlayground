@@ -1,0 +1,46 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:editing="clr-namespace:XamlPlayground.Services.VisualEditing"
+             mc:Ignorable="d" d:DesignWidth="300" d:DesignHeight="620"
+             x:Class="XamlPlayground.Views.Docking.VisualToolboxDockView"
+             x:CompileBindings="True" x:DataType="vm:VisualToolboxDockViewModel">
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
+    <StackPanel DockPanel.Dock="Top"
+                Margin="6"
+                Spacing="6">
+      <TextBox PlaceholderText="Search controls"
+               Text="{Binding Shell.VisualEditorToolboxSearch, Mode=TwoWay}" />
+      <Button Content="Insert"
+              Command="{Binding Shell.InsertSelectedToolboxItemCommand}" />
+    </StackPanel>
+
+    <ListBox ItemsSource="{Binding Shell.FilteredVisualEditorToolboxItems}"
+             SelectedItem="{Binding Shell.SelectedVisualEditorToolboxItem, Mode=TwoWay}"
+             Margin="4">
+      <ListBox.ItemTemplate>
+        <DataTemplate DataType="editing:ToolboxItemDescriptor">
+          <Grid RowDefinitions="Auto,Auto"
+                ColumnDefinitions="*,Auto"
+                MinHeight="38">
+            <TextBlock Text="{Binding DisplayName}"
+                       FontWeight="SemiBold"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="1"
+                       Text="{Binding Category}"
+                       Opacity="0.65"
+                       FontSize="11" />
+            <TextBlock Grid.Row="1"
+                       Grid.ColumnSpan="2"
+                       Text="{Binding TypeName}"
+                       Opacity="0.6"
+                       FontSize="11"
+                       TextTrimming="CharacterEllipsis" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </DockPanel>
+</UserControl>

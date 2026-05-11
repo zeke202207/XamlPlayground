@@ -19,6 +19,9 @@ public sealed class PlaygroundDockFactory : Factory
     private IRootDock? _rootDock;
     private IDocumentDock? _editorDock;
     private SolutionExplorerDockViewModel? _solutionExplorer;
+    private VisualStructureDockViewModel? _visualStructure;
+    private VisualPropertiesDockViewModel? _visualProperties;
+    private VisualToolboxDockViewModel? _visualToolbox;
     private PreviewDockViewModel? _preview;
     private DiagnosticTreeDockViewModel? _combinedTree;
     private DiagnosticTreeDockViewModel? _logicalTree;
@@ -37,6 +40,9 @@ public sealed class PlaygroundDockFactory : Factory
     public override IRootDock CreateLayout()
     {
         _solutionExplorer = new SolutionExplorerDockViewModel(_shell);
+        _visualStructure = new VisualStructureDockViewModel(_shell);
+        _visualProperties = new VisualPropertiesDockViewModel(_shell);
+        _visualToolbox = new VisualToolboxDockViewModel(_shell);
         _preview = new PreviewDockViewModel(_shell);
         _combinedTree = CreateDiagnosticsTreeTool("DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree);
         _logicalTree = CreateDiagnosticsTreeTool("DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree);
@@ -102,7 +108,11 @@ public sealed class PlaygroundDockFactory : Factory
         solutionDock.Alignment = Alignment.Right;
         solutionDock.Proportion = 0.22;
         solutionDock.CanCloseLastDockable = false;
-        solutionDock.VisibleDockables = CreateList<IDockable>(_solutionExplorer);
+        solutionDock.VisibleDockables = CreateList<IDockable>(
+            _solutionExplorer,
+            _visualStructure,
+            _visualProperties,
+            _visualToolbox);
         solutionDock.ActiveDockable = _solutionExplorer;
 
         var mainDock = CreateProportionalDock();
@@ -152,6 +162,9 @@ public sealed class PlaygroundDockFactory : Factory
         ContextLocator = new Dictionary<string, Func<object?>>
         {
             ["SolutionExplorer"] = () => _solutionExplorer,
+            ["VisualStructure"] = () => _visualStructure,
+            ["VisualProperties"] = () => _visualProperties,
+            ["VisualToolbox"] = () => _visualToolbox,
             ["Preview"] = () => _preview,
             ["DiagnosticsCombinedTree"] = () => _combinedTree,
             ["DiagnosticsLogicalTree"] = () => _logicalTree,

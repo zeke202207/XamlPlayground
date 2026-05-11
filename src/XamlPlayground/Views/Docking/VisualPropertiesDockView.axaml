@@ -1,0 +1,71 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             mc:Ignorable="d" d:DesignWidth="320" d:DesignHeight="620"
+             x:Class="XamlPlayground.Views.Docking.VisualPropertiesDockView"
+             x:CompileBindings="True" x:DataType="vm:VisualPropertiesDockViewModel">
+  <Grid Background="{DynamicResource DockSurfacePanelBrush}"
+        Margin="8"
+        RowDefinitions="Auto,Auto,*"
+        RowSpacing="8">
+    <Grid RowDefinitions="Auto,Auto"
+          RowSpacing="4">
+      <TextBlock Text="{Binding Shell.VisualEditorSelectedElementTitle}"
+                 FontWeight="SemiBold"
+                 TextTrimming="CharacterEllipsis" />
+      <TextBlock Grid.Row="1"
+                 Text="{Binding Shell.VisualEditorStatus}"
+                 TextWrapping="Wrap"
+                 Opacity="0.7" />
+    </Grid>
+
+    <TextBox Grid.Row="1"
+             PlaceholderText="Filter properties"
+             Text="{Binding Shell.VisualEditorPropertyFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+    <DataGrid Grid.Row="2"
+              x:Name="PropertiesGrid"
+              ItemsSource="{Binding Shell.VisualEditorPropertiesView}"
+              SelectedItem="{Binding Shell.SelectedVisualEditorProperty, Mode=TwoWay}"
+              AutoGenerateColumns="False"
+              CanUserResizeColumns="True"
+              CanUserSortColumns="True"
+              GridLinesVisibility="Horizontal"
+              HeadersVisibility="Column"
+              BorderThickness="0"
+              RowBackground="Transparent"
+              ScrollViewer.HorizontalScrollBarVisibility="Auto"
+              ScrollViewer.VerticalScrollBarVisibility="Auto">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Property"
+                            Binding="{Binding Name}"
+                            IsReadOnly="True"
+                            Width="190"
+                            x:DataType="visualVm:VisualEditorPropertyViewModel" />
+        <DataGridTextColumn Header="Value"
+                            Binding="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                            IsReadOnly="False"
+                            Width="170"
+                            x:DataType="visualVm:VisualEditorPropertyViewModel" />
+        <DataGridTextColumn Header="Type"
+                            Binding="{Binding TypeName}"
+                            IsReadOnly="True"
+                            Width="120"
+                            x:DataType="visualVm:VisualEditorPropertyViewModel" />
+        <DataGridTextColumn Header="Priority"
+                            Binding="{Binding Priority}"
+                            IsReadOnly="True"
+                            Width="90"
+                            x:DataType="visualVm:VisualEditorPropertyViewModel" />
+      </DataGrid.Columns>
+      <DataGrid.Styles>
+        <Style Selector="DataGridRow TextBox">
+          <Setter Property="SelectionBrush" Value="LightBlue" />
+        </Style>
+      </DataGrid.Styles>
+    </DataGrid>
+  </Grid>
+</UserControl>

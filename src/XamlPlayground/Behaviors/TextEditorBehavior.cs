@@ -42,6 +42,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private bool _isApplyingXamlEdit;
     private int _completionRequestVersion;
     private int _quickInfoRequestVersion;
+    private int _foldingRefreshVersion;
 
     public string? Extension
     {
@@ -99,6 +100,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
             foldingTimer.Tick -= FoldingTimerOnTick;
         }
 
+        _foldingRefreshVersion++;
         UninstallFoldingManager();
         SubscribeToDocument(null);
         CloseCompletionWindow();
@@ -323,6 +325,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
 
     private void TextEditorOnTextChanged(object? sender, EventArgs e)
     {
+        ClearFoldings();
         ScheduleFoldingUpdate();
     }
 
@@ -331,8 +334,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         _foldingTimer?.Stop();
         UninstallFoldingManager();
         SubscribeToDocument(e.NewDocument);
-        InstallFoldingManager();
-        UpdateFoldings();
+        QueueFoldingRefresh();
     }
 
     private void DocumentOnChanged(object? sender, DocumentChangeEventArgs e)
@@ -482,7 +484,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         }
         else
         {
-            UpdateFoldings();
+            QueueFoldingRefresh();
         }
     }
 
@@ -768,7 +770,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
     {
         if (_foldingTimer is null)
         {
-            UpdateFoldings();
+            QueueFoldingRefresh();
             return;
         }
 
@@ -778,24 +780,74 @@ public class TextEditorBehavior : Behavior<TextEditor>
 
     private void UpdateFoldings()
     {
-        if (_textEditor?.Document is null || _foldingManager is null)
+        if (_textEditor?.Document is null ||
+            _textEditor.TextArea.Document is null ||
+            !ReferenceEquals(_textEditor.Document, _textEditor.TextArea.Document))
         {
             return;
         }
 
-        if (_xmlFoldingStrategy is not null)
+        InstallFoldingManager();
+        if (_foldingManager is null)
         {
-            _xmlFoldingStrategy.UpdateFoldings(_foldingManager, _textEditor.Document);
             return;
         }
 
-        if (_csharpFoldingStrategy is not null)
+        try
         {
-            _csharpFoldingStrategy.UpdateFoldings(_foldingManager, _textEditor.Document);
+            if (_xmlFoldingStrategy is not null)
+            {
+                _xmlFoldingStrategy.UpdateFoldings(_foldingManager, _textEditor.Document);
+                return;
+            }
+
+            if (_csharpFoldingStrategy is not null)
+            {
+                _csharpFoldingStrategy.UpdateFoldings(_foldingManager, _textEditor.Document);
+                return;
+            }
+
+            _foldingManager.UpdateFoldings([], -1);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+            UninstallFoldingManager();
+        }
+    }
+
+    private void QueueFoldingRefresh()
+    {
+        var version = ++_foldingRefreshVersion;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                if (version != _foldingRefreshVersion)
+                {
+                    return;
+                }
+
+                UpdateFoldings();
+            },
+            DispatcherPriority.Loaded);
+    }
+
+    private void ClearFoldings()
+    {
+        if (_foldingManager is null)
+        {
             return;
         }
 
-        _foldingManager.UpdateFoldings([], -1);
+        try
+        {
+            _foldingManager.UpdateFoldings([], -1);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+            UninstallFoldingManager();
+        }
     }
 
     private void InstallFoldingManager()

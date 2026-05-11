@@ -17,6 +17,15 @@
     <DataTemplate DataType="dockVm:SolutionExplorerDockViewModel">
       <dockViews:SolutionExplorerDockView />
     </DataTemplate>
+    <DataTemplate DataType="dockVm:VisualStructureDockViewModel">
+      <dockViews:VisualStructureDockView />
+    </DataTemplate>
+    <DataTemplate DataType="dockVm:VisualPropertiesDockViewModel">
+      <dockViews:VisualPropertiesDockView />
+    </DataTemplate>
+    <DataTemplate DataType="dockVm:VisualToolboxDockViewModel">
+      <dockViews:VisualToolboxDockView />
+    </DataTemplate>
     <DataTemplate DataType="dockVm:XamlEditorDockViewModel">
       <dockViews:XamlEditorDockView />
     </DataTemplate>
@@ -129,6 +138,7 @@
   <Application.Styles>
     <FluentTheme />
     <dockFluent:DockFluentTheme DensityStyle="Compact" />
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.v2.xaml" />
     <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
     <StyleInclude Source="avares://XamlPlayground/Controls/AdaptiveControl.axaml" />
     <Style Selector="ae|TextEditor.theme-aware">

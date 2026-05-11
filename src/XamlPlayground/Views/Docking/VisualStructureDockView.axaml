@@ -1,0 +1,155 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             xmlns:hier="clr-namespace:Avalonia.Controls.DataGridHierarchical;assembly=Avalonia.Controls.DataGrid"
+             mc:Ignorable="d" d:DesignWidth="280" d:DesignHeight="600"
+             x:Class="XamlPlayground.Views.Docking.VisualStructureDockView"
+             x:CompileBindings="True" x:DataType="vm:VisualStructureDockViewModel">
+  <UserControl.Resources>
+    <StreamGeometry x:Key="StructureRefreshIcon">M17.65,6.35C16.2,4.9 14.21,4 12,4C7.58,4 4,7.58 4,12S7.58,20 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.82,16.33 14.6,18 12,18C8.69,18 6,15.31 6,12S8.69,6 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z</StreamGeometry>
+    <StreamGeometry x:Key="StructureWrapIcon">M4,5H20V7H4V5M4,11H14C16.21,11 18,12.79 18,15C18,17.21 16.21,19 14,19H10V22L5,18L10,14V17H14C15.1,17 16,16.1 16,15C16,13.9 15.1,13 14,13H4V11Z</StreamGeometry>
+    <StreamGeometry x:Key="StructureUnwrapIcon">M4,5H20V7H4V5M4,11H20V13H4V11M4,17H15V14L20,18L15,22V19H4V17Z</StreamGeometry>
+    <StreamGeometry x:Key="StructureDeleteIcon">M9,3H15L16,5H21V7H3V5H8L9,3M6,9H18L17,21H7L6,9Z</StreamGeometry>
+    <StreamGeometry x:Key="StructureDuplicateIcon">M8,7H5V21H16V18H8V7M10,3H19V16H10V3Z</StreamGeometry>
+    <StreamGeometry x:Key="StructureMoveUpIcon">M7,14L12,9L17,14H14V20H10V14H7M5,4H19V6H5V4Z</StreamGeometry>
+    <StreamGeometry x:Key="StructureMoveDownIcon">M7,10H10V4H14V10H17L12,15L7,10M5,18H19V20H5V18Z</StreamGeometry>
+  </UserControl.Resources>
+  <UserControl.Styles>
+    <Style Selector="Button.structure-tool">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="MinWidth" Value="30" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}"
+             DragDrop.AllowDrop="True">
+    <Grid DockPanel.Dock="Top"
+          Margin="6"
+          ColumnDefinitions="*,Auto"
+          ColumnSpacing="8">
+      <TextBlock Text="{Binding Shell.VisualEditorSelectedElementTitle}"
+                 VerticalAlignment="Center"
+                 FontWeight="SemiBold"
+                 TextTrimming="CharacterEllipsis" />
+      <StackPanel Grid.Column="1"
+                  Orientation="Horizontal"
+                  Spacing="4">
+        <Button Name="StructureRefreshButton"
+                Classes="structure-tool"
+                ToolTip.Tip="Refresh"
+                Command="{Binding Shell.RefreshVisualEditorCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource StructureRefreshIcon}" />
+        </Button>
+        <Button Name="StructureWrapButton"
+                Classes="structure-tool"
+                ToolTip.Tip="Wrap"
+                Command="{Binding Shell.WrapVisualEditorSelectionCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource StructureWrapIcon}" />
+        </Button>
+        <Button Name="StructureUnwrapButton"
+                Classes="structure-tool"
+                ToolTip.Tip="Unwrap"
+                Command="{Binding Shell.UnwrapVisualEditorSelectionCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource StructureUnwrapIcon}" />
+        </Button>
+        <Button Name="StructureDuplicateButton"
+                Classes="structure-tool"
+                ToolTip.Tip="Duplicate"
+                Command="{Binding Shell.DuplicateVisualEditorElementCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource StructureDuplicateIcon}" />
+        </Button>
+        <Button Name="StructureMoveUpButton"
+                Classes="structure-tool"
+                ToolTip.Tip="Move up"
+                Command="{Binding Shell.MoveVisualEditorElementUpCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource StructureMoveUpIcon}" />
+        </Button>
+        <Button Name="StructureMoveDownButton"
+                Classes="structure-tool"
+                ToolTip.Tip="Move down"
+                Command="{Binding Shell.MoveVisualEditorElementDownCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource StructureMoveDownIcon}" />
+        </Button>
+        <Button Name="StructureDeleteButton"
+                Classes="structure-tool"
+                ToolTip.Tip="Delete"
+                Command="{Binding Shell.DeleteVisualEditorElementCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource StructureDeleteIcon}" />
+        </Button>
+      </StackPanel>
+    </Grid>
+
+    <Border DockPanel.Dock="Bottom"
+            BorderThickness="0,1,0,0"
+            BorderBrush="{DynamicResource EditorBorderBrush}"
+            Padding="6">
+      <TextBlock Text="{Binding Shell.VisualEditorStatus}"
+                 TextWrapping="Wrap"
+                 Opacity="0.75" />
+    </Border>
+
+    <DataGrid Name="StructureGrid"
+              HierarchicalModel="{Binding Shell.VisualEditorStructureModel}"
+              HierarchicalRowsEnabled="True"
+              Classes="hierarchical"
+              SelectedItem="{Binding Shell.SelectedVisualEditorNode, Mode=TwoWay}"
+              AutoScrollToSelectedItem="True"
+              AutoExpandSelectedItem="True"
+              SelectionMode="Single"
+              AutoGenerateColumns="False"
+              IsReadOnly="True"
+              CanUserSortColumns="True"
+              GridLinesVisibility="Horizontal"
+              HeadersVisibility="Column"
+              Margin="4">
+      <DataGrid.Columns>
+        <DataGridHierarchicalColumn Header="Element"
+                                    SortMemberPath="Item.Title"
+                                    Width="2*"
+                                    x:CompileBindings="False"
+                                    Binding="{Binding Item}">
+          <DataGridHierarchicalColumn.CellTemplate>
+            <DataTemplate x:DataType="visualVm:VisualEditorNodeViewModel">
+              <TextBlock Text="{Binding Title}"
+                         VerticalAlignment="Center"
+                         TextTrimming="CharacterEllipsis" />
+            </DataTemplate>
+          </DataGridHierarchicalColumn.CellTemplate>
+        </DataGridHierarchicalColumn>
+        <DataGridTemplateColumn Header="Path"
+                                SortMemberPath="Item.PathText"
+                                Width="96"
+                                x:CompileBindings="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="hier:HierarchicalNode">
+              <TextBlock x:DataType="visualVm:VisualEditorNodeViewModel"
+                         DataContext="{Binding Item}"
+                         Text="{Binding PathText}"
+                         TextTrimming="CharacterEllipsis" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>
