@@ -662,6 +662,7 @@ public sealed class MainViewModelTests
             Assert.Empty(viewModel.FilteredControlThemes);
             var fluentTemplate = Assert.Single(viewModel.FilteredFluentControlThemeTemplates);
             Assert.Equal("Button", fluentTemplate.TargetType);
+            Assert.Equal("Controls/Button.xaml", fluentTemplate.SourcePath);
 
             viewModel.ControlThemeSearchText = "missing";
 

@@ -106,9 +106,15 @@ public sealed class FluentControlThemeCatalog
             yield return new FluentControlThemeTemplate(
                 key,
                 targetType,
-                Path.GetRelativePath(SourceRoot!, path),
+                NormalizeResourcePath(Path.GetRelativePath(SourceRoot!, path)),
                 theme.ToString(SaveOptions.DisableFormatting));
         }
+    }
+
+    private static string NormalizeResourcePath(string path)
+    {
+        return path.Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
     }
 
     private static string? ResolveSourceRoot()
