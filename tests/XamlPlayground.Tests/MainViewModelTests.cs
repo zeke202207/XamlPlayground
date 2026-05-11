@@ -1,3 +1,4 @@
+using System.Reflection;
 using Avalonia;
 using Avalonia.Diagnostics;
 using Avalonia.Controls;
@@ -130,6 +131,57 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void RuntimePreview_InvalidSemanticXamlReportsErrorWithoutEditorFoldingCrash()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
+            viewModel.ActiveXamlFile!.Text = """
+                                             <ContentControl xmlns="https://github.com/avaloniaui">
+                                               <TextBlock Text="One" />
+                                               <TextBlock Text="Two" />
+                                             </ContentControl>
+                                             """;
+            viewModel.ActiveProject = null;
+            var dockable = new WorkspaceFileDocumentDockViewModel(viewModel, viewModel.ActiveXamlFile);
+            var view = new WorkspaceFileEditorDockView
+            {
+                DataContext = dockable
+            };
+            var window = new Window
+            {
+                Width = 640,
+                Height = 420,
+                Content = view
+            };
+
+            try
+            {
+                window.Show();
+                PumpLayout(window);
+
+                var runTask = RunPreviewImmediately(viewModel!);
+                Assert.True(runTask.IsCompleted);
+                runTask.GetAwaiter().GetResult();
+                PumpLayout(window!);
+                PumpLayout(window!);
+
+                Assert.Contains("multiple assignments", viewModel!.LastErrorMessage, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                window?.Close();
+                dockable?.Dispose();
+            }
+        });
+    }
+
+    [Fact]
     public async Task CompilerService_ReturnsCSharpCompilerDiagnostics()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -158,6 +210,9 @@ public sealed class MainViewModelTests
         var dockables = Enumerate(root).ToList();
         var documents = dockables.OfType<WorkspaceFileDocumentDockViewModel>().ToList();
         var solutionExplorer = Assert.Single(dockables.OfType<SolutionExplorerDockViewModel>());
+        var visualStructure = Assert.Single(dockables.OfType<VisualStructureDockViewModel>());
+        var visualProperties = Assert.Single(dockables.OfType<VisualPropertiesDockViewModel>());
+        var visualToolbox = Assert.Single(dockables.OfType<VisualToolboxDockViewModel>());
         var preview = Assert.Single(dockables.OfType<PreviewDockViewModel>());
         var diagnosticTreeTools = dockables.OfType<DiagnosticTreeDockViewModel>().ToList();
         var diagnosticTools = dockables.OfType<DiagnosticToolDockViewModel>().ToList();
@@ -176,6 +231,9 @@ public sealed class MainViewModelTests
                 Assert.Equal("Main.axaml.cs", document.File.Path);
             });
         Assert.Same(viewModel, solutionExplorer.Shell);
+        Assert.Same(viewModel, visualStructure.Shell);
+        Assert.Same(viewModel, visualProperties.Shell);
+        Assert.Same(viewModel, visualToolbox.Shell);
         Assert.Same(viewModel, preview.Shell);
         Assert.All(diagnosticTreeTools, diagnosticTool => Assert.Same(viewModel, diagnosticTool.Shell));
         Assert.All(diagnosticTools, diagnosticTool => Assert.Same(viewModel, diagnosticTool.Shell));
@@ -196,6 +254,9 @@ public sealed class MainViewModelTests
         Assert.NotNull(factory.ContextLocator);
         var contextLocator = factory.ContextLocator;
         Assert.Same(solutionExplorer, contextLocator["SolutionExplorer"]());
+        Assert.Same(visualStructure, contextLocator["VisualStructure"]());
+        Assert.Same(visualProperties, contextLocator["VisualProperties"]());
+        Assert.Same(visualToolbox, contextLocator["VisualToolbox"]());
         Assert.Same(preview, contextLocator["Preview"]());
         Assert.Same(diagnosticTreeTools[0], contextLocator["DiagnosticsCombinedTree"]());
         Assert.Same(diagnosticTreeTools[1], contextLocator["DiagnosticsLogicalTree"]());
@@ -350,6 +411,11 @@ public sealed class MainViewModelTests
                 Assert.Same(errors, bottomDock.ActiveDockable);
                 var errorsView = Assert.Single(dockControl.GetVisualDescendants().OfType<ErrorsDockView>());
                 var errorTextBox = Assert.Single(errorsView.GetVisualDescendants().OfType<TextBox>());
+                for (var i = 0; i < 5 && errorTextBox.Text != "Broken sample"; i++)
+                {
+                    PumpLayout(window);
+                }
+
                 Assert.Equal("Broken sample", errorTextBox.Text);
             }
             finally
@@ -390,6 +456,15 @@ public sealed class MainViewModelTests
         window.UpdateLayout();
         Dispatcher.UIThread.RunJobs(DispatcherPriority.Loaded);
         Dispatcher.UIThread.RunJobs();
+    }
+
+    private static Task RunPreviewImmediately(MainViewModel viewModel)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "RunInternal",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        return Assert.IsAssignableFrom<Task>(method.Invoke(viewModel, null));
     }
 
     private static void AssertDiagnosticTreeTool(

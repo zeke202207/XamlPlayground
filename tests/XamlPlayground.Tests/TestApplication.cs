@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Headless;
+using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Themes.Fluent;
 
 namespace XamlPlayground.Tests;
@@ -12,6 +13,10 @@ public sealed class TestApplication : Application
     public TestApplication()
     {
         Styles.Add(new FluentTheme());
+        Styles.Add(new StyleInclude(new Uri("avares://XamlPlayground.Tests/"))
+        {
+            Source = new Uri("avares://Avalonia.Controls.DataGrid/Themes/Fluent.v2.xaml")
+        });
     }
 
     public static void EnsureAvaloniaInitialized()
