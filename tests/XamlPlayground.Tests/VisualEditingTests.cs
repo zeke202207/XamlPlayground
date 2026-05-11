@@ -1531,6 +1531,29 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void PreviewView_SetPseudoClass_RemovesControlOwnedPseudoClassWithoutThrowing()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var button = new Button();
+        var setPseudoClass = typeof(PreviewView)
+            .GetMethod("SetPseudoClass", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(setPseudoClass);
+
+        var removeException = Record.Exception(() =>
+            setPseudoClass.Invoke(null, new object[] { button, ":pointerover", false }));
+        Assert.Null(removeException);
+
+        setPseudoClass.Invoke(null, new object[] { button, ":pointerover", true });
+        Assert.Contains(":pointerover", button.Classes);
+
+        removeException = Record.Exception(() =>
+            setPseudoClass.Invoke(null, new object[] { button, ":pointerover", false }));
+        Assert.Null(removeException);
+        Assert.DoesNotContain(":pointerover", button.Classes);
+    }
+
+    [Fact]
     public void HeadlessPreview_SelectsRenderedControlAndCapturesAdorner()
     {
         TestApplication.EnsureAvaloniaInitialized();
