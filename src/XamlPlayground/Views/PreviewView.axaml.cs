@@ -1012,7 +1012,11 @@ public partial class PreviewView : UserControl
         Rect selectionBounds)
     {
         return FindCurrentSelectedPreviewControl(viewModel, previewRoot) ??
-               FindPreviewControlBySelectionBounds(previewRoot, selectionBounds);
+               FindPreviewControlBySelectionBounds(previewRoot, selectionBounds) ??
+               FindPreviewControlNearSelectionBounds(
+                   previewRoot,
+                   selectionBounds,
+                   viewModel.SelectedVisualEditorNode?.Element.TypeName);
     }
 
     private Control? FindPreviewControlBySelectionBounds(Control previewRoot, Rect selectionBounds)
@@ -1028,6 +1032,42 @@ public partial class PreviewView : UserControl
                 SameBounds(bounds, selectionBounds))
             .OrderByDescending(control => control.GetVisualAncestors().Count())
             .FirstOrDefault();
+    }
+
+    private Control? FindPreviewControlNearSelectionBounds(
+        Control previewRoot,
+        Rect selectionBounds,
+        string? selectedTypeName)
+    {
+        return previewRoot
+            .GetVisualDescendants()
+            .OfType<Control>()
+            .Append(previewRoot)
+            .Where(control =>
+                control.TemplatedParent is null &&
+                IsPreviewDescendantOrRoot(control, previewRoot) &&
+                GetSelectionBounds(control) is { })
+            .Select(control =>
+            {
+                var bounds = GetSelectionBounds(control)!.Value;
+                var typeMatches = MatchesXamlType(control, selectedTypeName);
+                var overlapArea = GetOverlapArea(bounds, selectionBounds);
+                return new LiveResizeCandidate(
+                    control,
+                    typeMatches,
+                    overlapArea,
+                    GetCenterDistanceSquared(bounds, selectionBounds),
+                    Math.Abs(bounds.Width - selectionBounds.Width) + Math.Abs(bounds.Height - selectionBounds.Height),
+                    control.GetVisualAncestors().Count());
+            })
+            .Where(candidate => candidate.TypeMatches || candidate.OverlapArea > 0)
+            .OrderByDescending(candidate => candidate.TypeMatches)
+            .ThenByDescending(candidate => candidate.OverlapArea)
+            .ThenBy(candidate => candidate.CenterDistanceSquared)
+            .ThenBy(candidate => candidate.SizeDifference)
+            .ThenByDescending(candidate => candidate.Depth)
+            .FirstOrDefault()
+            .Control;
     }
 
     private static bool SameXamlElement(XamlElementSnapshot? left, XamlElementSnapshot right)
@@ -1835,6 +1875,45 @@ public partial class PreviewView : UserControl
                Math.Abs(left.Height - right.Height) < 0.5;
     }
 
+    private static bool MatchesXamlType(Control control, string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        var localTypeName = GetLocalXamlTypeName(typeName);
+        return string.Equals(control.GetType().Name, typeName, StringComparison.Ordinal) ||
+               string.Equals(control.GetType().Name, localTypeName, StringComparison.Ordinal);
+    }
+
+    private static string GetLocalXamlTypeName(string typeName)
+    {
+        var namespaceIndex = typeName.IndexOf(':', StringComparison.Ordinal);
+        if (namespaceIndex >= 0)
+        {
+            return typeName[(namespaceIndex + 1)..];
+        }
+
+        var typeIndex = typeName.LastIndexOf(".", StringComparison.Ordinal);
+        return typeIndex >= 0
+            ? typeName[(typeIndex + 1)..]
+            : typeName;
+    }
+
+    private static double GetOverlapArea(Rect left, Rect right)
+    {
+        var x = Math.Max(0, Math.Min(left.Right, right.Right) - Math.Max(left.Left, right.Left));
+        var y = Math.Max(0, Math.Min(left.Bottom, right.Bottom) - Math.Max(left.Top, right.Top));
+        return x * y;
+    }
+
+    private static double GetCenterDistanceSquared(Rect left, Rect right)
+    {
+        var delta = left.Center - right.Center;
+        return delta.X * delta.X + delta.Y * delta.Y;
+    }
+
     private static bool IsAfterPlacement(Control target, Point point, Rect bounds)
     {
         return GetInsertionOrientation(target) == Orientation.Horizontal
@@ -2100,6 +2179,14 @@ public partial class PreviewView : UserControl
     private readonly record struct GuideCandidate(Control Control, Rect Bounds);
 
     private readonly record struct GuideMatch(double Distance, Rect GuideBounds);
+
+    private readonly record struct LiveResizeCandidate(
+        Control? Control,
+        bool TypeMatches,
+        double OverlapArea,
+        double CenterDistanceSquared,
+        double SizeDifference,
+        int Depth);
 
     private sealed record PreviewSelectionCandidate(
         Control Control,
