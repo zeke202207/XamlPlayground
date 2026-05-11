@@ -35,10 +35,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\..\XmlParser-Roslyn\src\Microsoft.Language.Xml\**\*.cs"
-             Exclude="..\..\..\XmlParser-Roslyn\src\Microsoft.Language.Xml\bin\**;..\..\..\XmlParser-Roslyn\src\Microsoft.Language.Xml\obj\**"
+    <Compile Include="..\..\external\XmlParser-Roslyn\src\Microsoft.Language.Xml\**\*.cs"
+             Exclude="..\..\external\XmlParser-Roslyn\src\Microsoft.Language.Xml\bin\**;..\..\external\XmlParser-Roslyn\src\Microsoft.Language.Xml\obj\**"
              LinkBase="External\Microsoft.Language.Xml" />
-    <EmbeddedResource Include="..\..\..\XmlParser-Roslyn\src\Microsoft.Language.Xml\XmlResources.resx"
+    <EmbeddedResource Include="..\..\external\XmlParser-Roslyn\src\Microsoft.Language.Xml\XmlResources.resx"
                       LogicalName="Microsoft.Language.Xml.XmlResources.resources" />
   </ItemGroup>
 
