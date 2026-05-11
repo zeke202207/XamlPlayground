@@ -1103,13 +1103,39 @@ public partial class PreviewView : UserControl
 
     private Rect? GetSelectionBounds(Control control)
     {
-        var topLeft = control.TranslatePoint(default, PreviewSurface);
-        if (topLeft is null || control.Bounds.Width <= 0 || control.Bounds.Height <= 0)
+        if (control.Bounds.Width <= 0 || control.Bounds.Height <= 0)
         {
             return null;
         }
 
-        return new Rect(topLeft.Value, control.Bounds.Size);
+        if (control.TranslatePoint(default, PreviewSurface) is { } topLeft)
+        {
+            return new Rect(topLeft, control.Bounds.Size);
+        }
+
+        var controlTopLeftInPreview = control.TranslatePoint(default, this);
+        var surfaceTopLeftInPreview = PreviewSurface.TranslatePoint(default, this);
+        if (controlTopLeftInPreview is { } controlPoint &&
+            surfaceTopLeftInPreview is { } surfacePoint)
+        {
+            return new Rect(
+                new Point(controlPoint.X - surfacePoint.X, controlPoint.Y - surfacePoint.Y),
+                control.Bounds.Size);
+        }
+
+        var controlBounds = control.GetTransformedBounds();
+        var surfaceBounds = PreviewSurface.GetTransformedBounds();
+        if (controlBounds is { } transformedControlBounds &&
+            surfaceBounds is { } transformedSurfaceBounds)
+        {
+            var controlPosition = transformedControlBounds.Bounds.Position;
+            var surfacePosition = transformedSurfaceBounds.Bounds.Position;
+            return new Rect(
+                new Point(controlPosition.X - surfacePosition.X, controlPosition.Y - surfacePosition.Y),
+                transformedControlBounds.Bounds.Size);
+        }
+
+        return null;
     }
 
     private Control? FindSelectablePreviewControlAt(Point point, Control previewRoot)
