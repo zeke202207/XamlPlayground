@@ -4,3 +4,6 @@
 [submodule "external/XmlParser-Roslyn"]
 	path = external/XmlParser-Roslyn
 	url = https://github.com/wieslawsoltes/XmlParser-Roslyn.git
+[submodule "external/Avalonia"]
+	path = external/Avalonia
+	url = https://github.com/wieslawsoltes/Avalonia.git
