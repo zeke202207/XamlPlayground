@@ -549,12 +549,15 @@ public partial class PreviewView : UserControl
     private bool TryMoveSelectionToDirectionalContainer(MainViewModel viewModel, Key key)
     {
         if (viewModel.Control is not { } previewRoot ||
-            GetCurrentSelectionBounds(viewModel) is not { } sourceBounds)
+            GetCurrentSelectionBounds(viewModel) is not { } currentSelectionBounds)
         {
             return false;
         }
 
         var selectedControl = FindCurrentSelectedPreviewControl(viewModel, previewRoot);
+        var sourceBounds = selectedControl is not null && GetSelectionBounds(selectedControl) is { } selectedBounds
+            ? selectedBounds
+            : currentSelectionBounds;
         var selectedParent = selectedControl?.GetVisualParent() as Control;
         var target = previewRoot
             .GetVisualDescendants()
