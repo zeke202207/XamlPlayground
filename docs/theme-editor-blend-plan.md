@@ -365,23 +365,18 @@ Concrete first slice:
 | Task | Status | Notes |
 | --- | --- | --- |
 | Resource graph: resources, usages, duplicates, unresolved references | Done | `ResourceDictionaryAnalyzer` feeds `Resources`, `Usages`, and `Diagnostics` tabs. |
-| Resource operations: rename, duplicate, delete, open, apply | Done | Rename updates references. Duplicate and open work from the resource list. Delete has a guarded confirmation path. |
-| Delete resources with usages and automated cleanup | Done | First delete reports usages; second delete removes simple `{StaticResource ...}` / `{DynamicResource ...}` attribute references and deletes the resource. |
-| Property-grid resource picker | Done | Property suggestions include compatible resource references for `Theme`, brush, thickness, number, string, and content-like properties, with static/dynamic options where appropriate. |
+| Resource operations: rename, duplicate, delete, open, apply | Done | Rename updates references. Duplicate and open work from the resource list. Delete opens a modal diff/confirmation dialog. |
+| Delete resources with usages and automated cleanup | Done | Delete preview shows affected files, then confirmation removes simple `{StaticResource ...}` / `{DynamicResource ...}` attribute references and deletes the resource. |
+| Property-grid resource picker | Done | Property suggestions include compatible resource references for `Theme`, brush, thickness, number, string, collection, template, data, and content-like properties, with static/dynamic options where appropriate. |
 | Edit referenced resource from property grid | Done | The property panel can open the resource referenced by the current property value. |
 | Scoped template editing breadcrumb and return | Done | Creating/opening a control theme records owner document and source selection, then supports returning. |
 | Template contract inspection | Done | Selected themes list named template parts and `TemplateBinding` usage. |
 | Pseudo-class state preview | Done | State selection forces matching preview pseudo-classes without mutating XAML. |
 | Visual state selector editing | Done | The state panel can add or update setters inside a `Style Selector="^:state"` block. |
+| Selector-specific template part editing | Done | The Parts tool can target a named template part and add/update setters for the selected preview state selector. |
 | Theme project save/load | Done | `.xamltheme` v2 includes format metadata, file kind, saved time, and inferred base/light/dark variants; v1 packages still load. |
 | Variant dictionary visibility | Done | The `Variants` tab groups resource dictionaries by inferred base/light/dark variant. |
 | Side-by-side light/dark fixture previews | Done | The `Variants` tab can generate a `Design.PreviewWith` fixture showing selected themes in light and dark columns. |
-
-Possible later refinements:
-
-- Replace the guarded delete action with a modal diff/confirmation dialog once dialog infrastructure exists.
-- Extend compatibility filtering to collection/template/data resources when the editor gains structured object-resource authoring.
-- Add selector-specific visual editing for template parts, beyond creating/updating simple state setters.
 
 ## Sources
 
