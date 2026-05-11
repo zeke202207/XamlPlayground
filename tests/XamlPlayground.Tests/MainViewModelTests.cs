@@ -505,6 +505,67 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void InMemorySolutionFactory_AddOrUpdateResource_DoesNotOverwriteNonResourceFiles()
+    {
+        var solutionFactory = new InMemorySolutionFactory(_ => { });
+        var solution = solutionFactory.CreateSolution("ThemeApp", AvaloniaProjectTemplates.All[0]);
+        var project = Assert.Single(solution.Projects);
+        var mainView = project.FindFile("Views/MainView.axaml");
+        Assert.NotNull(mainView);
+        var originalMainViewText = mainView.Text;
+
+        var loadedFile = solutionFactory.AddOrUpdateResource(
+            project,
+            "Views/MainView.axaml",
+            "<ResourceDictionary />");
+
+        Assert.Equal(originalMainViewText, mainView.Text);
+        Assert.Equal(ProjectFileKind.Resource, loadedFile.Kind);
+        Assert.Equal("Themes/MainView.axaml", loadedFile.Path);
+        Assert.Equal("<ResourceDictionary />", loadedFile.Text);
+    }
+
+    [Fact]
+    public void ThemeProjectFiles_IncludeResourceDependenciesWhenCustomThemeExists()
+    {
+        var viewModel = new MainViewModel(null)
+        {
+            EnableAutoRun = false
+        };
+        var project = viewModel.ActiveProject;
+        Assert.NotNull(project);
+        var resourcesFile = project.FindFile("Styles/Resources.axaml");
+        Assert.NotNull(resourcesFile);
+        resourcesFile.Text = """
+                             <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                               <SolidColorBrush x:Key="SharedBrush" Color="Red" />
+                             </ResourceDictionary>
+                             """;
+        project.AddFile(new InMemoryProjectFile(
+            "Themes/MyButtonTheme1.axaml",
+            """
+            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+              <ControlTheme x:Key="MyButtonTheme1" TargetType="Button">
+                <Setter Property="Background" Value="{DynamicResource SharedBrush}" />
+              </ControlTheme>
+            </ResourceDictionary>
+            """,
+            ProjectFileKind.Resource));
+
+        var method = typeof(MainViewModel).GetMethod(
+            "GetControlThemeProjectFiles",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var themeFiles = Assert.IsAssignableFrom<IReadOnlyList<InMemoryProjectFile>>(
+            method.Invoke(viewModel, null));
+
+        Assert.Contains(themeFiles, file => file.Path == "Themes/MyButtonTheme1.axaml");
+        Assert.Contains(themeFiles, file => file.Path == "Styles/Resources.axaml");
+    }
+
+    [Fact]
     public void CreateCustomControlThemeCommand_AddsThemeResourceAndAppliesSelectedControl()
     {
         TestApplication.EnsureAvaloniaInitialized();

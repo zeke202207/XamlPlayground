@@ -3669,12 +3669,13 @@ public partial class MainViewModel
                     .Select(static file => (file.Path, file.Text)))
             .Select(static theme => theme.FilePath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (customThemeFilePaths.Count == 0)
+        {
+            return Array.Empty<InMemoryProjectFile>();
+        }
 
         return project.GetXamlFiles()
             .Where(static file => file.Kind == ProjectFileKind.Resource)
-            .Where(file =>
-                file.Path.StartsWith("Themes/", StringComparison.OrdinalIgnoreCase) ||
-                customThemeFilePaths.Contains(file.Path))
             .OrderBy(static file => file.Path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }

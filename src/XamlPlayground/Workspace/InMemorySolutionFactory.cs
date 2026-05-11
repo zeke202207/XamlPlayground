@@ -111,6 +111,16 @@ public sealed class InMemorySolutionFactory
         var normalizedPath = NormalizeResourcePath(path);
         if (project.FindFile(normalizedPath) is { } existing)
         {
+            if (existing.Kind != ProjectFileKind.Resource)
+            {
+                normalizedPath = CreateUniqueResourcePath(project, $"Themes/{CreateSafeThemeFileName(normalizedPath)}");
+                return project.AddFile(new InMemoryProjectFile(
+                    normalizedPath,
+                    xaml,
+                    ProjectFileKind.Resource,
+                    _fileChanged));
+            }
+
             existing.Text = xaml;
             return existing;
         }
