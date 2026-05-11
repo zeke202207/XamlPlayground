@@ -87,6 +87,7 @@ public partial class MainViewModel : ViewModelBase
         RunCommand = new RelayCommand(RunActiveDocument);
         ToggleThemeCommand = new RelayCommand(ToggleTheme);
         GistCommand = new AsyncRelayCommand<string?>(Gist);
+        InitializeVisualEditing();
         InitializeDockLayout();
 
         if (!string.IsNullOrEmpty(initialGist))
@@ -354,6 +355,7 @@ public partial class MainViewModel : ViewModelBase
 
         ActiveXamlFile = firstXaml;
         ActiveCodeFile = firstCode;
+        _visualEditorSelectedSelector = null;
 
         if (DockFactory is PlaygroundDockFactory factory && firstXaml is { })
         {
@@ -362,6 +364,8 @@ public partial class MainViewModel : ViewModelBase
                 : new[] { firstXaml };
             factory.ResetDocuments(files);
         }
+
+        RefreshVisualEditingModel(updateSourceSelection: false);
     }
 
     private ObservableCollection<SolutionExplorerNodeViewModel> BuildSolutionExplorer(InMemorySolution solution)
@@ -587,7 +591,14 @@ public partial class MainViewModel : ViewModelBase
             ActiveXamlFile = project.FindXamlForCodeBehind(file) ?? ActiveXamlFile;
         }
 
+        var xamlFileChanged = !ReferenceEquals(previousPreviewFile, ActiveXamlFile);
+        if (xamlFileChanged)
+        {
+            _visualEditorSelectedSelector = null;
+        }
+
         WorkspaceStatus = $"{project.Name}: {file.Path}";
+        RefreshVisualEditingModel(updateSourceSelection: !xamlFileChanged);
 
         if (!_openingSample &&
             EnableAutoRun &&
@@ -630,6 +641,11 @@ public partial class MainViewModel : ViewModelBase
 
     private void OnProjectFileChanged(InMemoryProjectFile file)
     {
+        if (ReferenceEquals(file, ActiveXamlFile))
+        {
+            RefreshVisualEditingModel(updateSourceSelection: false);
+        }
+
         if (!EnableAutoRun || !ReferenceEquals(file, ActiveXamlFile) && !ReferenceEquals(file, ActiveCodeFile))
         {
             return;
@@ -759,7 +775,7 @@ public partial class MainViewModel : ViewModelBase
                 diagnosticsMessage,
                 FormatXamlDiagnostics(xamlDiagnostics),
                 FormatException(exception));
-            Console.WriteLine(exception);
+            Console.WriteLine(LastErrorMessage);
         }
         finally
         {
