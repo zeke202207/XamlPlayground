@@ -193,7 +193,7 @@ public partial class PreviewView : UserControl
                 point,
                 sourceBounds,
                 e,
-                FindCurrentSelectedPreviewControl(viewModel, previewRoot));
+                FindLiveResizePreviewControl(viewModel, previewRoot, sourceBounds));
             return;
         }
 
@@ -205,7 +205,7 @@ public partial class PreviewView : UserControl
                 point,
                 geometryBounds,
                 e,
-                FindCurrentSelectedPreviewControl(viewModel, previewRoot));
+                FindLiveResizePreviewControl(viewModel, previewRoot, geometryBounds));
             return;
         }
 
@@ -1004,6 +1004,30 @@ public partial class PreviewView : UserControl
 
         var document = _sourceSelectionMutationEngine.Analyze(xamlFile.Text);
         return FindPreviewControlForXamlElement(previewRoot, document, selected);
+    }
+
+    private Control? FindLiveResizePreviewControl(
+        MainViewModel viewModel,
+        Control previewRoot,
+        Rect selectionBounds)
+    {
+        return FindCurrentSelectedPreviewControl(viewModel, previewRoot) ??
+               FindPreviewControlBySelectionBounds(previewRoot, selectionBounds);
+    }
+
+    private Control? FindPreviewControlBySelectionBounds(Control previewRoot, Rect selectionBounds)
+    {
+        return previewRoot
+            .GetVisualDescendants()
+            .OfType<Control>()
+            .Append(previewRoot)
+            .Where(control =>
+                control.TemplatedParent is null &&
+                IsPreviewDescendantOrRoot(control, previewRoot) &&
+                GetSelectionBounds(control) is { } bounds &&
+                SameBounds(bounds, selectionBounds))
+            .OrderByDescending(control => control.GetVisualAncestors().Count())
+            .FirstOrDefault();
     }
 
     private static bool SameXamlElement(XamlElementSnapshot? left, XamlElementSnapshot right)
