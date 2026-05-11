@@ -90,6 +90,42 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MutationEngine_PreservesVisualContentInsideContentPropertyElements()
+    {
+        var engine = new XamlMutationEngine();
+        var xaml = """
+                   <ContentControl xmlns="https://github.com/avaloniaui">
+                     <ContentControl.Content>
+                       <Button x:Name="Action" Content="Save" />
+                     </ContentControl.Content>
+                   </ContentControl>
+                   """;
+
+        var snapshot = engine.Analyze(xaml);
+        var changed = engine.SetProperty(xaml, XamlElementSelector.ByPath(0), "Content", "Apply");
+
+        Assert.Empty(snapshot.Diagnostics);
+        Assert.DoesNotContain(snapshot.Elements, element => element.TypeName == "ContentControl.Content");
+        Assert.Collection(
+            snapshot.Elements,
+            root =>
+            {
+                Assert.Equal("ContentControl", root.TypeName);
+                Assert.Equal(Array.Empty<int>(), root.Path);
+                Assert.Equal(1, root.ChildElementCount);
+            },
+            button =>
+            {
+                Assert.Equal("Button", button.TypeName);
+                Assert.Equal("Action", button.Name);
+                Assert.Equal(new[] { 0 }, button.Path);
+                Assert.Equal("Save", button.Attributes["Content"]);
+            });
+        Assert.Empty(changed.Diagnostics);
+        Assert.Contains("<Button x:Name=\"Action\" Content=\"Apply\" />", changed.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MutationEngine_SetsAddsAndRemovesProperties()
     {
         var engine = new XamlMutationEngine();

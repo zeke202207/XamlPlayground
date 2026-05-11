@@ -728,14 +728,37 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
 
     private static IEnumerable<IXmlElementSyntax> GetVisualDescendantsAndSelf(IXmlElementSyntax root)
     {
-        return root.DescendantsAndSelf()
-            .Where(static element => !IsInMemberElementTree(element));
+        yield return root;
+
+        foreach (var child in GetDirectChildElements(root))
+        {
+            foreach (var descendant in GetVisualDescendantsAndSelf(child))
+            {
+                yield return descendant;
+            }
+        }
     }
 
     private static IEnumerable<IXmlElementSyntax> GetDirectChildElements(IXmlElementSyntax element)
     {
-        return GetDirectElementContent(element)
-            .Where(static child => !IsMemberElement(child));
+        foreach (var child in GetDirectElementContent(element))
+        {
+            if (!IsMemberElement(child))
+            {
+                yield return child;
+                continue;
+            }
+
+            if (!IsVisualContentMemberElement(child))
+            {
+                continue;
+            }
+
+            foreach (var visualChild in GetDirectChildElements(child))
+            {
+                yield return visualChild;
+            }
+        }
     }
 
     private static IEnumerable<IXmlElementSyntax> GetDirectElementContent(IXmlElementSyntax element)
@@ -749,23 +772,48 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
             string.Equals(child.NameNode.FullName, elementName, StringComparison.Ordinal));
     }
 
-    private static bool IsInMemberElementTree(IXmlElementSyntax element)
-    {
-        for (var current = element; current is not null; current = current.Parent)
-        {
-            if (IsMemberElement(current))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private static bool IsMemberElement(IXmlElementSyntax element)
     {
         return element.Parent is not null &&
                element.NameNode.FullName.Contains('.', StringComparison.Ordinal);
+    }
+
+    private static bool IsVisualContentMemberElement(IXmlElementSyntax element)
+    {
+        var propertyName = GetMemberPropertyName(element);
+        if (propertyName.Length == 0 ||
+            IsNonVisualMemberProperty(propertyName))
+        {
+            return false;
+        }
+
+        return propertyName is "Child" or "Children" or "Content" or "Footer" or "Header" or "Icon" or "Items" or
+                   "Pane" ||
+               propertyName.EndsWith("Child", StringComparison.Ordinal) ||
+               propertyName.EndsWith("Children", StringComparison.Ordinal) ||
+               propertyName.EndsWith("Content", StringComparison.Ordinal);
+    }
+
+    private static bool IsNonVisualMemberProperty(string propertyName)
+    {
+        return propertyName.EndsWith("Bindings", StringComparison.Ordinal) ||
+               propertyName.EndsWith("Definitions", StringComparison.Ordinal) ||
+               propertyName.EndsWith("Dictionaries", StringComparison.Ordinal) ||
+               propertyName.EndsWith("Resources", StringComparison.Ordinal) ||
+               propertyName.EndsWith("Styles", StringComparison.Ordinal) ||
+               propertyName.EndsWith("Template", StringComparison.Ordinal) ||
+               propertyName.EndsWith("Templates", StringComparison.Ordinal) ||
+               propertyName.EndsWith("Transitions", StringComparison.Ordinal) ||
+               propertyName is "DataContext" or "RenderTransform" or "Resources" or "Styles" or "Transitions";
+    }
+
+    private static string GetMemberPropertyName(IXmlElementSyntax element)
+    {
+        var fullName = element.NameNode.FullName;
+        var separator = fullName.LastIndexOf('.');
+        return separator < 0 || separator == fullName.Length - 1
+            ? string.Empty
+            : fullName[(separator + 1)..];
     }
 
     private static XmlAttributeSyntax? FindAttribute(IXmlElementSyntax element, string propertyName)
