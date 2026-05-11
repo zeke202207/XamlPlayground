@@ -3406,10 +3406,7 @@ public sealed class VisualEditingTests
         var previewSurface = Assert.Single(
             preview.GetVisualDescendants().OfType<Grid>(),
             grid => grid.Name == "PreviewSurface");
-        var topLeft = control.TranslatePoint(default, previewSurface);
-        Assert.NotNull(topLeft);
-
-        var point = topLeft.Value + new Vector(control.Bounds.Width / 2, control.Bounds.Height / 2);
+        var point = GetPreviewControlCenter(preview, previewSurface, control);
         var pointer = new Avalonia.Input.Pointer(
             Avalonia.Input.Pointer.GetNextFreeId(),
             PointerType.Mouse,
@@ -3417,6 +3414,39 @@ public sealed class VisualEditingTests
 
         preview.RaiseEvent(CreatePointerPressedArgs(preview, previewSurface, pointer, point, modifiers));
         preview.RaiseEvent(CreatePointerReleasedArgs(preview, previewSurface, pointer, point, modifiers));
+    }
+
+    private static Point GetPreviewControlCenter(
+        PreviewView preview,
+        Control previewSurface,
+        Control control)
+    {
+        var topLeft = control.TranslatePoint(default, previewSurface);
+        if (topLeft is { } point)
+        {
+            return point + new Vector(control.Bounds.Width / 2, control.Bounds.Height / 2);
+        }
+
+        var controlTopLeftInPreview = control.TranslatePoint(default, preview);
+        var surfaceTopLeftInPreview = previewSurface.TranslatePoint(default, preview);
+        if (controlTopLeftInPreview is { } controlPoint &&
+            surfaceTopLeftInPreview is { } surfacePoint)
+        {
+            return controlPoint - surfacePoint + new Vector(control.Bounds.Width / 2, control.Bounds.Height / 2);
+        }
+
+        var controlBounds = control.GetTransformedBounds();
+        var surfaceBounds = previewSurface.GetTransformedBounds();
+        if (controlBounds is { } transformedControlBounds &&
+            surfaceBounds is { } transformedSurfaceBounds)
+        {
+            var center = transformedControlBounds.Bounds.Center;
+            var origin = transformedSurfaceBounds.Bounds.Position;
+            return new Point(center.X - origin.X, center.Y - origin.Y);
+        }
+
+        Assert.Fail($"Could not map {control.GetType().Name} '{control.Name}' to the preview surface.");
+        return default;
     }
 
     private static PointerPressedEventArgs CreatePointerPressedArgs(

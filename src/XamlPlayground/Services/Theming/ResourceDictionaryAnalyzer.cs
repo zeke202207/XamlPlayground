@@ -122,13 +122,8 @@ public static class ResourceDictionaryAnalyzer
             yield break;
         }
 
-        foreach (var element in xaml.Root.Elements())
+        foreach (var element in EnumerateResourceElements(xaml.Root))
         {
-            if (element.Name.LocalName is "Design.PreviewWith" or "ResourceDictionary.MergedDictionaries")
-            {
-                continue;
-            }
-
             var key = element.Attribute(XamlNamespace + "Key")?.Value;
             if (string.IsNullOrWhiteSpace(key))
             {
@@ -141,6 +136,34 @@ public static class ResourceDictionaryAnalyzer
                 element.Attribute("TargetType")?.Value ?? element.Attribute("DataType")?.Value,
                 document.Path,
                 GetLineNumber(element));
+        }
+    }
+
+    private static IEnumerable<XElement> EnumerateResourceElements(XElement dictionary)
+    {
+        foreach (var element in dictionary.Elements())
+        {
+            switch (element.Name.LocalName)
+            {
+                case "Design.PreviewWith":
+                case "ResourceDictionary.MergedDictionaries":
+                    continue;
+
+                case "ResourceDictionary.ThemeDictionaries":
+                    foreach (var themeDictionary in element.Elements().Where(static child => child.Name.LocalName == "ResourceDictionary"))
+                    {
+                        foreach (var resource in EnumerateResourceElements(themeDictionary))
+                        {
+                            yield return resource;
+                        }
+                    }
+
+                    continue;
+
+                default:
+                    yield return element;
+                    break;
+            }
         }
     }
 

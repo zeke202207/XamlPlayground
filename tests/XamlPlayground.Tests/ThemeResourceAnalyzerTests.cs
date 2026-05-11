@@ -17,6 +17,11 @@ public sealed class ThemeResourceAnalyzerTests
                                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
                   <SolidColorBrush x:Key="AccentBrush" Color="Red" />
                   <ControlTheme x:Key="MyButtonTheme1" TargetType="Button" />
+                  <ResourceDictionary.ThemeDictionaries>
+                    <ResourceDictionary x:Key="Light">
+                      <SolidColorBrush x:Key="LightOnlyBrush" Color="White" />
+                    </ResourceDictionary>
+                  </ResourceDictionary.ThemeDictionaries>
                 </ResourceDictionary>
                 """,
                 IsResourceDictionary: true),
@@ -35,6 +40,7 @@ public sealed class ThemeResourceAnalyzerTests
                 <UserControl xmlns="https://github.com/avaloniaui"
                              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
                   <Button Theme="{StaticResource MyButtonTheme1}"
+                          BorderBrush="{DynamicResource LightOnlyBrush}"
                           Background="{DynamicResource MissingBrush}" />
                 </UserControl>
                 """,
@@ -45,9 +51,15 @@ public sealed class ThemeResourceAnalyzerTests
             resource.Key == "MyButtonTheme1" &&
             resource.ResourceType == "ControlTheme" &&
             resource.TargetType == "Button");
+        Assert.Contains(analysis.Resources, resource =>
+            resource.Key == "LightOnlyBrush" &&
+            resource.ResourceType == "SolidColorBrush");
         Assert.Contains(analysis.References, reference =>
             reference.Key == "MyButtonTheme1" &&
             reference.Kind == ThemeResourceReferenceKind.StaticResource);
+        Assert.Contains(analysis.References, reference =>
+            reference.Key == "LightOnlyBrush" &&
+            reference.Kind == ThemeResourceReferenceKind.DynamicResource);
         Assert.Contains(analysis.References, reference =>
             reference.Key == "MissingBrush" &&
             reference.Kind == ThemeResourceReferenceKind.DynamicResource);
@@ -55,6 +67,8 @@ public sealed class ThemeResourceAnalyzerTests
             diagnostic.Message.Contains("Duplicate resource key 'AccentBrush'", System.StringComparison.Ordinal)));
         Assert.Contains(analysis.Diagnostics, diagnostic =>
             diagnostic.Message.Contains("Resource 'MissingBrush' is referenced but not defined", System.StringComparison.Ordinal));
+        Assert.DoesNotContain(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Resource 'LightOnlyBrush' is referenced but not defined", System.StringComparison.Ordinal));
     }
 
     [Fact]
