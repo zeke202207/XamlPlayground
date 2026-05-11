@@ -1038,7 +1038,8 @@ public partial class PreviewView : UserControl
         Control previewRoot,
         XamlElementSnapshot? selected)
     {
-        if (selected is null)
+        if (selected is null ||
+            string.IsNullOrWhiteSpace(selected.Name))
         {
             return null;
         }
@@ -1051,11 +1052,8 @@ public partial class PreviewView : UserControl
                 control.TemplatedParent is null &&
                 IsPreviewDescendantOrRoot(control, previewRoot) &&
                 MatchesXamlType(control, selected.TypeName) &&
-                (string.IsNullOrWhiteSpace(selected.Name) ||
-                 string.Equals(control.Name, selected.Name, StringComparison.Ordinal)))
-            .OrderByDescending(control => !string.IsNullOrWhiteSpace(selected.Name) &&
-                                          string.Equals(control.Name, selected.Name, StringComparison.Ordinal))
-            .ThenByDescending(control => control.GetVisualAncestors().Count())
+                string.Equals(control.Name, selected.Name, StringComparison.Ordinal))
+            .OrderByDescending(control => control.GetVisualAncestors().Count())
             .FirstOrDefault();
     }
 

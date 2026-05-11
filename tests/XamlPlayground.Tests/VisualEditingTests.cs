@@ -1910,6 +1910,66 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void HeadlessPreview_LiveResizeIdentityFallbackRequiresStableName()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         Width="220"
+                                                         Height="140"
+                                                         Background="White">
+                                               <Button Width="120" Height="32" Content="First" />
+                                               <Button Width="120" Height="32" Content="Second" />
+                                             </StackPanel>
+                                             """;
+            viewModel.Control = Assert.IsAssignableFrom<Control>(
+                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+
+            var preview = new PreviewView
+            {
+                Width = 360,
+                Height = 240,
+                DataContext = viewModel
+            };
+            var window = new Window
+            {
+                Width = 380,
+                Height = 280,
+                Background = Brushes.White,
+                Content = preview
+            };
+
+            try
+            {
+                window.Show();
+                PumpLayout(window);
+
+                var selected = FindVisualEditorNodeByPath(viewModel.VisualEditorStructureNodes, 1)?.Element;
+                Assert.NotNull(selected);
+                var result = typeof(PreviewView)
+                    .GetMethod("FindPreviewControlByElementIdentity", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(preview, new object?[]
+                    {
+                        viewModel.Control,
+                        selected
+                    });
+
+                Assert.Null(result);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void HeadlessPreview_DraggingChildShowsPanelPlacementAndGuides()
     {
         TestApplication.EnsureAvaloniaInitialized();
