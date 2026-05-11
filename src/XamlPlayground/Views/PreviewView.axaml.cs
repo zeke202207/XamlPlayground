@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
@@ -34,6 +36,8 @@ public partial class PreviewView : UserControl
     private string? _lastToolboxDropDocumentText;
     private LiveResizeState? _liveResizeState;
     private MainViewModel? _sourceSelectionViewModel;
+    private bool _previewStateApplyQueued;
+    private string? _lastForcedThemePreviewState;
     private readonly IVisualTreeSnapshotService _sourceSelectionSnapshotService = new AvaloniaVisualTreeSnapshotService();
     private readonly IXamlMutationEngine _sourceSelectionMutationEngine = new XamlMutationEngine();
     private readonly XamlVisualTreeMapper _sourceSelectionMapper = new();
@@ -93,6 +97,58 @@ public partial class PreviewView : UserControl
         {
             QueueSynchronizePreviewSelectionFromSource();
         }
+
+        if (e.PropertyName is nameof(MainViewModel.SelectedThemePreviewState) or
+            nameof(MainViewModel.Control))
+        {
+            QueueApplyForcedThemePreviewState();
+        }
+    }
+
+    private void QueueApplyForcedThemePreviewState()
+    {
+        if (_previewStateApplyQueued)
+        {
+            return;
+        }
+
+        _previewStateApplyQueued = true;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                _previewStateApplyQueued = false;
+                ApplyForcedThemePreviewState();
+            },
+            DispatcherPriority.Loaded);
+    }
+
+    private void ApplyForcedThemePreviewState()
+    {
+        if (_sourceSelectionViewModel is not { Control: { } previewRoot } viewModel)
+        {
+            return;
+        }
+
+        var nextState = viewModel.SelectedThemePreviewState?.State;
+        var states = viewModel.ThemePreviewStates
+            .Select(static state => state.State)
+            .Append(_lastForcedThemePreviewState ?? string.Empty)
+            .Where(static state => !string.IsNullOrWhiteSpace(state) && !string.Equals(state, "normal", StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var targetType = viewModel.SelectedControlTheme?.TargetType;
+
+        foreach (var control in EnumerateThemePreviewControls(previewRoot, targetType))
+        {
+            foreach (var state in states)
+            {
+                SetPseudoClass(control, $":{state}", string.Equals(state, nextState, StringComparison.Ordinal));
+            }
+        }
+
+        _lastForcedThemePreviewState = string.Equals(nextState, "normal", StringComparison.Ordinal)
+            ? null
+            : nextState;
     }
 
     private void QueueSynchronizePreviewSelectionFromSource()
@@ -2285,6 +2341,41 @@ public partial class PreviewView : UserControl
                 yield break;
             }
         }
+    }
+
+    private static IEnumerable<Control> EnumerateThemePreviewControls(Control previewRoot, string? targetType)
+    {
+        var controls = new[] { previewRoot }.Concat(previewRoot.GetVisualDescendants().OfType<Control>());
+        foreach (var control in controls)
+        {
+            if (control is PreviewView or ScrollViewer or ExclusiveContentControl)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(targetType) ||
+                string.Equals(control.GetType().Name, targetType, StringComparison.Ordinal))
+            {
+                yield return control;
+            }
+        }
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "Preview state forcing intentionally reflects Avalonia's protected pseudo-class collection for design-time only.")]
+    private static void SetPseudoClass(Control control, string pseudoClass, bool active)
+    {
+        var pseudoClasses = typeof(StyledElement)
+            .GetProperty("PseudoClasses", BindingFlags.Instance | BindingFlags.NonPublic)?
+            .GetValue(control);
+        var setMethod = pseudoClasses?
+            .GetType()
+            .GetMethod(
+                "Set",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                types: new[] { typeof(string), typeof(bool) },
+                modifiers: null);
+        setMethod?.Invoke(pseudoClasses, new object[] { pseudoClass, active });
     }
 
     private static bool IsPreviewDescendantOrRoot(Control control, Control previewRoot)

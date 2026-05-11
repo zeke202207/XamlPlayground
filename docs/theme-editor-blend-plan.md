@@ -360,6 +360,24 @@ Concrete first slice:
 4. Add a `Resources` tab and `Diagnostics` tab to the Themes panel.
 5. Add tests for duplicate keys, missing references, and usage discovery.
 
+## Implementation Status
+
+The first implementation pass now covers the core Blend-inspired workflow:
+
+- Resource graph: resources, usages, duplicate diagnostics, and missing-reference diagnostics.
+- Resource operations: rename with reference updates, duplicate, delete unused resources, open, and apply compatible `ControlTheme` resources.
+- Scoped template editing: creating or opening a control theme records a return breadcrumb back to the owning document and selected control.
+- State inspection: selected control themes expose pseudo-class states, matching selectors, template parts, and `TemplateBinding` usage.
+- Preview state forcing: selecting a pseudo-class state attempts to force that state on matching preview controls without mutating XAML.
+- Theme packaging: `.xamltheme` saves include format metadata, file kind, inferred base/light/dark variants, and remain compatible with version 1 packages.
+
+Remaining high-value follow-up work:
+
+- Add confirmation UI for deleting resources with usages and offer automated reference removal.
+- Add a richer resource picker from the property grid with property-type compatibility filtering beyond `ControlTheme`.
+- Add visual state editing commands that create or update selectors, not just inspect and preview them.
+- Add side-by-side light/dark fixture previews for variant dictionaries.
+
 ## Sources
 
 - Microsoft Learn: Modify the style of objects in Blend for Visual Studio.

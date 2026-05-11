@@ -43,6 +43,8 @@ public partial class MainViewModel
     private bool _isSynchronizingVisualEditorPropertySelection;
     private bool _isApplyingVisualEditorPropertyGridValue;
     private XamlElementSelector? _visualEditorCurrentContainerSelector;
+    private ThemeEditScope? _themeEditScope;
+    private ControlThemeAnalysis _selectedControlThemeAnalysis = ControlThemeAnalysis.Empty;
 
     [ObservableProperty] private ObservableCollection<VisualEditorNodeViewModel> _visualEditorStructureNodes = new();
     [ObservableProperty] private HierarchicalModel<VisualEditorNodeViewModel>? _visualEditorStructureModel;
@@ -119,9 +121,19 @@ public partial class MainViewModel
     [ObservableProperty] private string _controlThemeSelectedTargetType = "No control selected.";
     [ObservableProperty] private string _controlThemeStatus = "No custom control themes.";
     [ObservableProperty] private ObservableCollection<ThemeResourceViewModel> _themeResources = new();
+    [ObservableProperty] private ObservableCollection<ThemeResourceViewModel> _filteredThemeResources = new();
     [ObservableProperty] private ThemeResourceViewModel? _selectedThemeResource;
     [ObservableProperty] private ObservableCollection<ThemeResourceUsageViewModel> _selectedThemeResourceUsages = new();
     [ObservableProperty] private ObservableCollection<ThemeResourceDiagnosticViewModel> _themeResourceDiagnostics = new();
+    [ObservableProperty] private ObservableCollection<ThemeResourceDiagnosticViewModel> _filteredThemeResourceDiagnostics = new();
+    [ObservableProperty] private string _themeResourceKeyEditText = string.Empty;
+    [ObservableProperty] private bool _isThemeEditScopeActive;
+    [ObservableProperty] private string _themeEditScopeBreadcrumb = string.Empty;
+    [ObservableProperty] private ObservableCollection<ThemePreviewStateViewModel> _themePreviewStates = new();
+    [ObservableProperty] private ThemePreviewStateViewModel? _selectedThemePreviewState;
+    [ObservableProperty] private ObservableCollection<ThemeStateSelectorViewModel> _themeStateSelectors = new();
+    [ObservableProperty] private ObservableCollection<ThemeTemplatePartViewModel> _themeTemplateParts = new();
+    [ObservableProperty] private ObservableCollection<ThemeTemplateBindingViewModel> _themeTemplateBindings = new();
 
     public bool VisualEditorPreviewContentHitTestVisible => !VisualEditorDesignerMode;
 
@@ -189,6 +201,18 @@ public partial class MainViewModel
 
     public ICommand OpenSelectedControlThemeCommand { get; private set; } = null!;
 
+    public ICommand OpenSelectedThemeResourceCommand { get; private set; } = null!;
+
+    public ICommand RenameSelectedThemeResourceCommand { get; private set; } = null!;
+
+    public ICommand DuplicateSelectedThemeResourceCommand { get; private set; } = null!;
+
+    public ICommand DeleteSelectedThemeResourceCommand { get; private set; } = null!;
+
+    public ICommand ApplySelectedThemeResourceCommand { get; private set; } = null!;
+
+    public ICommand ReturnFromThemeEditScopeCommand { get; private set; } = null!;
+
     public ICommand ImportControlThemeFilesCommand { get; private set; } = null!;
 
     public ICommand ExportSelectedControlThemeCommand { get; private set; } = null!;
@@ -221,6 +245,12 @@ public partial class MainViewModel
         ApplyControlThemeCommand = new RelayCommand<ControlThemeDefinitionViewModel?>(ApplyControlTheme, CanApplyControlTheme);
         RemoveControlThemeCommand = new RelayCommand(RemoveControlTheme, CanRemoveControlTheme);
         OpenSelectedControlThemeCommand = new RelayCommand(OpenSelectedControlTheme, () => SelectedControlTheme is not null);
+        OpenSelectedThemeResourceCommand = new RelayCommand(OpenSelectedThemeResource, () => SelectedThemeResource is not null);
+        RenameSelectedThemeResourceCommand = new RelayCommand(RenameSelectedThemeResource, CanRenameSelectedThemeResource);
+        DuplicateSelectedThemeResourceCommand = new RelayCommand(DuplicateSelectedThemeResource, () => SelectedThemeResource is not null);
+        DeleteSelectedThemeResourceCommand = new RelayCommand(DeleteSelectedThemeResource, () => SelectedThemeResource is not null);
+        ApplySelectedThemeResourceCommand = new RelayCommand(ApplySelectedThemeResource, CanApplySelectedThemeResource);
+        ReturnFromThemeEditScopeCommand = new RelayCommand(ReturnFromThemeEditScope, () => IsThemeEditScopeActive);
         ImportControlThemeFilesCommand = new AsyncRelayCommand(ImportControlThemeFiles, () => ActiveProject is not null);
         ExportSelectedControlThemeCommand = new AsyncRelayCommand(ExportSelectedControlTheme, () => SelectedControlTheme is not null);
         SaveControlThemeProjectCommand = new AsyncRelayCommand(SaveControlThemeProject, CanSaveControlThemeProject);
@@ -336,6 +366,7 @@ public partial class MainViewModel
 
     partial void OnSelectedControlThemeChanged(ControlThemeDefinitionViewModel? value)
     {
+        RefreshSelectedControlThemeAnalysis();
         NotifyControlThemeCommandsChanged();
     }
 
@@ -346,7 +377,23 @@ public partial class MainViewModel
 
     partial void OnSelectedThemeResourceChanged(ThemeResourceViewModel? value)
     {
+        ThemeResourceKeyEditText = value?.Key ?? string.Empty;
         RefreshSelectedThemeResourceUsages();
+        RefreshSelectedResourceThemeAnalysis(value);
+        NotifyControlThemeCommandsChanged();
+    }
+
+    partial void OnThemeResourceKeyEditTextChanged(string value)
+    {
+        NotifyControlThemeCommandsChanged();
+    }
+
+    partial void OnSelectedThemePreviewStateChanged(ThemePreviewStateViewModel? value)
+    {
+        RefreshThemeStateSelectors();
+        ControlThemeStatus = value is null || string.Equals(value.State, "normal", StringComparison.Ordinal)
+            ? "Theme preview state: Normal."
+            : $"Theme preview state: {value.PseudoClass}.";
     }
 
     partial void OnVisualEditorPropertyFilterChanged(string value)
@@ -2030,6 +2077,14 @@ public partial class MainViewModel
 
     private readonly record struct DesignerThickness(double Left, double Top, double Right, double Bottom);
 
+    private sealed record ThemeEditScope(
+        InMemoryProjectFile OwnerFile,
+        string? SelectionFilePath,
+        int SelectionStart,
+        int SelectionLength,
+        int CaretOffset,
+        string ThemeKey);
+
     private static IReadOnlyDictionary<string, string>? CreateToolboxInsertionProperties(
         Control targetParent,
         Point? canvasPosition)
@@ -2148,9 +2203,10 @@ public partial class MainViewModel
                 diagnostic.FilePath,
                 diagnostic.Line)));
 
+        RefreshThemeResourceFilters();
         SelectedThemeResource =
-            ThemeResources.FirstOrDefault(resource => string.Equals(resource.Key, previousKey, StringComparison.Ordinal)) ??
-            ThemeResources.FirstOrDefault();
+            FilteredThemeResources.FirstOrDefault(resource => string.Equals(resource.Key, previousKey, StringComparison.Ordinal)) ??
+            FilteredThemeResources.FirstOrDefault();
         RefreshSelectedThemeResourceUsages();
     }
 
@@ -2170,6 +2226,22 @@ public partial class MainViewModel
                         reference.Snippet)));
     }
 
+    private void RefreshThemeResourceFilters()
+    {
+        var query = ControlThemeSearchText?.Trim();
+        var resources = ThemeResources.AsEnumerable();
+        var diagnostics = ThemeResourceDiagnostics.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            resources = resources.Where(resource => MatchesThemeResourceSearch(resource, query));
+            diagnostics = diagnostics.Where(diagnostic => MatchesThemeResourceSearch(diagnostic, query));
+        }
+
+        FilteredThemeResources = new ObservableCollection<ThemeResourceViewModel>(resources);
+        FilteredThemeResourceDiagnostics = new ObservableCollection<ThemeResourceDiagnosticViewModel>(diagnostics);
+    }
+
     private void RefreshControlThemeFilters(string? preferredThemeKey = null)
     {
         var query = ControlThemeSearchText?.Trim();
@@ -2184,8 +2256,15 @@ public partial class MainViewModel
 
         FilteredControlThemes = new ObservableCollection<ControlThemeDefinitionViewModel>(customThemes);
         FilteredFluentControlThemeTemplates = new ObservableCollection<FluentControlThemeTemplateViewModel>(fluentTemplates);
+        RefreshThemeResourceFilters();
 
         SelectedControlTheme = SelectFilteredControlTheme(preferredThemeKey ?? SelectedControlTheme?.Key);
+        if (SelectedThemeResource is null ||
+            !FilteredThemeResources.Any(resource => ReferenceEquals(resource, SelectedThemeResource)))
+        {
+            SelectedThemeResource = FilteredThemeResources.FirstOrDefault();
+        }
+
         UpdateControlThemeStatus(query);
 
         NotifyControlThemeCommandsChanged();
@@ -2244,6 +2323,29 @@ public partial class MainViewModel
                 template.Title.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool MatchesThemeResourceSearch(ThemeResourceViewModel resource, string query)
+    {
+        return query
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .All(token =>
+                resource.Key.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                resource.ResourceType.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                resource.TargetType.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                resource.FilePath.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                resource.Title.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool MatchesThemeResourceSearch(ThemeResourceDiagnosticViewModel diagnostic, string query)
+    {
+        return query
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .All(token =>
+                diagnostic.Severity.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                diagnostic.Message.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                diagnostic.FilePath.Contains(token, StringComparison.OrdinalIgnoreCase) ||
+                diagnostic.Title.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
     public IReadOnlyList<ControlThemeDefinitionViewModel> GetControlThemesForSelectedVisualElement()
     {
         return GetControlThemesForSelectedVisualElement(ControlThemes);
@@ -2299,6 +2401,81 @@ public partial class MainViewModel
         return true;
     }
 
+    private void RefreshSelectedResourceThemeAnalysis(ThemeResourceViewModel? resource)
+    {
+        if (resource is { ResourceType: "ControlTheme" } &&
+            ControlThemes.FirstOrDefault(theme =>
+                string.Equals(theme.Key, resource.Key, StringComparison.Ordinal) &&
+                string.Equals(theme.FilePath, resource.FilePath, StringComparison.OrdinalIgnoreCase)) is { } theme)
+        {
+            SelectedControlTheme = theme;
+            return;
+        }
+
+        _selectedControlThemeAnalysis = ControlThemeAnalysis.Empty;
+        ThemePreviewStates = new ObservableCollection<ThemePreviewStateViewModel>();
+        SelectedThemePreviewState = null;
+        ThemeStateSelectors = new ObservableCollection<ThemeStateSelectorViewModel>();
+        ThemeTemplateParts = new ObservableCollection<ThemeTemplatePartViewModel>();
+        ThemeTemplateBindings = new ObservableCollection<ThemeTemplateBindingViewModel>();
+    }
+
+    private void RefreshSelectedControlThemeAnalysis()
+    {
+        if (ActiveProject is null ||
+            SelectedControlTheme is not { } selectedTheme ||
+            ActiveProject.FindFile(selectedTheme.FilePath) is not { } themeFile)
+        {
+            _selectedControlThemeAnalysis = ControlThemeAnalysis.Empty;
+            ThemePreviewStates = new ObservableCollection<ThemePreviewStateViewModel>();
+            SelectedThemePreviewState = null;
+            ThemeStateSelectors = new ObservableCollection<ThemeStateSelectorViewModel>();
+            ThemeTemplateParts = new ObservableCollection<ThemeTemplatePartViewModel>();
+            ThemeTemplateBindings = new ObservableCollection<ThemeTemplateBindingViewModel>();
+            return;
+        }
+
+        var previousState = SelectedThemePreviewState?.State;
+        _selectedControlThemeAnalysis = ControlThemeAnalyzer.Analyze(themeFile.Text, selectedTheme.Key);
+        var stateSelectorKeys = _selectedControlThemeAnalysis.StateSelectors
+            .Select(static selector => selector.State)
+            .ToHashSet(StringComparer.Ordinal);
+        ThemePreviewStates = new ObservableCollection<ThemePreviewStateViewModel>(
+            _selectedControlThemeAnalysis.AvailableStates.Select(state => new ThemePreviewStateViewModel(
+                state,
+                stateSelectorKeys.Contains(state))));
+        ThemeTemplateParts = new ObservableCollection<ThemeTemplatePartViewModel>(
+            _selectedControlThemeAnalysis.Parts.Select(static part => new ThemeTemplatePartViewModel(
+                part.Name,
+                part.Type,
+                part.Line)));
+        ThemeTemplateBindings = new ObservableCollection<ThemeTemplateBindingViewModel>(
+            _selectedControlThemeAnalysis.TemplateBindings.Select(static binding => new ThemeTemplateBindingViewModel(
+                binding.Property,
+                binding.Line,
+                binding.Snippet)));
+        SelectedThemePreviewState =
+            ThemePreviewStates.FirstOrDefault(state => string.Equals(state.State, previousState, StringComparison.Ordinal)) ??
+            ThemePreviewStates.FirstOrDefault(state => string.Equals(state.State, "normal", StringComparison.Ordinal)) ??
+            ThemePreviewStates.FirstOrDefault();
+        RefreshThemeStateSelectors();
+    }
+
+    private void RefreshThemeStateSelectors()
+    {
+        var state = SelectedThemePreviewState?.State;
+        ThemeStateSelectors = string.IsNullOrWhiteSpace(state) ||
+                              string.Equals(state, "normal", StringComparison.Ordinal)
+            ? new ObservableCollection<ThemeStateSelectorViewModel>()
+            : new ObservableCollection<ThemeStateSelectorViewModel>(
+                _selectedControlThemeAnalysis.StateSelectors
+                    .Where(selector => string.Equals(selector.State, state, StringComparison.Ordinal))
+                    .Select(static selector => new ThemeStateSelectorViewModel(
+                        selector.State,
+                        selector.Selector,
+                        selector.Line)));
+    }
+
     private bool CanCreateCustomControlTheme()
     {
         return ActiveProject is not null &&
@@ -2325,6 +2502,7 @@ public partial class MainViewModel
         var themeKey = CreateUniqueControlThemeKey(project, targetType);
         var xaml = ControlThemeResourceBuilder.CreateResourceDictionary(template, themeKey);
         var themeFile = _solutionFactory.AddControlThemeResource(project, themeKey, xaml);
+        var ownerFile = ActiveXamlFile;
 
         SolutionExplorerNodes = Solution is { } solution
             ? BuildSolutionExplorer(solution)
@@ -2337,6 +2515,11 @@ public partial class MainViewModel
         {
             SelectedControlTheme = createdTheme;
             ApplyControlTheme(createdTheme);
+        }
+
+        if (ownerFile is not null)
+        {
+            EnterThemeEditScope(ownerFile, themeKey);
         }
 
         OpenWorkspaceFile(themeFile);
@@ -2418,8 +2601,235 @@ public partial class MainViewModel
         var file = ActiveProject.FindFile(SelectedControlTheme.FilePath);
         if (file is not null)
         {
+            if (ActiveXamlFile is { } ownerFile &&
+                !ReferenceEquals(ownerFile, file))
+            {
+                EnterThemeEditScope(ownerFile, SelectedControlTheme.Key);
+            }
+
             OpenWorkspaceFile(file);
         }
+    }
+
+    private void OpenSelectedThemeResource()
+    {
+        if (ActiveProject is null || SelectedThemeResource is null)
+        {
+            return;
+        }
+
+        var file = ActiveProject.FindFile(SelectedThemeResource.FilePath);
+        if (file is null)
+        {
+            return;
+        }
+
+        if (SelectedThemeResource.ResourceType == "ControlTheme" &&
+            ActiveXamlFile is { } ownerFile &&
+            !ReferenceEquals(ownerFile, file))
+        {
+            EnterThemeEditScope(ownerFile, SelectedThemeResource.Key);
+        }
+
+        OpenWorkspaceFile(file);
+    }
+
+    private bool CanRenameSelectedThemeResource()
+    {
+        var newKey = ThemeResourceKeyEditText.Trim();
+        return SelectedThemeResource is { } selectedResource &&
+               !string.IsNullOrWhiteSpace(newKey) &&
+               !string.Equals(selectedResource.Key, newKey, StringComparison.Ordinal) &&
+               !ThemeResources.Any(resource =>
+                   !ReferenceEquals(resource, selectedResource) &&
+                   string.Equals(resource.Key, newKey, StringComparison.Ordinal));
+    }
+
+    private void RenameSelectedThemeResource()
+    {
+        if (ActiveProject is not { } project ||
+            SelectedThemeResource is not { } selectedResource ||
+            project.FindFile(selectedResource.FilePath) is not { } resourceFile)
+        {
+            return;
+        }
+
+        var newKey = ThemeResourceKeyEditText.Trim();
+        var rename = ThemeResourceEditor.RenameResourceKey(resourceFile.Text, selectedResource.Key, newKey);
+        if (!rename.Changed)
+        {
+            ControlThemeStatus = rename.Error ?? $"Could not rename {selectedResource.Key}.";
+            return;
+        }
+
+        resourceFile.Text = rename.Text;
+        foreach (var file in project.GetXamlFiles())
+        {
+            file.Text = ThemeResourceEditor.RenameResourceReferences(file.Text, selectedResource.Key, newKey);
+        }
+
+        RefreshWorkspaceAfterThemeFileChanges(resourceFile);
+        SelectThemeResource(newKey);
+        ControlThemeStatus = $"Renamed {selectedResource.Key} to {newKey}.";
+    }
+
+    private void DuplicateSelectedThemeResource()
+    {
+        if (ActiveProject is not { } project ||
+            SelectedThemeResource is not { } selectedResource ||
+            project.FindFile(selectedResource.FilePath) is not { } resourceFile)
+        {
+            return;
+        }
+
+        var duplicateKey = CreateUniqueThemeResourceKey(selectedResource.Key);
+        var duplicate = ThemeResourceEditor.DuplicateResource(resourceFile.Text, selectedResource.Key, duplicateKey);
+        if (!duplicate.Changed)
+        {
+            ControlThemeStatus = duplicate.Error ?? $"Could not duplicate {selectedResource.Key}.";
+            return;
+        }
+
+        resourceFile.Text = duplicate.Text;
+        RefreshWorkspaceAfterThemeFileChanges(resourceFile);
+        SelectThemeResource(duplicateKey);
+        ControlThemeStatus = $"Duplicated {selectedResource.Key} as {duplicateKey}.";
+    }
+
+    private void DeleteSelectedThemeResource()
+    {
+        if (ActiveProject is not { } project ||
+            SelectedThemeResource is not { } selectedResource ||
+            project.FindFile(selectedResource.FilePath) is not { } resourceFile)
+        {
+            return;
+        }
+
+        var usages = _themeResourceAnalysis.References
+            .Where(reference => string.Equals(reference.Key, selectedResource.Key, StringComparison.Ordinal))
+            .ToArray();
+        if (usages.Length > 0)
+        {
+            ControlThemeStatus = $"Cannot delete {selectedResource.Key}; it has {usages.Length} usage(s).";
+            return;
+        }
+
+        var delete = ThemeResourceEditor.DeleteResource(resourceFile.Text, selectedResource.Key);
+        if (!delete.Changed)
+        {
+            ControlThemeStatus = delete.Error ?? $"Could not delete {selectedResource.Key}.";
+            return;
+        }
+
+        if (delete.RemovedLastResource &&
+            resourceFile.Path.StartsWith("Themes/", StringComparison.OrdinalIgnoreCase))
+        {
+            project.Files.Remove(resourceFile);
+            if (ReferenceEquals(ActiveXamlFile, resourceFile))
+            {
+                ActiveXamlFile = project.GetXamlFiles().FirstOrDefault(file => file.Kind == ProjectFileKind.Xaml) ??
+                                 project.GetXamlFiles().FirstOrDefault();
+                RefreshVisualEditingModel(updateSourceSelection: false);
+            }
+
+            RefreshWorkspaceAfterThemeFileChanges(null);
+        }
+        else
+        {
+            resourceFile.Text = delete.Text;
+            RefreshWorkspaceAfterThemeFileChanges(resourceFile);
+        }
+
+        ControlThemeStatus = $"Deleted {selectedResource.Key}.";
+    }
+
+    private bool CanApplySelectedThemeResource()
+    {
+        return SelectedThemeResource is { ResourceType: "ControlTheme" } selectedResource &&
+               ControlThemes.FirstOrDefault(theme =>
+                   string.Equals(theme.Key, selectedResource.Key, StringComparison.Ordinal) &&
+                   string.Equals(theme.FilePath, selectedResource.FilePath, StringComparison.OrdinalIgnoreCase)) is { } theme &&
+               CanApplyControlTheme(theme);
+    }
+
+    private void ApplySelectedThemeResource()
+    {
+        if (SelectedThemeResource is not { ResourceType: "ControlTheme" } selectedResource)
+        {
+            ControlThemeStatus = "Select a ControlTheme resource first.";
+            return;
+        }
+
+        var theme = ControlThemes.FirstOrDefault(theme =>
+            string.Equals(theme.Key, selectedResource.Key, StringComparison.Ordinal) &&
+            string.Equals(theme.FilePath, selectedResource.FilePath, StringComparison.OrdinalIgnoreCase));
+        if (theme is null)
+        {
+            ControlThemeStatus = $"{selectedResource.Key} is not a custom ControlTheme.";
+            return;
+        }
+
+        ApplyControlTheme(theme);
+    }
+
+    private void SelectThemeResource(string key)
+    {
+        SelectedThemeResource =
+            FilteredThemeResources.FirstOrDefault(resource => string.Equals(resource.Key, key, StringComparison.Ordinal)) ??
+            ThemeResources.FirstOrDefault(resource => string.Equals(resource.Key, key, StringComparison.Ordinal));
+    }
+
+    private string CreateUniqueThemeResourceKey(string sourceKey)
+    {
+        var baseKey = sourceKey.EndsWith("Copy", StringComparison.Ordinal)
+            ? sourceKey
+            : $"{sourceKey}Copy";
+        var key = baseKey;
+        var index = 2;
+        while (ThemeResources.Any(resource => string.Equals(resource.Key, key, StringComparison.Ordinal)))
+        {
+            key = $"{baseKey}{index}";
+            index++;
+        }
+
+        return key;
+    }
+
+    private void EnterThemeEditScope(InMemoryProjectFile ownerFile, string themeKey)
+    {
+        _themeEditScope = new ThemeEditScope(
+            ownerFile,
+            VisualEditorSourceSelectionFilePath,
+            VisualEditorSourceSelectionStart,
+            VisualEditorSourceSelectionLength,
+            VisualEditorSourceSelectionStart,
+            themeKey);
+        IsThemeEditScopeActive = true;
+        ThemeEditScopeBreadcrumb = $"{ownerFile.Path} > {themeKey}";
+        (ReturnFromThemeEditScopeCommand as RelayCommand)?.NotifyCanExecuteChanged();
+    }
+
+    private void ReturnFromThemeEditScope()
+    {
+        if (_themeEditScope is not { } scope)
+        {
+            return;
+        }
+
+        _themeEditScope = null;
+        IsThemeEditScopeActive = false;
+        ThemeEditScopeBreadcrumb = string.Empty;
+        OpenWorkspaceFile(scope.OwnerFile);
+        if (!string.IsNullOrWhiteSpace(scope.SelectionFilePath))
+        {
+            SelectVisualEditorSourceRange(
+                scope.SelectionFilePath,
+                scope.SelectionStart,
+                scope.SelectionLength,
+                scope.CaretOffset);
+        }
+
+        (ReturnFromThemeEditScopeCommand as RelayCommand)?.NotifyCanExecuteChanged();
     }
 
     private async Task ImportControlThemeFiles()
@@ -2638,6 +3048,12 @@ public partial class MainViewModel
         (ApplyControlThemeCommand as RelayCommand<ControlThemeDefinitionViewModel?>)?.NotifyCanExecuteChanged();
         (RemoveControlThemeCommand as RelayCommand)?.NotifyCanExecuteChanged();
         (OpenSelectedControlThemeCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (OpenSelectedThemeResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (RenameSelectedThemeResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (DuplicateSelectedThemeResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (DeleteSelectedThemeResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (ApplySelectedThemeResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (ReturnFromThemeEditScopeCommand as RelayCommand)?.NotifyCanExecuteChanged();
         (ImportControlThemeFilesCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         (ExportSelectedControlThemeCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         (SaveControlThemeProjectCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();

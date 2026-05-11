@@ -391,19 +391,55 @@ public sealed class MainViewModelTests
         var document = ThemeProjectStorage.Load(json);
 
         Assert.Equal(ThemeProjectStorage.CurrentVersion, document.Version);
+        Assert.Equal(ThemeProjectStorage.FormatName, document.Format);
         Assert.Equal("ThemeSet", document.Name);
+        Assert.Contains(ThemeProjectStorage.BaseVariant, document.Variants);
         Assert.Collection(
             document.Files,
             file =>
             {
                 Assert.Equal("Themes/MyButtonTheme1.axaml", file.Path);
                 Assert.Equal("<ResourceDictionary />", file.Text);
+                Assert.Equal(ThemeProjectStorage.ResourceFileKind, file.Kind);
+                Assert.Equal(ThemeProjectStorage.BaseVariant, file.Variant);
             },
             file =>
             {
                 Assert.Equal("Themes/MyTextBoxTheme1.axaml", file.Path);
                 Assert.Equal("<ResourceDictionary />", file.Text);
+                Assert.Equal(ThemeProjectStorage.ResourceFileKind, file.Kind);
+                Assert.Equal(ThemeProjectStorage.BaseVariant, file.Variant);
             });
+    }
+
+    [Fact]
+    public void ThemeProjectStorage_LoadsVersionOneAndInfersThemeVariants()
+    {
+        var json = """
+                   {
+                     "version": 1,
+                     "name": "LegacyThemeSet",
+                     "files": [
+                       {
+                         "path": "Themes/Palette.Light.axaml",
+                         "text": "<ResourceDictionary />"
+                       },
+                       {
+                         "path": "Themes/Palette.Dark.axaml",
+                         "text": "<ResourceDictionary />"
+                       }
+                     ]
+                   }
+                   """;
+
+        var document = ThemeProjectStorage.Load(json);
+
+        Assert.Equal(ThemeProjectStorage.CurrentVersion, document.Version);
+        Assert.Equal("LegacyThemeSet", document.Name);
+        Assert.Contains("light", document.Variants);
+        Assert.Contains("dark", document.Variants);
+        Assert.Contains(document.Files, file => file.Path == "Themes/Palette.Light.axaml" && file.Variant == "light");
+        Assert.Contains(document.Files, file => file.Path == "Themes/Palette.Dark.axaml" && file.Variant == "dark");
     }
 
     [Fact]
@@ -534,6 +570,62 @@ public sealed class MainViewModelTests
             Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, buttonStart, 0, buttonStart));
             var contextMenuThemes = Assert.Single(viewModel.GetControlThemesForSelectedVisualElement());
             Assert.Equal("MyButtonTheme1", contextMenuThemes.Key);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", previousThemeRoot);
+            Directory.Delete(themeRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ThemeResourceCommands_RenameDuplicateAndWarnBeforeDeletingUsedResource()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var themeRoot = CreateTemporaryFluentThemeRoot();
+        var previousThemeRoot = Environment.GetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH");
+        Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", themeRoot);
+
+        try
+        {
+            var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
+            var mainFile = viewModel.ActiveXamlFile!;
+            mainFile.Text = """
+                            <UserControl xmlns="https://github.com/avaloniaui"
+                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <Button x:Name="ActionButton" Content="Save" />
+                            </UserControl>
+                            """;
+            var buttonStart = mainFile.Text.IndexOf("<Button", StringComparison.Ordinal);
+            Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, buttonStart, 0, buttonStart));
+            viewModel.CreateCustomControlThemeCommand.Execute(null);
+
+            var themeFile = viewModel.ActiveProject!.FindFile("Themes/MyButtonTheme1.axaml");
+            Assert.NotNull(themeFile);
+            viewModel.SelectedThemeResource = Assert.Single(viewModel.ThemeResources, resource => resource.Key == "MyButtonTheme1");
+            viewModel.ThemeResourceKeyEditText = "PrimaryButtonTheme";
+
+            Assert.True(viewModel.RenameSelectedThemeResourceCommand.CanExecute(null));
+            viewModel.RenameSelectedThemeResourceCommand.Execute(null);
+
+            Assert.Contains("x:Key=\"PrimaryButtonTheme\"", themeFile.Text, StringComparison.Ordinal);
+            Assert.Contains("Theme=\"{StaticResource PrimaryButtonTheme}\"", mainFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("MyButtonTheme1", mainFile.Text, StringComparison.Ordinal);
+
+            viewModel.DuplicateSelectedThemeResourceCommand.Execute(null);
+
+            Assert.Contains(viewModel.ThemeResources, resource => resource.Key == "PrimaryButtonThemeCopy");
+            Assert.Contains("x:Key=\"PrimaryButtonThemeCopy\"", themeFile.Text, StringComparison.Ordinal);
+
+            viewModel.SelectedThemeResource = Assert.Single(viewModel.ThemeResources, resource => resource.Key == "PrimaryButtonTheme");
+            viewModel.DeleteSelectedThemeResourceCommand.Execute(null);
+
+            Assert.Contains("Cannot delete PrimaryButtonTheme", viewModel.ControlThemeStatus, StringComparison.Ordinal);
+            Assert.Contains("x:Key=\"PrimaryButtonTheme\"", themeFile.Text, StringComparison.Ordinal);
         }
         finally
         {

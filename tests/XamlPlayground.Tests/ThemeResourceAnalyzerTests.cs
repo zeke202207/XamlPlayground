@@ -56,4 +56,72 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.Contains(analysis.Diagnostics, diagnostic =>
             diagnostic.Message.Contains("Resource 'MissingBrush' is referenced but not defined", System.StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void ThemeResourceEditor_RenamesReferencesDuplicatesAndDeletesTopLevelResources()
+    {
+        const string xaml = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <Design.PreviewWith>
+                                <Button Theme="{StaticResource MyButtonTheme1}" />
+                              </Design.PreviewWith>
+                              <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+                              <ControlTheme x:Key="MyButtonTheme1" TargetType="Button" />
+                            </ResourceDictionary>
+                            """;
+
+        var renamed = ThemeResourceEditor.RenameResourceKey(xaml, "MyButtonTheme1", "PrimaryButtonTheme");
+        var references = ThemeResourceEditor.RenameResourceReferences(
+            renamed.Text,
+            "MyButtonTheme1",
+            "PrimaryButtonTheme");
+        var duplicated = ThemeResourceEditor.DuplicateResource(references, "PrimaryButtonTheme", "SecondaryButtonTheme");
+        var deleted = ThemeResourceEditor.DeleteResource(duplicated.Text, "AccentBrush");
+
+        Assert.True(renamed.Changed);
+        Assert.Contains("x:Key=\"PrimaryButtonTheme\"", references, System.StringComparison.Ordinal);
+        Assert.Contains("Theme=\"{StaticResource PrimaryButtonTheme}\"", references, System.StringComparison.Ordinal);
+        Assert.True(duplicated.Changed);
+        Assert.Contains("x:Key=\"SecondaryButtonTheme\"", duplicated.Text, System.StringComparison.Ordinal);
+        Assert.True(deleted.Changed);
+        Assert.DoesNotContain("AccentBrush", deleted.Text, System.StringComparison.Ordinal);
+        Assert.False(deleted.RemovedLastResource);
+    }
+
+    [Fact]
+    public void ControlThemeAnalyzer_FindsStatesPartsAndTemplateBindings()
+    {
+        const string xaml = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <ControlTheme x:Key="MyButtonTheme1" TargetType="Button">
+                                <Setter Property="Template">
+                                  <ControlTemplate>
+                                    <Border x:Name="PART_Chrome"
+                                            Padding="{TemplateBinding Padding}">
+                                      <ContentPresenter Content="{TemplateBinding Content}" />
+                                    </Border>
+                                  </ControlTemplate>
+                                </Setter>
+                                <Style Selector="^:pointerover /template/ Border#PART_Chrome">
+                                  <Setter Property="Opacity" Value="0.8" />
+                                </Style>
+                                <Style Selector="^:pressed /template/ Border#PART_Chrome">
+                                  <Setter Property="Opacity" Value="0.6" />
+                                </Style>
+                              </ControlTheme>
+                            </ResourceDictionary>
+                            """;
+
+        var analysis = ControlThemeAnalyzer.Analyze(xaml, "MyButtonTheme1");
+
+        Assert.Equal("Button", analysis.TargetType);
+        Assert.Contains(analysis.Parts, part => part.Name == "PART_Chrome" && part.Type == "Border");
+        Assert.Contains(analysis.TemplateBindings, binding => binding.Property == "Padding");
+        Assert.Contains(analysis.TemplateBindings, binding => binding.Property == "Content");
+        Assert.Contains(analysis.AvailableStates, state => state == "normal");
+        Assert.Contains(analysis.StateSelectors, selector => selector.State == "pointerover");
+        Assert.Contains(analysis.StateSelectors, selector => selector.State == "pressed");
+    }
 }

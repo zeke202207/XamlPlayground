@@ -295,3 +295,84 @@ public sealed class ThemeResourceDiagnosticViewModel : ViewModelBase
 
     public string Title => $"{Severity}: {Message}";
 }
+
+public sealed class ThemePreviewStateViewModel : ViewModelBase
+{
+    public ThemePreviewStateViewModel(string state, bool hasSelectors)
+    {
+        State = state;
+        HasSelectors = hasSelectors;
+    }
+
+    public string State { get; }
+
+    public bool HasSelectors { get; }
+
+    public string PseudoClass => string.Equals(State, "normal", StringComparison.Ordinal)
+        ? string.Empty
+        : $":{State}";
+
+    public string Title => string.Equals(State, "normal", StringComparison.Ordinal)
+        ? "Normal"
+        : PseudoClass;
+}
+
+public sealed class ThemeStateSelectorViewModel : ViewModelBase
+{
+    public ThemeStateSelectorViewModel(string state, string selector, int? line)
+    {
+        State = state;
+        Selector = selector;
+        Line = line;
+    }
+
+    public string State { get; }
+
+    public string Selector { get; }
+
+    public int? Line { get; }
+
+    public string Title => Line is { } line
+        ? $"{Selector} : line {line}"
+        : Selector;
+}
+
+public sealed class ThemeTemplatePartViewModel : ViewModelBase
+{
+    public ThemeTemplatePartViewModel(string name, string type, int? line)
+    {
+        Name = name;
+        Type = type;
+        Line = line;
+    }
+
+    public string Name { get; }
+
+    public string Type { get; }
+
+    public int? Line { get; }
+
+    public string Title => Line is { } line
+        ? $"{Name} - {Type} : line {line}"
+        : $"{Name} - {Type}";
+}
+
+public sealed class ThemeTemplateBindingViewModel : ViewModelBase
+{
+    public ThemeTemplateBindingViewModel(string property, int line, string snippet)
+    {
+        Property = property;
+        Line = line;
+        Snippet = snippet;
+    }
+
+    public string Property { get; }
+
+    public int Line { get; }
+
+    public string Snippet { get; }
+
+    public string Title => Line > 0
+        ? $"{Property} : line {Line}"
+        : Property;
+}
