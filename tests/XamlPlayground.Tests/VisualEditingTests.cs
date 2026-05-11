@@ -705,6 +705,47 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_ToolboxCommandInsertsIntoSelectedEmptyDecoratorContainer()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <Border x:Name="Target"
+                                                       Width="120"
+                                                       Height="80"
+                                                       Background="LightBlue" />
+                                               <Button x:Name="Peer" Content="Peer" />
+                                             </StackPanel>
+                                             """;
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+            viewModel.SelectedVisualEditorNode = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "Target");
+            Assert.Equal("Border #Target", viewModel.VisualEditorCurrentContainerTitle);
+
+            viewModel.SelectedVisualEditorToolboxItem = Assert.Single(
+                viewModel.VisualEditorToolboxItems,
+                item => item.TypeName == "TextBlock");
+            viewModel.InsertSelectedToolboxItemCommand.Execute(null);
+
+            var updated = viewModel.ActiveXamlFile.Text;
+            var targetStart = updated.IndexOf("x:Name=\"Target\"", StringComparison.Ordinal);
+            var targetEnd = updated.IndexOf("</Border>", targetStart, StringComparison.Ordinal);
+            var inserted = updated.IndexOf("<TextBlock", targetStart, StringComparison.Ordinal);
+            var peer = updated.IndexOf("x:Name=\"Peer\"", StringComparison.Ordinal);
+
+            Assert.True(targetStart >= 0);
+            Assert.True(targetEnd > targetStart);
+            Assert.True(inserted > targetStart && inserted < targetEnd);
+            Assert.True(peer > targetEnd);
+        });
+    }
+
+    [Fact]
     public void MainViewModel_DesignerManipulationUpdatesCanvasBounds()
     {
         TestApplication.EnsureAvaloniaInitialized();

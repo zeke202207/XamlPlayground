@@ -630,7 +630,11 @@ public partial class MainViewModel
 
         var type = ResolveControlType(element.TypeName);
         return type is not null &&
-               typeof(Panel).IsAssignableFrom(type);
+               (typeof(Panel).IsAssignableFrom(type) ||
+                element.ChildElementCount == 0 &&
+                (typeof(Decorator).IsAssignableFrom(type) ||
+                 typeof(ContentControl).IsAssignableFrom(type) &&
+                 !element.Attributes.ContainsKey("Content")));
     }
 
     private static string FormatVisualEditorElementTitle(XamlElementSnapshot element)
