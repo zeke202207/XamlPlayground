@@ -1781,6 +1781,14 @@ public partial class PreviewView : UserControl
 
     private void ApplyLiveResizeBounds(Rect bounds)
     {
+        if (_liveResizeState is null &&
+            DataContext is MainViewModel viewModel &&
+            viewModel.Control is { } previewRoot &&
+            FindLiveResizePreviewControl(viewModel, previewRoot, _dragStartBounds) is { } liveResizeControl)
+        {
+            _liveResizeState = CreateLiveResizeState(liveResizeControl);
+        }
+
         if (_liveResizeState is not { } state)
         {
             return;
