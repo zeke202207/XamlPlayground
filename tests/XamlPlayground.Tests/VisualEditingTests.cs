@@ -293,6 +293,28 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MutationEngine_DoesNotShiftTargetParentForNestedSourceRemoval()
+    {
+        var engine = new XamlMutationEngine();
+        var xaml = """
+                   <Grid xmlns="https://github.com/avaloniaui">
+                     <StackPanel>
+                       <Button Content="Move" />
+                     </StackPanel>
+                     <StackPanel />
+                   </Grid>
+                   """;
+
+        var moved = engine.MoveElement(xaml, XamlElementSelector.ByPath(0, 0), XamlElementSelector.ByPath(1));
+
+        Assert.Empty(moved.Diagnostics);
+        var movedButton = Assert.Single(moved.Snapshot.Elements, element =>
+            element.Attributes.TryGetValue("Content", out var content) &&
+            string.Equals(content, "Move", StringComparison.Ordinal));
+        Assert.Equal(new[] { 1, 0 }, movedButton.Path);
+    }
+
+    [Fact]
     public void MutationEngine_DuplicatesElementsWithoutDuplicatingNames()
     {
         var engine = new XamlMutationEngine();
@@ -429,6 +451,36 @@ public sealed class VisualEditingTests
         Assert.Equal("local1", inserted.NamespacePrefix);
         Assert.Contains("xmlns:local1=\"clr-namespace:Demo.Controls;assembly=Demo\"", inserted.Mutation.Text, StringComparison.Ordinal);
         Assert.Contains("<local1:CustomControl Canvas.Left=\"12\" />", inserted.Mutation.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ToolboxInsertion_PrefixesUnprefixedCustomNamespaceSnippets()
+    {
+        var engine = new XamlMutationEngine();
+        var service = new XamlToolboxInsertionService(engine);
+        var xaml = """
+                   <StackPanel xmlns="https://github.com/avaloniaui">
+                   </StackPanel>
+                   """;
+        var item = new ToolboxItemDescriptor(
+            "custom-widget",
+            "Custom Widget",
+            "Custom",
+            "MyWidget",
+            "clr-namespace:Demo.Controls;assembly=Demo",
+            "Demo",
+            "<MyWidget />",
+            new Dictionary<string, string>());
+
+        var inserted = service.Insert(
+            xaml,
+            XamlElementSelector.ByPath(),
+            item);
+
+        Assert.True(inserted.Success, string.Join(Environment.NewLine, inserted.Mutation.Diagnostics));
+        Assert.Equal("local", inserted.NamespacePrefix);
+        Assert.Contains("xmlns:local=\"clr-namespace:Demo.Controls;assembly=Demo\"", inserted.Mutation.Text, StringComparison.Ordinal);
+        Assert.Contains("<local:MyWidget />", inserted.Mutation.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -868,6 +920,44 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_DesignerReparentsUnnamedSelectionIntoPreviewPanel()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <Grid xmlns="https://github.com/avaloniaui"
+                                                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                   x:Name="Root">
+                                               <StackPanel x:Name="Left">
+                                                 <Button Content="Run" />
+                                               </StackPanel>
+                                               <StackPanel x:Name="Right" />
+                                             </Grid>
+                                             """;
+            viewModel.Control = Assert.IsAssignableFrom<Control>(
+                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+            viewModel.SelectedVisualEditorNode = FindVisualEditorNodeByPath(viewModel.VisualEditorStructureNodes, 0, 0);
+
+            var rightPanel = Assert.Single(
+                viewModel.Control.GetVisualDescendants().OfType<StackPanel>(),
+                panel => panel.Name == "Right");
+
+            Assert.True(viewModel.MoveVisualEditorSelectionIntoPreviewControl(rightPanel));
+            Assert.Contains("<StackPanel x:Name=\"Right\">", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.True(
+                viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"Right\"", StringComparison.Ordinal) <
+                viewModel.ActiveXamlFile.Text.IndexOf("Content=\"Run\"", StringComparison.Ordinal));
+            Assert.Equal("Button", viewModel.SelectedVisualEditorNode?.Element.TypeName);
+            Assert.Equal("Run", viewModel.SelectedVisualEditorNode?.Element.Attributes["Content"]);
+            Assert.Equal(new[] { 1, 0 }, viewModel.SelectedVisualEditorNode?.Element.Path);
+        });
+    }
+
+    [Fact]
     public void MainViewModel_DesignerReordersSelectionNearPreviewSibling()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -901,6 +991,45 @@ public sealed class VisualEditingTests
                 viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"Third\"", StringComparison.Ordinal) <
                 viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"First\"", StringComparison.Ordinal));
             Assert.Equal("Moved selection after Button.", viewModel.VisualEditorStatus);
+        });
+    }
+
+    [Fact]
+    public void MainViewModel_DesignerReordersUnnamedSelectionNearPreviewSibling()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <Button Content="Move" />
+                                               <Button x:Name="Second" Content="Second" />
+                                               <Button x:Name="Third" Content="Third" />
+                                             </StackPanel>
+                                             """;
+            viewModel.Control = Assert.IsAssignableFrom<Control>(
+                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+            viewModel.SelectedVisualEditorNode = FindVisualEditorNodeByPath(viewModel.VisualEditorStructureNodes, 0);
+
+            var thirdButton = Assert.Single(
+                viewModel.Control.GetVisualDescendants().OfType<Button>(),
+                button => button.Name == "Third");
+
+            Assert.True(viewModel.MoveVisualEditorSelectionNearPreviewControl(thirdButton, after: true));
+            Assert.True(
+                viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"Second\"", StringComparison.Ordinal) <
+                viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"Third\"", StringComparison.Ordinal));
+            Assert.True(
+                viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"Third\"", StringComparison.Ordinal) <
+                viewModel.ActiveXamlFile.Text.IndexOf("Content=\"Move\"", StringComparison.Ordinal));
+            Assert.Equal("Button", viewModel.SelectedVisualEditorNode?.Element.TypeName);
+            Assert.Equal("Move", viewModel.SelectedVisualEditorNode?.Element.Attributes["Content"]);
+            Assert.Equal(new[] { 2 }, viewModel.SelectedVisualEditorNode?.Element.Path);
         });
     }
 

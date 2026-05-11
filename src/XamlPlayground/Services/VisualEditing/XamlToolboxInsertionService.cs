@@ -48,7 +48,8 @@ public sealed class XamlToolboxInsertionService
 
         if (!UsesDefaultNamespace(item))
         {
-            var namespaceResult = EnsureNamespace(xaml, document.Root, item.XmlNamespace, GetSnippetPrefix(insertionXaml) ?? "local");
+            var snippetPrefix = GetSnippetPrefix(insertionXaml);
+            var namespaceResult = EnsureNamespace(xaml, document.Root, item.XmlNamespace, snippetPrefix ?? "local");
             if (!namespaceResult.Mutation.Success)
             {
                 return new ToolboxInsertionResult(namespaceResult.Mutation, insertionXaml, namespacePrefix);
@@ -56,7 +57,7 @@ public sealed class XamlToolboxInsertionService
 
             xaml = namespaceResult.Xaml;
             namespacePrefix = namespaceResult.Prefix;
-            insertionXaml = RewriteSnippetPrefix(insertionXaml, namespaceResult.OriginalPrefix, namespacePrefix);
+            insertionXaml = RewriteSnippetPrefix(insertionXaml, snippetPrefix, namespacePrefix);
         }
 
         var mutation = _mutationEngine.InsertChild(xaml, parentSelector, insertionXaml, childIndex);
@@ -86,7 +87,7 @@ public sealed class XamlToolboxInsertionService
         return updated;
     }
 
-    private (string Xaml, string? OriginalPrefix, string Prefix, XamlMutationResult Mutation) EnsureNamespace(
+    private (string Xaml, string Prefix, XamlMutationResult Mutation) EnsureNamespace(
         string xaml,
         XamlElementSnapshot root,
         string xmlNamespace,
@@ -97,7 +98,7 @@ public sealed class XamlToolboxInsertionService
             string.Equals(declaration.XmlNamespace, xmlNamespace, StringComparison.Ordinal));
         if (existingForNamespace.Prefix is { Length: > 0 })
         {
-            return (xaml, preferredPrefix, existingForNamespace.Prefix, CreateMutationResult(_mutationEngine.Analyze(xaml)));
+            return (xaml, existingForNamespace.Prefix, CreateMutationResult(_mutationEngine.Analyze(xaml)));
         }
 
         var prefix = GetAvailablePrefix(preferredPrefix, declarations);
@@ -107,7 +108,7 @@ public sealed class XamlToolboxInsertionService
             $"xmlns:{prefix}",
             xmlNamespace);
 
-        return (updated.Text, preferredPrefix, prefix, updated);
+        return (updated.Text, prefix, updated);
     }
 
     private static IEnumerable<(string? Prefix, string XmlNamespace)> GetNamespaceDeclarations(XamlElementSnapshot root)

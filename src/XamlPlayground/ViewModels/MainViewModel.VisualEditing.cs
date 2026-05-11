@@ -1550,9 +1550,17 @@ public partial class MainViewModel
         }
 
         var targetParentSelector = XamlElementSelector.ByPath(targetParentPath);
+        var selectedPathAfterMove = selectedParentPath.SequenceEqual(targetParentPath)
+            ? targetParentPath.Concat(new[] { targetIndex }).ToArray()
+            : AdjustPathAfterRemoval(targetParentPath, selected.Path).Concat(new[] { targetIndex }).ToArray();
         var result = selectedParentPath.SequenceEqual(targetParentPath)
             ? _visualMutationEngine.ReorderElement(xamlFile.Text, selector, targetIndex)
             : _visualMutationEngine.MoveElement(xamlFile.Text, selector, targetParentSelector, targetIndex);
+        if (result.Success)
+        {
+            _visualEditorSelectedSelector = XamlElementSelector.ByPath(selectedPathAfterMove);
+        }
+
         ApplyVisualEditorMutation(result);
 
         if (result.Success)
@@ -1609,7 +1617,15 @@ public partial class MainViewModel
             return false;
         }
 
+        var selectedPathAfterMove = AdjustPathAfterRemoval(target.Path, selected.Path)
+            .Concat(new[] { target.ChildElementCount })
+            .ToArray();
         var result = _visualMutationEngine.MoveElement(xamlFile.Text, selector, target.Selector);
+        if (result.Success)
+        {
+            _visualEditorSelectedSelector = XamlElementSelector.ByPath(selectedPathAfterMove);
+        }
+
         ApplyVisualEditorMutation(result);
 
         if (result.Success)
@@ -1780,6 +1796,31 @@ public partial class MainViewModel
     {
         return candidate.Path.Count > ancestor.Path.Count &&
                candidate.Path.Take(ancestor.Path.Count).SequenceEqual(ancestor.Path);
+    }
+
+    private static IReadOnlyList<int> AdjustPathAfterRemoval(
+        IReadOnlyList<int> path,
+        IReadOnlyList<int> removedPath)
+    {
+        if (path.Count == 0 || removedPath.Count == 0)
+        {
+            return path.ToArray();
+        }
+
+        var adjusted = path.ToArray();
+        var removedIndexDepth = removedPath.Count - 1;
+        if (path.Count <= removedIndexDepth ||
+            !path.Take(removedIndexDepth).SequenceEqual(removedPath.Take(removedIndexDepth)))
+        {
+            return adjusted;
+        }
+
+        if (removedPath[removedIndexDepth] < path[removedIndexDepth])
+        {
+            adjusted[removedIndexDepth]--;
+        }
+
+        return adjusted;
     }
 
     private static XamlElementSnapshot? FindVisualEditorElementAtSourceRange(

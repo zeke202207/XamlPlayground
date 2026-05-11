@@ -1166,21 +1166,16 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
         }
 
         var adjusted = path.ToArray();
-        var sharedLength = Math.Min(path.Count, removedPath.Count);
-        for (var i = 0; i < sharedLength; i++)
+        var removedIndexDepth = removedPath.Count - 1;
+        if (path.Count <= removedIndexDepth ||
+            !path.Take(removedIndexDepth).SequenceEqual(removedPath.Take(removedIndexDepth)))
         {
-            if (path[i] == removedPath[i])
-            {
-                continue;
-            }
-
-            if (removedPath[i] < path[i] &&
-                path.Take(i).SequenceEqual(removedPath.Take(i)))
-            {
-                adjusted[i]--;
-            }
-
             return adjusted;
+        }
+
+        if (removedPath[removedIndexDepth] < path[removedIndexDepth])
+        {
+            adjusted[removedIndexDepth]--;
         }
 
         return adjusted;
