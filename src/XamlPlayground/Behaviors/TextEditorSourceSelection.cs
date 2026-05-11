@@ -151,6 +151,7 @@ public sealed class TextEditorSourceSelection : AvaloniaObject
             editor.Document is null ||
             !string.Equals(GetSourcePath(editor), GetTargetPath(editor), StringComparison.Ordinal))
         {
+            ClearSelection(editor);
             return;
         }
 
@@ -159,6 +160,7 @@ public sealed class TextEditorSourceSelection : AvaloniaObject
         var length = Math.Clamp(GetSourceLength(editor), 0, documentLength - start);
         if (length == 0)
         {
+            ClearSelection(editor, start);
             return;
         }
 
@@ -167,5 +169,17 @@ public sealed class TextEditorSourceSelection : AvaloniaObject
 
         var line = editor.Document.GetLineByOffset(start);
         editor.ScrollToLine(line.LineNumber);
+    }
+
+    private static void ClearSelection(TextEditor editor, int? caretOffset = null)
+    {
+        if (editor.Document is null)
+        {
+            return;
+        }
+
+        var offset = Math.Clamp(caretOffset ?? editor.CaretOffset, 0, editor.Document.TextLength);
+        editor.Select(offset, 0);
+        editor.CaretOffset = offset;
     }
 }

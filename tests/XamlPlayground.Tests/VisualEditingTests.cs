@@ -12,6 +12,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
+using AvaloniaEdit.Document;
 using XamlPlayground.Behaviors;
 using XamlPlayground.Services;
 using XamlPlayground.Services.VisualEditing;
@@ -2866,6 +2867,37 @@ public sealed class VisualEditingTests
                 window.Close();
                 dockable.Dispose();
             }
+        });
+    }
+
+    [Fact]
+    public void TextEditorSourceSelection_ClearsStaleSelectionWhenSourceSelectionClears()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var editor = new TextEditor
+            {
+                Document = new TextDocument { Text = "<StackPanel><TextBlock /></StackPanel>" }
+            };
+
+            TextEditorSourceSelection.SetIsEnabled(editor, true);
+            TextEditorSourceSelection.SetTargetPath(editor, "Main.axaml");
+            TextEditorSourceSelection.SetSourcePath(editor, "Main.axaml");
+            TextEditorSourceSelection.SetSourceStart(editor, 12);
+            TextEditorSourceSelection.SetSourceLength(editor, 11);
+            TextEditorSourceSelection.SetSourceVersion(editor, 1);
+
+            Assert.Equal(12, editor.SelectionStart);
+            Assert.Equal(11, editor.SelectionLength);
+
+            TextEditorSourceSelection.SetSourcePath(editor, null);
+            TextEditorSourceSelection.SetSourceLength(editor, 0);
+            TextEditorSourceSelection.SetSourceVersion(editor, 2);
+
+            Assert.Equal(0, editor.SelectionLength);
+            Assert.NotEqual(11, editor.SelectionLength);
         });
     }
 
