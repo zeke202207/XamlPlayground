@@ -111,50 +111,107 @@
                  Opacity="0.75" />
     </Border>
 
-    <Grid RowDefinitions="Auto,*,Auto,*"
-          Margin="6"
-          RowSpacing="6">
-      <TextBlock Text="Custom themes"
-                 FontWeight="SemiBold" />
-      <ListBox Grid.Row="1"
-               ItemsSource="{Binding Shell.FilteredControlThemes}"
-               SelectedItem="{Binding Shell.SelectedControlTheme, Mode=TwoWay}">
-        <ListBox.ItemTemplate>
-          <DataTemplate DataType="visualVm:ControlThemeDefinitionViewModel"
-                        x:DataType="visualVm:ControlThemeDefinitionViewModel">
-            <StackPanel Spacing="2"
-                        Margin="0,3">
-              <TextBlock Text="{Binding Key}"
-                         TextTrimming="CharacterEllipsis" />
-              <TextBlock Text="{Binding FilePath}"
-                         FontSize="11"
-                         Opacity="0.65"
-                         TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
+    <TabControl Margin="6">
+      <TabItem Header="Custom">
+        <ListBox ItemsSource="{Binding Shell.FilteredControlThemes}"
+                 SelectedItem="{Binding Shell.SelectedControlTheme, Mode=TwoWay}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:ControlThemeDefinitionViewModel"
+                          x:DataType="visualVm:ControlThemeDefinitionViewModel">
+              <StackPanel Spacing="2"
+                          Margin="0,3">
+                <TextBlock Text="{Binding Key}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding FilePath}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </TabItem>
 
-      <TextBlock Grid.Row="2"
-                 Text="Fluent source templates"
-                 FontWeight="SemiBold" />
-      <ListBox Grid.Row="3"
-               ItemsSource="{Binding Shell.FilteredFluentControlThemeTemplates}">
-        <ListBox.ItemTemplate>
-          <DataTemplate DataType="visualVm:FluentControlThemeTemplateViewModel"
-                        x:DataType="visualVm:FluentControlThemeTemplateViewModel">
-            <StackPanel Spacing="2"
-                        Margin="0,3">
-              <TextBlock Text="{Binding Title}"
-                         TextTrimming="CharacterEllipsis" />
-              <TextBlock Text="{Binding SourcePath}"
-                         FontSize="11"
-                         Opacity="0.65"
-                         TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
-    </Grid>
+      <TabItem Header="Resources">
+        <ListBox ItemsSource="{Binding Shell.ThemeResources}"
+                 SelectedItem="{Binding Shell.SelectedThemeResource, Mode=TwoWay}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:ThemeResourceViewModel"
+                          x:DataType="visualVm:ThemeResourceViewModel">
+              <StackPanel Spacing="2"
+                          Margin="0,3">
+                <TextBlock Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Location}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </TabItem>
+
+      <TabItem Header="Usages">
+        <ListBox ItemsSource="{Binding Shell.SelectedThemeResourceUsages}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:ThemeResourceUsageViewModel"
+                          x:DataType="visualVm:ThemeResourceUsageViewModel">
+              <StackPanel Spacing="2"
+                          Margin="0,3">
+                <TextBlock Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Location}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Snippet}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </TabItem>
+
+      <TabItem Header="Diagnostics">
+        <ListBox ItemsSource="{Binding Shell.ThemeResourceDiagnostics}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:ThemeResourceDiagnosticViewModel"
+                          x:DataType="visualVm:ThemeResourceDiagnosticViewModel">
+              <StackPanel Spacing="2"
+                          Margin="0,3">
+                <TextBlock Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Location}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </TabItem>
+
+      <TabItem Header="Fluent">
+        <ListBox ItemsSource="{Binding Shell.FilteredFluentControlThemeTemplates}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:FluentControlThemeTemplateViewModel"
+                          x:DataType="visualVm:FluentControlThemeTemplateViewModel">
+              <StackPanel Spacing="2"
+                          Margin="0,3">
+                <TextBlock Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding SourcePath}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </TabItem>
+    </TabControl>
   </DockPanel>
 </UserControl>

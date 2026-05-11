@@ -670,6 +670,10 @@ public partial class MainViewModel : ViewModelBase
         {
             RefreshControlThemes();
         }
+        else if (file.IsXaml)
+        {
+            RefreshThemeResourceAnalysis();
+        }
 
         if (ReferenceEquals(file, ActiveXamlFile))
         {

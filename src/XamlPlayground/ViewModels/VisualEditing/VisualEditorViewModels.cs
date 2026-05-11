@@ -200,3 +200,98 @@ public sealed class FluentControlThemeTemplateViewModel : ViewModelBase
 
     public string Title => $"{TargetType} - {Key}";
 }
+
+public sealed class ThemeResourceViewModel : ViewModelBase
+{
+    public ThemeResourceViewModel(
+        string key,
+        string resourceType,
+        string? targetType,
+        string filePath,
+        int? line)
+    {
+        Key = key;
+        ResourceType = resourceType;
+        TargetType = targetType ?? string.Empty;
+        FilePath = filePath;
+        Line = line;
+    }
+
+    public string Key { get; }
+
+    public string ResourceType { get; }
+
+    public string TargetType { get; }
+
+    public string FilePath { get; }
+
+    public int? Line { get; }
+
+    public string Location => Line is { } line
+        ? $"{FilePath}:{line}"
+        : FilePath;
+
+    public string Title => string.IsNullOrWhiteSpace(TargetType)
+        ? $"{Key} - {ResourceType}"
+        : $"{Key} - {ResourceType} ({TargetType})";
+}
+
+public sealed class ThemeResourceUsageViewModel : ViewModelBase
+{
+    public ThemeResourceUsageViewModel(
+        string key,
+        string kind,
+        string filePath,
+        int line,
+        string snippet)
+    {
+        Key = key;
+        Kind = kind;
+        FilePath = filePath;
+        Line = line;
+        Snippet = snippet;
+    }
+
+    public string Key { get; }
+
+    public string Kind { get; }
+
+    public string FilePath { get; }
+
+    public int Line { get; }
+
+    public string Snippet { get; }
+
+    public string Location => $"{FilePath}:{Line}";
+
+    public string Title => $"{Kind} {Key}";
+}
+
+public sealed class ThemeResourceDiagnosticViewModel : ViewModelBase
+{
+    public ThemeResourceDiagnosticViewModel(
+        string severity,
+        string message,
+        string filePath,
+        int? line)
+    {
+        Severity = severity;
+        Message = message;
+        FilePath = filePath;
+        Line = line;
+    }
+
+    public string Severity { get; }
+
+    public string Message { get; }
+
+    public string FilePath { get; }
+
+    public int? Line { get; }
+
+    public string Location => Line is { } line
+        ? $"{FilePath}:{line}"
+        : FilePath;
+
+    public string Title => $"{Severity}: {Message}";
+}

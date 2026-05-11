@@ -33,6 +33,7 @@ public partial class MainViewModel
     private FluentControlThemeCatalog _controlThemeCatalog = null!;
     private IVisualTreeSnapshotService _visualTreeSnapshotService = null!;
     private VisualEditorSelectionService _visualSelectionService = null!;
+    private ThemeResourceAnalysis _themeResourceAnalysis = ThemeResourceAnalysis.Empty;
     private XamlDocumentSnapshot? _visualEditorDocument;
     private XamlElementSelector? _visualEditorSelectedSelector;
     private bool _isRefreshingVisualEditor;
@@ -117,6 +118,10 @@ public partial class MainViewModel
     [ObservableProperty] private string _controlThemeSourceStatus = "Fluent theme source not loaded.";
     [ObservableProperty] private string _controlThemeSelectedTargetType = "No control selected.";
     [ObservableProperty] private string _controlThemeStatus = "No custom control themes.";
+    [ObservableProperty] private ObservableCollection<ThemeResourceViewModel> _themeResources = new();
+    [ObservableProperty] private ThemeResourceViewModel? _selectedThemeResource;
+    [ObservableProperty] private ObservableCollection<ThemeResourceUsageViewModel> _selectedThemeResourceUsages = new();
+    [ObservableProperty] private ObservableCollection<ThemeResourceDiagnosticViewModel> _themeResourceDiagnostics = new();
 
     public bool VisualEditorPreviewContentHitTestVisible => !VisualEditorDesignerMode;
 
@@ -337,6 +342,11 @@ public partial class MainViewModel
     partial void OnControlThemeSearchTextChanged(string value)
     {
         RefreshControlThemeFilters();
+    }
+
+    partial void OnSelectedThemeResourceChanged(ThemeResourceViewModel? value)
+    {
+        RefreshSelectedThemeResourceUsages();
     }
 
     partial void OnVisualEditorPropertyFilterChanged(string value)
@@ -2106,8 +2116,58 @@ public partial class MainViewModel
                 theme.TargetType,
                 theme.FilePath)));
 
+        RefreshThemeResourceAnalysis();
         RefreshControlThemeFilters(previousKey);
         NotifyControlThemeCommandsChanged();
+    }
+
+    private void RefreshThemeResourceAnalysis()
+    {
+        var previousKey = SelectedThemeResource?.Key;
+        _themeResourceAnalysis = ActiveProject is null
+            ? ThemeResourceAnalysis.Empty
+            : ResourceDictionaryAnalyzer.Analyze(
+                ActiveProject.GetXamlFiles()
+                    .Select(static file => new ThemeResourceDocument(
+                        file.Path,
+                        file.Text,
+                        file.Kind == ProjectFileKind.Resource)));
+
+        ThemeResources = new ObservableCollection<ThemeResourceViewModel>(
+            _themeResourceAnalysis.Resources.Select(static resource => new ThemeResourceViewModel(
+                resource.Key,
+                resource.ResourceType,
+                resource.TargetType,
+                resource.FilePath,
+                resource.Line)));
+
+        ThemeResourceDiagnostics = new ObservableCollection<ThemeResourceDiagnosticViewModel>(
+            _themeResourceAnalysis.Diagnostics.Select(static diagnostic => new ThemeResourceDiagnosticViewModel(
+                diagnostic.Severity.ToString(),
+                diagnostic.Message,
+                diagnostic.FilePath,
+                diagnostic.Line)));
+
+        SelectedThemeResource =
+            ThemeResources.FirstOrDefault(resource => string.Equals(resource.Key, previousKey, StringComparison.Ordinal)) ??
+            ThemeResources.FirstOrDefault();
+        RefreshSelectedThemeResourceUsages();
+    }
+
+    private void RefreshSelectedThemeResourceUsages()
+    {
+        var selectedKey = SelectedThemeResource?.Key;
+        SelectedThemeResourceUsages = string.IsNullOrWhiteSpace(selectedKey)
+            ? new ObservableCollection<ThemeResourceUsageViewModel>()
+            : new ObservableCollection<ThemeResourceUsageViewModel>(
+                _themeResourceAnalysis.References
+                    .Where(reference => string.Equals(reference.Key, selectedKey, StringComparison.Ordinal))
+                    .Select(static reference => new ThemeResourceUsageViewModel(
+                        reference.Key,
+                        reference.Kind.ToString(),
+                        reference.FilePath,
+                        reference.Line,
+                        reference.Snippet)));
     }
 
     private void RefreshControlThemeFilters(string? preferredThemeKey = null)
