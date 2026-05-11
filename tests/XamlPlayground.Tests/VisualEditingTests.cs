@@ -3085,16 +3085,26 @@ public sealed class VisualEditingTests
     private static void EnsureAvaloniaEditTestResources()
     {
         var application = Application.Current!;
+        const string avaloniaEditTheme = "avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml";
         if (application.Styles.OfType<StyleInclude>().Any(style =>
-                style.Source?.OriginalString == "avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml"))
+                style.Source?.OriginalString == avaloniaEditTheme))
         {
             return;
         }
 
-        application.Styles.Add(new StyleInclude(new Uri("avares://XamlPlayground.Tests/"))
+        var include = new StyleInclude(new Uri("avares://XamlPlayground.Tests/"))
         {
-            Source = new Uri("avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml")
-        });
+            Source = new Uri(avaloniaEditTheme)
+        };
+
+        try
+        {
+            application.Styles.Add(include);
+        }
+        catch (XamlLoadException)
+        {
+            application.Styles.Remove(include);
+        }
     }
 
     private static string NormalizeLineEndings(string text)
