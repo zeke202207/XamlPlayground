@@ -3120,7 +3120,7 @@ public partial class MainViewModel
         }
 
         var newKey = ThemeResourceKeyEditText.Trim();
-        var rename = ThemeResourceEditor.RenameResourceKey(resourceFile.Text, selectedResource.Key, newKey);
+        var rename = ThemeResourceEditor.RenameResourceKey(resourceFile.Text, selectedResource.Key, newKey, selectedResource.Line);
         if (!rename.Changed)
         {
             ControlThemeStatus = rename.Error ?? $"Could not rename {selectedResource.Key}.";
@@ -3128,14 +3128,20 @@ public partial class MainViewModel
         }
 
         resourceFile.Text = rename.Text;
-        foreach (var file in project.GetXamlFiles())
+        var renameReferences = !HasMultipleResourceDefinitions(selectedResource);
+        if (renameReferences)
         {
-            file.Text = ThemeResourceEditor.RenameResourceReferences(file.Text, selectedResource.Key, newKey);
+            foreach (var file in project.GetXamlFiles())
+            {
+                file.Text = ThemeResourceEditor.RenameResourceReferences(file.Text, selectedResource.Key, newKey);
+            }
         }
 
         RefreshWorkspaceAfterThemeFileChanges(resourceFile);
         SelectThemeResource(newKey);
-        ControlThemeStatus = $"Renamed {selectedResource.Key} to {newKey}.";
+        ControlThemeStatus = renameReferences
+            ? $"Renamed {selectedResource.Key} to {newKey}."
+            : $"Renamed {selectedResource.Key} to {newKey}. References were left unchanged because the key has multiple definitions.";
     }
 
     private void DuplicateSelectedThemeResource()
@@ -3148,7 +3154,7 @@ public partial class MainViewModel
         }
 
         var duplicateKey = CreateUniqueThemeResourceKey(selectedResource.Key);
-        var duplicate = ThemeResourceEditor.DuplicateResource(resourceFile.Text, selectedResource.Key, duplicateKey);
+        var duplicate = ThemeResourceEditor.DuplicateResource(resourceFile.Text, selectedResource.Key, duplicateKey, selectedResource.Line);
         if (!duplicate.Changed)
         {
             ControlThemeStatus = duplicate.Error ?? $"Could not duplicate {selectedResource.Key}.";
@@ -3206,20 +3212,26 @@ public partial class MainViewModel
         ThemeResourceViewModel selectedResource,
         InMemoryProjectFile resourceFile)
     {
-        var usages = _themeResourceAnalysis.References
-            .Where(reference => string.Equals(reference.Key, selectedResource.Key, StringComparison.Ordinal))
-            .ToArray();
+        var removeReferences = !HasMultipleResourceDefinitions(selectedResource);
+        var usages = removeReferences
+            ? _themeResourceAnalysis.References
+                .Where(reference => string.Equals(reference.Key, selectedResource.Key, StringComparison.Ordinal))
+                .ToArray()
+            : Array.Empty<ThemeResourceReference>();
         var afterTexts = project.GetXamlFiles()
             .ToDictionary(static file => file, static file => file.Text);
 
-        foreach (var file in project.GetXamlFiles())
+        if (removeReferences)
         {
-            afterTexts[file] = ThemeResourceEditor.RemoveResourceReferences(
-                afterTexts[file],
-                selectedResource.Key);
+            foreach (var file in project.GetXamlFiles())
+            {
+                afterTexts[file] = ThemeResourceEditor.RemoveResourceReferences(
+                    afterTexts[file],
+                    selectedResource.Key);
+            }
         }
 
-        var delete = ThemeResourceEditor.DeleteResource(afterTexts[resourceFile], selectedResource.Key);
+        var delete = ThemeResourceEditor.DeleteResource(afterTexts[resourceFile], selectedResource.Key, selectedResource.Line);
         if (!delete.Changed)
         {
             return (null, delete.Error ?? $"Could not delete {selectedResource.Key}.");
@@ -3258,6 +3270,13 @@ public partial class MainViewModel
         }
 
         return (new ThemeResourceDeletePlan(selectedResource.Key, usages.Length, changes), null);
+    }
+
+    private bool HasMultipleResourceDefinitions(ThemeResourceViewModel selectedResource)
+    {
+        return ThemeResources.Any(resource =>
+            !ReferenceEquals(resource, selectedResource) &&
+            string.Equals(resource.Key, selectedResource.Key, StringComparison.Ordinal));
     }
 
     private void ConfirmThemeResourceDelete()

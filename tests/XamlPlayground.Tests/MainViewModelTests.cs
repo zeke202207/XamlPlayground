@@ -813,6 +813,48 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ThemeResourceCommands_EditSelectedDuplicateKeyByLine()
+    {
+        var viewModel = new MainViewModel(null)
+        {
+            EnableAutoRun = false
+        };
+        var project = viewModel.ActiveProject;
+        Assert.NotNull(project);
+        var themeFile = project.AddFile(new InMemoryProjectFile(
+            "Themes/Palette.axaml",
+            """
+            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+              <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                  <SolidColorBrush x:Key="VariantBrush" Color="White" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                  <SolidColorBrush x:Key="VariantBrush" Color="Black" />
+                </ResourceDictionary>
+              </ResourceDictionary.ThemeDictionaries>
+            </ResourceDictionary>
+            """,
+            ProjectFileKind.Resource));
+        RefreshControlThemes(viewModel);
+        var duplicateResources = viewModel.ThemeResources
+            .Where(resource => resource.Key == "VariantBrush")
+            .OrderBy(resource => resource.Line)
+            .ToArray();
+        Assert.Equal(2, duplicateResources.Length);
+
+        viewModel.SelectedThemeResource = duplicateResources[1];
+        viewModel.ThemeResourceKeyEditText = "DarkVariantBrush";
+        Assert.True(viewModel.RenameSelectedThemeResourceCommand.CanExecute(null));
+        viewModel.RenameSelectedThemeResourceCommand.Execute(null);
+
+        Assert.Contains("x:Key=\"VariantBrush\" Color=\"White\"", themeFile.Text, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"DarkVariantBrush\" Color=\"Black\"", themeFile.Text, StringComparison.Ordinal);
+        Assert.Contains("References were left unchanged", viewModel.ControlThemeStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void VisualPropertyResourcePicker_SuggestsCompatibleResourcesAndOpensReference()
     {
         TestApplication.EnsureAvaloniaInitialized();

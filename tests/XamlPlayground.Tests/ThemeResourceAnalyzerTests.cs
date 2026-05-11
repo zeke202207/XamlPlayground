@@ -138,6 +138,44 @@ public sealed class ThemeResourceAnalyzerTests
     }
 
     [Fact]
+    public void ThemeResourceEditor_UsesLineToDisambiguateThemeDictionaryResources()
+    {
+        const string xaml = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <ResourceDictionary.ThemeDictionaries>
+                                <ResourceDictionary x:Key="Light">
+                                  <SolidColorBrush x:Key="VariantBrush" Color="White" />
+                                </ResourceDictionary>
+                                <ResourceDictionary x:Key="Dark">
+                                  <SolidColorBrush x:Key="VariantBrush" Color="Black" />
+                                </ResourceDictionary>
+                              </ResourceDictionary.ThemeDictionaries>
+                            </ResourceDictionary>
+                            """;
+        var darkLine = ResourceDictionaryAnalyzer.Analyze(new[]
+            {
+                new ThemeResourceDocument("Themes/Palette.axaml", xaml, IsResourceDictionary: true)
+            })
+            .Resources
+            .Where(resource => resource.Key == "VariantBrush")
+            .Max(resource => resource.Line);
+
+        var renamed = ThemeResourceEditor.RenameResourceKey(xaml, "VariantBrush", "DarkVariantBrush", darkLine);
+        var duplicated = ThemeResourceEditor.DuplicateResource(xaml, "VariantBrush", "DarkVariantBrushCopy", darkLine);
+        var deleted = ThemeResourceEditor.DeleteResource(xaml, "VariantBrush", darkLine);
+
+        Assert.True(renamed.Changed);
+        Assert.Contains("x:Key=\"VariantBrush\" Color=\"White\"", renamed.Text, System.StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"DarkVariantBrush\" Color=\"Black\"", renamed.Text, System.StringComparison.Ordinal);
+        Assert.True(duplicated.Changed);
+        Assert.Contains("x:Key=\"DarkVariantBrushCopy\" Color=\"Black\"", duplicated.Text, System.StringComparison.Ordinal);
+        Assert.True(deleted.Changed);
+        Assert.Contains("x:Key=\"VariantBrush\" Color=\"White\"", deleted.Text, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Color=\"Black\"", deleted.Text, System.StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ControlThemeAnalyzer_FindsStatesPartsAndTemplateBindings()
     {
         const string xaml = """

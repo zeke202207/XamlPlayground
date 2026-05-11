@@ -28,7 +28,8 @@ public static class ThemeResourceEditor
     public static ThemeResourceEditResult RenameResourceKey(
         string xaml,
         string oldKey,
-        string newKey)
+        string newKey,
+        int? line = null)
     {
         if (!IsValidKey(oldKey) || !IsValidKey(newKey))
         {
@@ -38,6 +39,7 @@ public static class ThemeResourceEditor
         return UpdateResourceElement(
             xaml,
             oldKey,
+            line,
             element => element.SetAttributeValue(XamlNamespace + "Key", newKey));
     }
 
@@ -87,7 +89,8 @@ public static class ThemeResourceEditor
     public static ThemeResourceEditResult DuplicateResource(
         string xaml,
         string sourceKey,
-        string newKey)
+        string newKey,
+        int? line = null)
     {
         if (!IsValidKey(sourceKey) || !IsValidKey(newKey))
         {
@@ -116,7 +119,7 @@ public static class ThemeResourceEditor
             return new ThemeResourceEditResult(false, xaml, $"Resource '{newKey}' already exists in this dictionary.");
         }
 
-        var source = FindTopLevelResource(root, sourceKey);
+        var source = FindTopLevelResource(root, sourceKey, line);
         if (source is null)
         {
             return new ThemeResourceEditResult(false, xaml, $"Resource '{sourceKey}' was not found.");
@@ -131,7 +134,8 @@ public static class ThemeResourceEditor
 
     public static ThemeResourceDeleteResult DeleteResource(
         string xaml,
-        string key)
+        string key,
+        int? line = null)
     {
         if (!IsValidKey(key))
         {
@@ -150,7 +154,7 @@ public static class ThemeResourceEditor
             return new ThemeResourceDeleteResult(false, xaml, RemovedLastResource: false, "Resource dictionary has no root element.");
         }
 
-        var element = FindTopLevelResource(root, key);
+        var element = FindTopLevelResource(root, key, line);
         if (element is null)
         {
             return new ThemeResourceDeleteResult(false, xaml, RemovedLastResource: false, $"Resource '{key}' was not found.");
@@ -178,6 +182,7 @@ public static class ThemeResourceEditor
     private static ThemeResourceEditResult UpdateResourceElement(
         string xaml,
         string key,
+        int? line,
         Action<XElement> update)
     {
         var parse = TryParseResourceDictionary(xaml);
@@ -192,7 +197,7 @@ public static class ThemeResourceEditor
             return new ThemeResourceEditResult(false, xaml, "Resource dictionary has no root element.");
         }
 
-        var element = FindTopLevelResource(root, key);
+        var element = FindTopLevelResource(root, key, line);
         if (element is null)
         {
             return new ThemeResourceEditResult(false, xaml, $"Resource '{key}' was not found.");
@@ -206,7 +211,7 @@ public static class ThemeResourceEditor
     {
         try
         {
-            return (XDocument.Parse(xaml, LoadOptions.PreserveWhitespace), null);
+            return (XDocument.Parse(xaml, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo), null);
         }
         catch (XmlException exception)
         {
@@ -214,13 +219,14 @@ public static class ThemeResourceEditor
         }
     }
 
-    private static XElement? FindTopLevelResource(XElement root, string key)
+    private static XElement? FindTopLevelResource(XElement root, string key, int? line = null)
     {
         return EnumerateTopLevelResources(root)
             .FirstOrDefault(element => string.Equals(
                 element.Attribute(XamlNamespace + "Key")?.Value,
                 key,
-                StringComparison.Ordinal));
+                StringComparison.Ordinal) &&
+                (line is null || GetLineNumber(element) == line));
     }
 
     private static IEnumerable<XElement> EnumerateTopLevelResources(XElement root)
@@ -287,6 +293,13 @@ public static class ThemeResourceEditor
     private static bool IsValidKey(string key)
     {
         return !string.IsNullOrWhiteSpace(key);
+    }
+
+    private static int? GetLineNumber(XObject value)
+    {
+        return value is IXmlLineInfo lineInfo && lineInfo.HasLineInfo()
+            ? lineInfo.LineNumber
+            : null;
     }
 
     private static string Serialize(XDocument document)
