@@ -21,6 +21,9 @@ public sealed class ThemeResourceAnalyzerTests
                     <ResourceDictionary x:Key="Light">
                       <SolidColorBrush x:Key="LightOnlyBrush" Color="White" />
                     </ResourceDictionary>
+                    <ResourceDictionary x:Key="Dark">
+                      <SolidColorBrush x:Key="LightOnlyBrush" Color="Black" />
+                    </ResourceDictionary>
                   </ResourceDictionary.ThemeDictionaries>
                 </ResourceDictionary>
                 """,
@@ -65,6 +68,8 @@ public sealed class ThemeResourceAnalyzerTests
             reference.Kind == ThemeResourceReferenceKind.DynamicResource);
         Assert.Equal(2, analysis.Diagnostics.Count(diagnostic =>
             diagnostic.Message.Contains("Duplicate resource key 'AccentBrush'", System.StringComparison.Ordinal)));
+        Assert.DoesNotContain(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Duplicate resource key 'LightOnlyBrush'", System.StringComparison.Ordinal));
         Assert.Contains(analysis.Diagnostics, diagnostic =>
             diagnostic.Message.Contains("Resource 'MissingBrush' is referenced but not defined", System.StringComparison.Ordinal));
         Assert.DoesNotContain(analysis.Diagnostics, diagnostic =>
@@ -102,6 +107,33 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.DoesNotContain("Theme=\"{StaticResource PrimaryButtonTheme}\"", cleanedReferences, System.StringComparison.Ordinal);
         Assert.True(deleted.Changed);
         Assert.DoesNotContain("AccentBrush", deleted.Text, System.StringComparison.Ordinal);
+        Assert.False(deleted.RemovedLastResource);
+    }
+
+    [Fact]
+    public void ThemeResourceEditor_EditsResourcesInsideThemeDictionaries()
+    {
+        const string xaml = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <ResourceDictionary.ThemeDictionaries>
+                                <ResourceDictionary x:Key="Light">
+                                  <SolidColorBrush x:Key="VariantBrush" Color="White" />
+                                </ResourceDictionary>
+                              </ResourceDictionary.ThemeDictionaries>
+                            </ResourceDictionary>
+                            """;
+
+        var renamed = ThemeResourceEditor.RenameResourceKey(xaml, "VariantBrush", "RenamedVariantBrush");
+        var duplicated = ThemeResourceEditor.DuplicateResource(renamed.Text, "RenamedVariantBrush", "VariantBrushCopy");
+        var deleted = ThemeResourceEditor.DeleteResource(duplicated.Text, "RenamedVariantBrush");
+
+        Assert.True(renamed.Changed);
+        Assert.Contains("x:Key=\"RenamedVariantBrush\"", renamed.Text, System.StringComparison.Ordinal);
+        Assert.True(duplicated.Changed);
+        Assert.Contains("x:Key=\"VariantBrushCopy\"", duplicated.Text, System.StringComparison.Ordinal);
+        Assert.True(deleted.Changed);
+        Assert.DoesNotContain("x:Key=\"RenamedVariantBrush\"", deleted.Text, System.StringComparison.Ordinal);
         Assert.False(deleted.RemovedLastResource);
     }
 

@@ -225,9 +225,31 @@ public static class ThemeResourceEditor
 
     private static IEnumerable<XElement> EnumerateTopLevelResources(XElement root)
     {
-        return root.Elements()
-            .Where(static element => element.Name.LocalName is not "Design.PreviewWith" and not "ResourceDictionary.MergedDictionaries")
-            .Where(static element => element.Attribute(XamlNamespace + "Key") is not null);
+        foreach (var element in root.Elements())
+        {
+            switch (element.Name.LocalName)
+            {
+                case "Design.PreviewWith":
+                case "ResourceDictionary.MergedDictionaries":
+                    continue;
+
+                case "ResourceDictionary.ThemeDictionaries":
+                    foreach (var themeDictionary in element.Elements().Where(static child => child.Name.LocalName == "ResourceDictionary"))
+                    {
+                        foreach (var resource in EnumerateTopLevelResources(themeDictionary))
+                        {
+                            yield return resource;
+                        }
+                    }
+
+                    continue;
+            }
+
+            if (element.Attribute(XamlNamespace + "Key") is not null)
+            {
+                yield return element;
+            }
+        }
     }
 
     private static void RemoveDesignPreviewReferences(XElement root, string key)

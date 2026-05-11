@@ -28,7 +28,10 @@ public sealed record ThemeResourceDefinition(
     string ResourceType,
     string? TargetType,
     string FilePath,
-    int? Line);
+    int? Line)
+{
+    public string ThemeScope { get; init; } = ThemeProjectStorage.BaseVariant;
+}
 
 public sealed record ThemeResourceReference(
     string Key,
@@ -122,8 +125,9 @@ public static class ResourceDictionaryAnalyzer
             yield break;
         }
 
-        foreach (var element in EnumerateResourceElements(xaml.Root))
+        foreach (var resource in EnumerateResourceElements(xaml.Root, ThemeProjectStorage.BaseVariant))
         {
+            var element = resource.Element;
             var key = element.Attribute(XamlNamespace + "Key")?.Value;
             if (string.IsNullOrWhiteSpace(key))
             {
@@ -135,11 +139,16 @@ public static class ResourceDictionaryAnalyzer
                 element.Name.LocalName,
                 element.Attribute("TargetType")?.Value ?? element.Attribute("DataType")?.Value,
                 document.Path,
-                GetLineNumber(element));
+                GetLineNumber(element))
+            {
+                ThemeScope = resource.ThemeScope
+            };
         }
     }
 
-    private static IEnumerable<XElement> EnumerateResourceElements(XElement dictionary)
+    private static IEnumerable<(XElement Element, string ThemeScope)> EnumerateResourceElements(
+        XElement dictionary,
+        string themeScope)
     {
         foreach (var element in dictionary.Elements())
         {
@@ -152,7 +161,13 @@ public static class ResourceDictionaryAnalyzer
                 case "ResourceDictionary.ThemeDictionaries":
                     foreach (var themeDictionary in element.Elements().Where(static child => child.Name.LocalName == "ResourceDictionary"))
                     {
-                        foreach (var resource in EnumerateResourceElements(themeDictionary))
+                        var childScope = themeDictionary.Attribute(XamlNamespace + "Key")?.Value;
+                        if (string.IsNullOrWhiteSpace(childScope))
+                        {
+                            childScope = themeScope;
+                        }
+
+                        foreach (var resource in EnumerateResourceElements(themeDictionary, childScope))
                         {
                             yield return resource;
                         }
@@ -161,7 +176,7 @@ public static class ResourceDictionaryAnalyzer
                     continue;
 
                 default:
-                    yield return element;
+                    yield return (element, themeScope);
                     break;
             }
         }
@@ -195,7 +210,9 @@ public static class ResourceDictionaryAnalyzer
         IEnumerable<ThemeResourceDefinition> resources)
     {
         foreach (var duplicateGroup in resources
-                     .GroupBy(static resource => resource.Key, StringComparer.Ordinal)
+                     .GroupBy(
+                         static resource => (resource.Key, resource.ThemeScope),
+                         new ThemeResourceDefinitionDuplicateScopeComparer())
                      .Where(static group => group.Count() > 1))
         {
             foreach (var resource in duplicateGroup)
@@ -232,5 +249,22 @@ public static class ResourceDictionaryAnalyzer
         return value is IXmlLineInfo lineInfo && lineInfo.HasLineInfo()
             ? lineInfo.LineNumber
             : null;
+    }
+
+    private sealed class ThemeResourceDefinitionDuplicateScopeComparer :
+        IEqualityComparer<(string Key, string ThemeScope)>
+    {
+        public bool Equals((string Key, string ThemeScope) x, (string Key, string ThemeScope) y)
+        {
+            return string.Equals(x.Key, y.Key, StringComparison.Ordinal) &&
+                   string.Equals(x.ThemeScope, y.ThemeScope, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public int GetHashCode((string Key, string ThemeScope) obj)
+        {
+            return HashCode.Combine(
+                StringComparer.Ordinal.GetHashCode(obj.Key),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.ThemeScope));
+        }
     }
 }
