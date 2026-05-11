@@ -1025,12 +1025,38 @@ public partial class PreviewView : UserControl
         Control previewRoot,
         Rect selectionBounds)
     {
-        return FindCurrentSelectedPreviewControl(viewModel, previewRoot) ??
+        return FindPreviewControlByElementIdentity(previewRoot, viewModel.SelectedVisualEditorNode?.Element) ??
+               FindCurrentSelectedPreviewControl(viewModel, previewRoot) ??
                FindPreviewControlBySelectionBounds(previewRoot, selectionBounds) ??
                FindPreviewControlNearSelectionBounds(
                    previewRoot,
                    selectionBounds,
                    viewModel.SelectedVisualEditorNode?.Element.TypeName);
+    }
+
+    private Control? FindPreviewControlByElementIdentity(
+        Control previewRoot,
+        XamlElementSnapshot? selected)
+    {
+        if (selected is null)
+        {
+            return null;
+        }
+
+        return previewRoot
+            .GetVisualDescendants()
+            .OfType<Control>()
+            .Append(previewRoot)
+            .Where(control =>
+                control.TemplatedParent is null &&
+                IsPreviewDescendantOrRoot(control, previewRoot) &&
+                MatchesXamlType(control, selected.TypeName) &&
+                (string.IsNullOrWhiteSpace(selected.Name) ||
+                 string.Equals(control.Name, selected.Name, StringComparison.Ordinal)))
+            .OrderByDescending(control => !string.IsNullOrWhiteSpace(selected.Name) &&
+                                          string.Equals(control.Name, selected.Name, StringComparison.Ordinal))
+            .ThenByDescending(control => control.GetVisualAncestors().Count())
+            .FirstOrDefault();
     }
 
     private Control? FindPreviewControlBySelectionBounds(Control previewRoot, Rect selectionBounds)
