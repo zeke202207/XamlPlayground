@@ -956,6 +956,17 @@ public partial class PreviewView : UserControl
         };
     }
 
+    private static bool IsEmptyDropContainer(Control control)
+    {
+        return control switch
+        {
+            Panel panel => !GetDirectPanelChildren(panel).Any(),
+            Decorator { Child: null } => true,
+            ContentControl { Content: null } => true,
+            _ => false
+        };
+    }
+
     private Rect? GetSelectionBounds(Control control)
     {
         var topLeft = control.TranslatePoint(default, PreviewSurface);
@@ -1042,7 +1053,7 @@ public partial class PreviewView : UserControl
         Rect selectionBounds,
         string? selectedTypeName)
     {
-        return previewRoot
+        var candidates = previewRoot
             .GetVisualDescendants()
             .OfType<Control>()
             .Append(previewRoot)
@@ -1069,8 +1080,11 @@ public partial class PreviewView : UserControl
             .ThenBy(candidate => candidate.CenterDistanceSquared)
             .ThenBy(candidate => candidate.SizeDifference)
             .ThenByDescending(candidate => candidate.Depth)
-            .FirstOrDefault()
-            .Control;
+            .ToArray();
+
+        return candidates.Length == 0
+            ? null
+            : candidates[0].Control;
     }
 
     private static bool SameXamlElement(XamlElementSnapshot? left, XamlElementSnapshot right)
@@ -1089,8 +1103,22 @@ public partial class PreviewView : UserControl
 
         var target = FindDropContainerAt(point, previewRoot);
 
-        return target is not null &&
-               viewModel.MoveVisualEditorSelectionIntoPreviewControl(target);
+        if (target is null)
+        {
+            return false;
+        }
+
+        var resolvedTarget = TryResolvePreviewControl(
+            viewModel,
+            previewRoot,
+            target,
+            out _,
+            out var targetElement,
+            out _)
+                ? targetElement
+                : null;
+
+        return viewModel.MoveVisualEditorSelectionIntoPreviewControl(target, resolvedTarget);
     }
 
     private bool TryMoveSelectionNearDropSibling(MainViewModel viewModel, Point point)
@@ -1113,7 +1141,17 @@ public partial class PreviewView : UserControl
         }
 
         var after = IsAfterPlacement(target, point, bounds.Value);
-        return viewModel.MoveVisualEditorSelectionNearPreviewControl(target, after);
+        var resolvedTarget = TryResolvePreviewControl(
+            viewModel,
+            previewRoot,
+            target,
+            out _,
+            out var targetElement,
+            out _)
+                ? targetElement
+                : null;
+
+        return viewModel.MoveVisualEditorSelectionNearPreviewControl(target, after, resolvedTarget);
     }
 
     private void UpdateMoveDropFeedback(MainViewModel viewModel, Point point, Rect activeBounds)
@@ -1200,6 +1238,12 @@ public partial class PreviewView : UserControl
 
     private Control? FindDropSiblingAt(Point point, Control previewRoot)
     {
+        if (FindDropContainerAt(point, previewRoot) is { } container &&
+            IsEmptyDropContainer(container))
+        {
+            return null;
+        }
+
         return FindSelectablePreviewControlAt(
             point,
             previewRoot,

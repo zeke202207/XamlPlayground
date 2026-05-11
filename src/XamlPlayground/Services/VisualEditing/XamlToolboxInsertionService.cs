@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace XamlPlayground.Services.VisualEditing;
 
@@ -179,9 +180,72 @@ public sealed class XamlToolboxInsertionService
             return snippet;
         }
 
-        return snippet
-            .Replace($"<{elementName}", $"<{newPrefix}:{elementName}", StringComparison.Ordinal)
-            .Replace($"</{elementName}", $"</{newPrefix}:{elementName}", StringComparison.Ordinal);
+        return PrefixUnqualifiedElementTags(snippet, newPrefix);
+    }
+
+    private static string PrefixUnqualifiedElementTags(string snippet, string newPrefix)
+    {
+        var builder = new StringBuilder(snippet.Length + newPrefix.Length * 2);
+        var offset = 0;
+        while (offset < snippet.Length)
+        {
+            var tagStart = snippet.IndexOf('<', offset);
+            if (tagStart < 0)
+            {
+                builder.Append(snippet, offset, snippet.Length - offset);
+                break;
+            }
+
+            builder.Append(snippet, offset, tagStart - offset);
+            if (tagStart + 1 >= snippet.Length)
+            {
+                builder.Append('<');
+                break;
+            }
+
+            var marker = snippet[tagStart + 1];
+            if (marker is '!' or '?')
+            {
+                var tagEnd = snippet.IndexOf('>', tagStart + 2);
+                if (tagEnd < 0)
+                {
+                    builder.Append(snippet, tagStart, snippet.Length - tagStart);
+                    break;
+                }
+
+                builder.Append(snippet, tagStart, tagEnd - tagStart + 1);
+                offset = tagEnd + 1;
+                continue;
+            }
+
+            var nameStart = marker == '/' ? tagStart + 2 : tagStart + 1;
+            var nameEnd = nameStart;
+            while (nameEnd < snippet.Length &&
+                   snippet[nameEnd] is not ' ' and not '\t' and not '\r' and not '\n' and not '/' and not '>')
+            {
+                nameEnd++;
+            }
+
+            if (nameEnd == nameStart)
+            {
+                builder.Append('<');
+                offset = tagStart + 1;
+                continue;
+            }
+
+            var name = snippet[nameStart..nameEnd];
+            builder.Append(snippet, tagStart, nameStart - tagStart);
+            if (!name.Contains(':', StringComparison.Ordinal))
+            {
+                builder.Append(newPrefix);
+                builder.Append(':');
+            }
+
+            builder.Append(name);
+            offset = nameEnd;
+        }
+
+        return builder.ToString();
     }
 
     private static string? GetFirstElementName(string snippet)

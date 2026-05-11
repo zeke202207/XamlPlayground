@@ -1506,7 +1506,10 @@ public partial class MainViewModel
         return result.Success;
     }
 
-    public bool MoveVisualEditorSelectionNearPreviewControl(Control targetControl, bool after)
+    public bool MoveVisualEditorSelectionNearPreviewControl(
+        Control targetControl,
+        bool after,
+        XamlElementSnapshot? resolvedTarget = null)
     {
         ArgumentNullException.ThrowIfNull(targetControl);
 
@@ -1516,15 +1519,19 @@ public partial class MainViewModel
             return false;
         }
 
-        var targetVisualNode = _visualTreeSnapshotService.Snapshot(targetControl);
-        var targetSelection = _visualSelectionService.SelectVisual(xamlFile.Text, targetVisualNode);
-        if (!targetSelection.HasSelection || targetSelection.XamlElement is null)
+        var target = ResolvePreviewTargetElement(
+            xamlFile.Text,
+            targetControl,
+            resolvedTarget,
+            out var diagnostics);
+        if (target is null)
         {
-            VisualEditorStatus = string.Join(Environment.NewLine, targetSelection.Diagnostics);
+            VisualEditorStatus = diagnostics.Count > 0
+                ? string.Join(Environment.NewLine, diagnostics)
+                : "The drop target could not be mapped to XAML.";
             return false;
         }
 
-        var target = targetSelection.XamlElement;
         if (Matches(target, selector) ||
             IsDescendantOf(target, selected) ||
             target.Path.Count == 0)
@@ -1573,7 +1580,9 @@ public partial class MainViewModel
         return result.Success;
     }
 
-    public bool MoveVisualEditorSelectionIntoPreviewControl(Control targetParent)
+    public bool MoveVisualEditorSelectionIntoPreviewControl(
+        Control targetParent,
+        XamlElementSnapshot? resolvedTarget = null)
     {
         ArgumentNullException.ThrowIfNull(targetParent);
 
@@ -1596,15 +1605,19 @@ public partial class MainViewModel
             return false;
         }
 
-        var targetVisualNode = _visualTreeSnapshotService.Snapshot(targetParent);
-        var targetSelection = _visualSelectionService.SelectVisual(xamlFile.Text, targetVisualNode);
-        if (!targetSelection.HasSelection || targetSelection.XamlElement is null)
+        var target = ResolvePreviewTargetElement(
+            xamlFile.Text,
+            targetParent,
+            resolvedTarget,
+            out var diagnostics);
+        if (target is null)
         {
-            VisualEditorStatus = string.Join(Environment.NewLine, targetSelection.Diagnostics);
+            VisualEditorStatus = diagnostics.Count > 0
+                ? string.Join(Environment.NewLine, diagnostics)
+                : "The drop target could not be mapped to XAML.";
             return false;
         }
 
-        var target = targetSelection.XamlElement;
         if (Matches(target, selector) ||
             IsDescendantOf(target, selected))
         {
@@ -1693,6 +1706,30 @@ public partial class MainViewModel
         }
 
         return insertion.Success;
+    }
+
+    private XamlElementSnapshot? ResolvePreviewTargetElement(
+        string xaml,
+        Control targetControl,
+        XamlElementSnapshot? resolvedTarget,
+        out IReadOnlyList<string> diagnostics)
+    {
+        if (resolvedTarget is not null)
+        {
+            var document = _visualMutationEngine.Analyze(xaml);
+            if (FindElement(document, XamlElementSelector.ByPath(resolvedTarget.Path.ToArray())) is { } target)
+            {
+                diagnostics = Array.Empty<string>();
+                return target;
+            }
+        }
+
+        var targetVisualNode = _visualTreeSnapshotService.Snapshot(targetControl);
+        var targetSelection = _visualSelectionService.SelectVisual(xaml, targetVisualNode);
+        diagnostics = targetSelection.Diagnostics;
+        return targetSelection.HasSelection
+            ? targetSelection.XamlElement
+            : null;
     }
 
     private void SetVisualEditorPreviewSelectionBounds(Rect bounds)

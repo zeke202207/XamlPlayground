@@ -469,7 +469,7 @@ public sealed class VisualEditingTests
             "MyWidget",
             "clr-namespace:Demo.Controls;assembly=Demo",
             "Demo",
-            "<MyWidget />",
+            "<MyWidget><ChildWidget /></MyWidget>",
             new Dictionary<string, string>());
 
         var inserted = service.Insert(
@@ -480,7 +480,9 @@ public sealed class VisualEditingTests
         Assert.True(inserted.Success, string.Join(Environment.NewLine, inserted.Mutation.Diagnostics));
         Assert.Equal("local", inserted.NamespacePrefix);
         Assert.Contains("xmlns:local=\"clr-namespace:Demo.Controls;assembly=Demo\"", inserted.Mutation.Text, StringComparison.Ordinal);
-        Assert.Contains("<local:MyWidget />", inserted.Mutation.Text, StringComparison.Ordinal);
+        Assert.Contains("<local:MyWidget>", inserted.Mutation.Text, StringComparison.Ordinal);
+        Assert.Contains("<local:ChildWidget />", inserted.Mutation.Text, StringComparison.Ordinal);
+        Assert.Contains("</local:MyWidget>", inserted.Mutation.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1026,6 +1028,39 @@ public sealed class VisualEditingTests
                 viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"Third\"", StringComparison.Ordinal));
             Assert.True(
                 viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"Third\"", StringComparison.Ordinal) <
+                viewModel.ActiveXamlFile.Text.IndexOf("Content=\"Move\"", StringComparison.Ordinal));
+            Assert.Equal("Button", viewModel.SelectedVisualEditorNode?.Element.TypeName);
+            Assert.Equal("Move", viewModel.SelectedVisualEditorNode?.Element.Attributes["Content"]);
+            Assert.Equal(new[] { 2 }, viewModel.SelectedVisualEditorNode?.Element.Path);
+        });
+    }
+
+    [Fact]
+    public void MainViewModel_DesignerReordersSelectionNearResolvedPreviewSibling()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <Button Content="Move" />
+                                               <Button Content="Middle" />
+                                               <Button Content="Target" />
+                                             </StackPanel>
+                                             """;
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+            viewModel.SelectedVisualEditorNode = FindVisualEditorNodeByPath(viewModel.VisualEditorStructureNodes, 0);
+
+            var target = FindVisualEditorNodeByPath(viewModel.VisualEditorStructureNodes, 2);
+            Assert.NotNull(target);
+
+            Assert.True(viewModel.MoveVisualEditorSelectionNearPreviewControl(new Button(), after: true, target!.Element));
+            Assert.True(
+                viewModel.ActiveXamlFile.Text.IndexOf("Content=\"Target\"", StringComparison.Ordinal) <
                 viewModel.ActiveXamlFile.Text.IndexOf("Content=\"Move\"", StringComparison.Ordinal));
             Assert.Equal("Button", viewModel.SelectedVisualEditorNode?.Element.TypeName);
             Assert.Equal("Move", viewModel.SelectedVisualEditorNode?.Element.Attributes["Content"]);
@@ -1788,6 +1823,52 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void HeadlessPreview_LiveResizeCandidateLookupReturnsNullWhenNoControlMatches()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var preview = new PreviewView
+            {
+                Width = 320,
+                Height = 180
+            };
+            var window = new Window
+            {
+                Width = 360,
+                Height = 240,
+                Background = Brushes.White,
+                Content = preview
+            };
+
+            try
+            {
+                window.Show();
+                PumpLayout(window);
+
+                var previewSurface = Assert.Single(
+                    preview.GetVisualDescendants().OfType<Grid>(),
+                    grid => grid.Name == "PreviewSurface");
+                var result = typeof(PreviewView)
+                    .GetMethod("FindPreviewControlNearSelectionBounds", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(preview, new object?[]
+                    {
+                        previewSurface,
+                        new Rect(10_000, 10_000, 20, 20),
+                        "DefinitelyMissingControl"
+                    });
+
+                Assert.Null(result);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void HeadlessPreview_DraggingChildShowsPanelPlacementAndGuides()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -1875,6 +1956,104 @@ public sealed class VisualEditingTests
 
                 preview.RaiseEvent(CreatePointerReleasedArgs(preview, preview, pointer, end));
                 PumpLayout(window);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void HeadlessPreview_DraggingIntoEmptyContainerDropsInsideInsteadOfBeside()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         Width="260"
+                                                         Height="180"
+                                                         Background="White"
+                                                         x:Name="Root">
+                                               <Button x:Name="MoveMe" Width="120" Height="32" Content="Move" />
+                                               <Border x:Name="Target"
+                                                       Width="180"
+                                                       Height="80"
+                                                       Background="LightBlue" />
+                                             </StackPanel>
+                                             """;
+            viewModel.Control = Assert.IsAssignableFrom<Control>(
+                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+
+            var preview = new PreviewView
+            {
+                Width = 360,
+                Height = 260,
+                DataContext = viewModel
+            };
+            var window = new Window
+            {
+                Width = 400,
+                Height = 300,
+                Background = Brushes.White,
+                Content = preview
+            };
+
+            try
+            {
+                window.Show();
+                PumpLayout(window);
+
+                var previewSurface = Assert.Single(
+                    preview.GetVisualDescendants().OfType<Grid>(),
+                    grid => grid.Name == "PreviewSurface");
+                var moveButton = Assert.Single(
+                    preview.GetVisualDescendants().OfType<Button>(),
+                    button => button.Name == "MoveMe");
+                var targetBorder = Assert.Single(
+                    preview.GetVisualDescendants().OfType<Border>(),
+                    border => border.Name == "Target");
+                var moveTopLeft = moveButton.TranslatePoint(default, previewSurface);
+                var targetTopLeft = targetBorder.TranslatePoint(default, previewSurface);
+                Assert.NotNull(moveTopLeft);
+                Assert.NotNull(targetTopLeft);
+
+                Assert.True(viewModel.SelectVisualEditorPreviewControl(
+                    moveButton,
+                    new Rect(moveTopLeft.Value, moveButton.Bounds.Size)));
+                PumpLayout(window);
+
+                var pointer = new Avalonia.Input.Pointer(
+                    Avalonia.Input.Pointer.GetNextFreeId(),
+                    PointerType.Mouse,
+                    isPrimary: true);
+                var start = moveTopLeft.Value + new Vector(12, 12);
+                var end = targetTopLeft.Value + new Vector(targetBorder.Bounds.Width / 2, targetBorder.Bounds.Height / 2);
+                preview.RaiseEvent(CreatePointerPressedArgs(preview, preview, pointer, start));
+                preview.RaiseEvent(CreatePointerMovedArgs(preview, preview, pointer, end));
+                PumpLayout(window);
+
+                Assert.True(viewModel.VisualEditorPreviewDropTargetVisible);
+                Assert.True(viewModel.VisualEditorPreviewDropPlaceholderVisible);
+                Assert.False(viewModel.VisualEditorPreviewInsertionVisible);
+
+                preview.RaiseEvent(CreatePointerReleasedArgs(preview, preview, pointer, end));
+                PumpLayout(window);
+
+                var updated = viewModel.ActiveXamlFile.Text;
+                var targetStart = updated.IndexOf("x:Name=\"Target\"", StringComparison.Ordinal);
+                var targetEnd = updated.IndexOf("</Border>", targetStart, StringComparison.Ordinal);
+                var moved = updated.IndexOf("x:Name=\"MoveMe\"", StringComparison.Ordinal);
+
+                Assert.True(targetStart >= 0);
+                Assert.True(targetEnd > targetStart);
+                Assert.True(moved > targetStart && moved < targetEnd);
+                Assert.Equal("Moved selection into Border.", viewModel.VisualEditorStatus);
             }
             finally
             {
