@@ -1714,8 +1714,8 @@ public partial class MainViewModel
         double deltaX,
         double deltaY)
     {
-        var left = GetDoubleAttribute(selected, "Canvas.Left", VisualEditorPreviewSelectionLeft) + deltaX;
-        var top = GetDoubleAttribute(selected, "Canvas.Top", VisualEditorPreviewSelectionTop) + deltaY;
+        var left = GetDoubleAttribute(selected, "Canvas.Left", 0) + deltaX;
+        var top = GetDoubleAttribute(selected, "Canvas.Top", 0) + deltaY;
 
         return new[]
         {

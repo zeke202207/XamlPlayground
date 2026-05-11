@@ -305,11 +305,13 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
                 return CreateResult(xaml, "An element cannot be moved into itself or one of its descendants.");
             }
 
+            var sourcePath = GetElementPath(target).ToArray();
+            var targetParentSelectorAfterRemoval = CreateSelectorForElementAfterRemoval(targetParent, sourcePath);
             var targetBlock = NormalizeElementBlock(xaml, target);
             var (removeStart, removeLength) = ExpandRemovalRangeToWholeLine(xaml, target.AsNode.Span.Start, target.AsNode.Span.Length);
             var removed = ReplaceRange(xaml, removeStart, removeLength, string.Empty);
 
-            return InsertChild(removed, targetParentSelector, targetBlock, childIndex);
+            return InsertChild(removed, targetParentSelectorAfterRemoval, targetBlock, childIndex);
         }
         catch (Exception exception)
         {
@@ -660,7 +662,7 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
 
     private static IXmlElementSyntax? FindElement(IXmlElementSyntax root, XamlElementSelector selector)
     {
-        var elements = root.DescendantsAndSelf().ToArray();
+        var elements = GetVisualDescendantsAndSelf(root).ToArray();
 
         if (!string.IsNullOrWhiteSpace(selector.Name))
         {
@@ -724,16 +726,46 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
         return true;
     }
 
+    private static IEnumerable<IXmlElementSyntax> GetVisualDescendantsAndSelf(IXmlElementSyntax root)
+    {
+        return root.DescendantsAndSelf()
+            .Where(static element => !IsInMemberElementTree(element));
+    }
+
     private static IEnumerable<IXmlElementSyntax> GetDirectChildElements(IXmlElementSyntax element)
     {
-        return element.Content
-            .OfType<IXmlElementSyntax>();
+        return GetDirectElementContent(element)
+            .Where(static child => !IsMemberElement(child));
+    }
+
+    private static IEnumerable<IXmlElementSyntax> GetDirectElementContent(IXmlElementSyntax element)
+    {
+        return element.Content.OfType<IXmlElementSyntax>();
     }
 
     private static IXmlElementSyntax? FindDirectChildElement(IXmlElementSyntax element, string elementName)
     {
-        return GetDirectChildElements(element).FirstOrDefault(child =>
+        return GetDirectElementContent(element).FirstOrDefault(child =>
             string.Equals(child.NameNode.FullName, elementName, StringComparison.Ordinal));
+    }
+
+    private static bool IsInMemberElementTree(IXmlElementSyntax element)
+    {
+        for (var current = element; current is not null; current = current.Parent)
+        {
+            if (IsMemberElement(current))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsMemberElement(IXmlElementSyntax element)
+    {
+        return element.Parent is not null &&
+               element.NameNode.FullName.Contains('.', StringComparison.Ordinal);
     }
 
     private static XmlAttributeSyntax? FindAttribute(IXmlElementSyntax element, string propertyName)
@@ -865,7 +897,8 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
         }
 
         var text = xaml;
-        var attributes = root.Attributes
+        var attributes = root.DescendantsAndSelf()
+            .SelectMany(static element => element.Attributes)
             .Where(static attribute =>
                 string.Equals(attribute.Name, XamlNameAttribute, StringComparison.Ordinal) ||
                 string.Equals(attribute.Name, NameAttribute, StringComparison.Ordinal))
@@ -1108,6 +1141,49 @@ public sealed class XamlMutationEngine : IXamlMutationEngine
         }
 
         return false;
+    }
+
+    private static XamlElementSelector CreateSelectorForElementAfterRemoval(
+        IXmlElementSyntax element,
+        IReadOnlyList<int> removedPath)
+    {
+        var name = TryGetName(element);
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            return XamlElementSelector.ByName(name);
+        }
+
+        return XamlElementSelector.ByPath(AdjustPathAfterRemoval(GetElementPath(element), removedPath).ToArray());
+    }
+
+    private static IReadOnlyList<int> AdjustPathAfterRemoval(
+        IReadOnlyList<int> path,
+        IReadOnlyList<int> removedPath)
+    {
+        if (path.Count == 0 || removedPath.Count == 0)
+        {
+            return path.ToArray();
+        }
+
+        var adjusted = path.ToArray();
+        var sharedLength = Math.Min(path.Count, removedPath.Count);
+        for (var i = 0; i < sharedLength; i++)
+        {
+            if (path[i] == removedPath[i])
+            {
+                continue;
+            }
+
+            if (removedPath[i] < path[i] &&
+                path.Take(i).SequenceEqual(removedPath.Take(i)))
+            {
+                adjusted[i]--;
+            }
+
+            return adjusted;
+        }
+
+        return adjusted;
     }
 
     private static string GetMemberElementName(IXmlElementSyntax element, string propertyName)

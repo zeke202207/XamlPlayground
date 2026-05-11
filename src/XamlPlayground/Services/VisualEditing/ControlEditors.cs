@@ -258,8 +258,7 @@ public abstract class ControlEditorProviderBase<TControl> : IControlEditorProvid
 
     private static string GetXamlPropertyName(Type controlType, AvaloniaProperty property)
     {
-        if (property.IsAttached &&
-            !property.OwnerType.IsAssignableFrom(controlType))
+        if (property.IsAttached)
         {
             return $"{property.OwnerType.Name}.{property.Name}";
         }

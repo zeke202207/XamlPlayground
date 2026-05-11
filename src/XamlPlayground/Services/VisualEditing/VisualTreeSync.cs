@@ -124,11 +124,15 @@ public sealed class XamlVisualTreeMapper
             return null;
         }
 
-        return xamlSnapshot.Elements.FirstOrDefault(element =>
-            (string.Equals(element.TypeName, visualNode.TypeName, StringComparison.Ordinal) ||
-             string.Equals(GetLocalName(element.TypeName), visualNode.TypeName, StringComparison.Ordinal)) &&
-            element.Start <= offset &&
-            offset <= element.Start + element.Length);
+        return xamlSnapshot.Elements
+            .Where(element =>
+                (string.Equals(element.TypeName, visualNode.TypeName, StringComparison.Ordinal) ||
+                 string.Equals(GetLocalName(element.TypeName), visualNode.TypeName, StringComparison.Ordinal)) &&
+                element.Start <= offset &&
+                offset <= element.Start + element.Length)
+            .OrderByDescending(static element => element.Path.Count)
+            .ThenBy(static element => element.Length)
+            .FirstOrDefault();
     }
 
     private static int GetOffsetFromLinePosition(string text, int lineNumber, int linePosition)

@@ -51,6 +51,44 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MutationEngine_ExcludesMemberElementsFromVisualPaths()
+    {
+        var engine = new XamlMutationEngine();
+        var xaml = """
+                   <Grid xmlns="https://github.com/avaloniaui">
+                     <Grid.RowDefinitions>
+                       <RowDefinition Height="Auto" />
+                     </Grid.RowDefinitions>
+                     <Button x:Name="Action" />
+                   </Grid>
+                   """;
+
+        var snapshot = engine.Analyze(xaml);
+        var inserted = engine.InsertChild(xaml, XamlElementSelector.ByPath(), "<TextBlock />", 0);
+
+        Assert.Empty(snapshot.Diagnostics);
+        Assert.DoesNotContain(snapshot.Elements, element => element.TypeName == "Grid.RowDefinitions");
+        Assert.DoesNotContain(snapshot.Elements, element => element.TypeName == "RowDefinition");
+        Assert.Collection(
+            snapshot.Elements,
+            root =>
+            {
+                Assert.Equal(Array.Empty<int>(), root.Path);
+                Assert.Equal(1, root.ChildElementCount);
+            },
+            button =>
+            {
+                Assert.Equal("Button", button.TypeName);
+                Assert.Equal(new[] { 0 }, button.Path);
+            });
+        Assert.Empty(inserted.Diagnostics);
+        Assert.Contains(
+            "</Grid.RowDefinitions>\n  <TextBlock />\n  <Button x:Name=\"Action\" />",
+            NormalizeLineEndings(inserted.Text),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MutationEngine_SetsAddsAndRemovesProperties()
     {
         var engine = new XamlMutationEngine();
@@ -231,6 +269,30 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MutationEngine_MovesEarlierSiblingIntoUnnamedLaterParent()
+    {
+        var engine = new XamlMutationEngine();
+        var xaml = """
+                   <Grid xmlns="https://github.com/avaloniaui">
+                     <StackPanel>
+                       <Button x:Name="A" />
+                     </StackPanel>
+                     <StackPanel>
+                       <Button x:Name="B" />
+                     </StackPanel>
+                   </Grid>
+                   """;
+
+        var moved = engine.MoveElement(xaml, XamlElementSelector.ByPath(0), XamlElementSelector.ByPath(1));
+        var movedA = Assert.Single(moved.Snapshot.Elements, element => element.Name == "A");
+        var movedB = Assert.Single(moved.Snapshot.Elements, element => element.Name == "B");
+
+        Assert.Empty(moved.Diagnostics);
+        Assert.Equal(new[] { 0, 1, 0 }, movedA.Path);
+        Assert.Equal(new[] { 0, 0 }, movedB.Path);
+    }
+
+    [Fact]
     public void MutationEngine_DuplicatesElementsWithoutDuplicatingNames()
     {
         var engine = new XamlMutationEngine();
@@ -252,6 +314,28 @@ public sealed class VisualEditingTests
         Assert.True(
             reordered.Text.IndexOf("<Button x:Name=\"Action\"", StringComparison.Ordinal) <
             reordered.Text.IndexOf("<TextBlock x:Name=\"Title\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MutationEngine_DuplicatesElementsWithoutDuplicatingDescendantNames()
+    {
+        var engine = new XamlMutationEngine();
+        var xaml = """
+                   <StackPanel xmlns="https://github.com/avaloniaui"
+                               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                     <StackPanel x:Name="Panel">
+                       <Button x:Name="Save" />
+                       <TextBlock Name="Legacy" />
+                     </StackPanel>
+                   </StackPanel>
+                   """;
+
+        var duplicated = engine.DuplicateElement(xaml, XamlElementSelector.ByName("Panel"));
+
+        Assert.Empty(duplicated.Diagnostics);
+        Assert.Equal(1, CountOccurrences(duplicated.Text, "x:Name=\"Panel\""));
+        Assert.Equal(1, CountOccurrences(duplicated.Text, "x:Name=\"Save\""));
+        Assert.Equal(1, CountOccurrences(duplicated.Text, "Name=\"Legacy\""));
     }
 
     [Fact]
@@ -370,6 +454,47 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void ControlEditorRegistry_QualifiesAttachedPropertiesForOwnerControls()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var descriptor = new ControlEditorRegistry().Resolve(typeof(Grid));
+
+        Assert.Contains(descriptor.Properties, property => property.PropertyName == "Grid.Row");
+        Assert.Contains(descriptor.Properties, property => property.PropertyName == "Grid.Column");
+        Assert.DoesNotContain(descriptor.Properties, property => property.PropertyName == "Row");
+        Assert.DoesNotContain(descriptor.Properties, property => property.PropertyName == "Column");
+    }
+
+    [Fact]
+    public void VisualTreeMapper_PrefersInnermostSourceInfoMatch()
+    {
+        var engine = new XamlMutationEngine();
+        var snapshot = engine.Analyze(
+            "<Border xmlns=\"https://github.com/avaloniaui\">\n" +
+            "  <Border>\n" +
+            "    <TextBlock />\n" +
+            "  </Border>\n" +
+            "</Border>");
+        var mapper = new XamlVisualTreeMapper();
+        var visualNode = new VisualTreeNodeSnapshot(
+            "inner-border",
+            "Border",
+            null,
+            default,
+            Array.Empty<int>(),
+            null,
+            2,
+            4,
+            Array.Empty<VisualTreeNodeSnapshot>());
+
+        var element = mapper.FindXamlElement(visualNode, snapshot);
+
+        Assert.NotNull(element);
+        Assert.Equal(new[] { 0 }, element.Path);
+    }
+
+    [Fact]
     public void ToolboxCatalogBuilder_ScansAvaloniaControlAssemblies()
     {
         var builder = new ToolboxCatalogBuilder();
@@ -458,7 +583,7 @@ public sealed class VisualEditingTests
                 property => property.Name == "FontSize");
             var textAlignmentProperty = Assert.Single(
                 viewModel.VisualEditorAvailableProperties,
-                property => property.Name == "TextAlignment");
+                property => property.Name.EndsWith("TextAlignment", StringComparison.Ordinal));
             viewModel.VisualEditorPropertyFilter = "TextAlignment";
             Assert.True(viewModel.VisualEditorAvailablePropertiesView!.Contains(textAlignmentProperty));
             Assert.False(viewModel.VisualEditorAvailablePropertiesView.Contains(fontSizeProperty));
@@ -478,19 +603,19 @@ public sealed class VisualEditingTests
             Assert.Contains(viewModel.VisualEditorProperties, property =>
                 property.Name == "Text" && property.Value == "After");
 
-            viewModel.SelectedVisualEditorAvailableProperty = Assert.Single(
-                viewModel.VisualEditorAvailableProperties,
-                property => property.Name == "TextWrapping");
+            viewModel.SelectedVisualEditorAvailableProperty =
+                viewModel.VisualEditorAvailableProperties.First(property =>
+                    property.Name == "TextWrapping");
             Assert.Contains("Wrap", viewModel.VisualEditorPropertyOptions);
             viewModel.SelectedVisualEditorPropertyOption = "Wrap";
 
             viewModel.ApplyVisualEditorPropertyCommand.Execute(null);
 
-            Assert.Contains("TextWrapping=\"Wrap\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.Contains($"{viewModel.SelectedVisualEditorAvailableProperty.Name}=\"Wrap\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
 
             viewModel.ResetVisualEditorPropertyCommand.Execute(null);
 
-            Assert.DoesNotContain("TextWrapping=\"Wrap\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain($"{viewModel.SelectedVisualEditorAvailableProperty.Name}=\"Wrap\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
 
             titleNode = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "Title");
             Assert.NotNull(titleNode);
@@ -563,6 +688,41 @@ public sealed class VisualEditingTests
             Assert.Contains("Height=\"40\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
             Assert.Equal("Resized selection using Width and Height.", viewModel.VisualEditorStatus);
             Assert.Equal("Action", viewModel.SelectedVisualEditorNode?.Element.Name);
+        });
+    }
+
+    [Fact]
+    public void MainViewModel_CanvasMoveFallbacksAreParentRelative()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <Canvas xmlns="https://github.com/avaloniaui"
+                                                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                     x:Name="Root">
+                                               <Canvas x:Name="Nested"
+                                                       Canvas.Left="200"
+                                                       Canvas.Top="80">
+                                                 <Button x:Name="Action"
+                                                         Width="100"
+                                                         Height="30"
+                                                         Content="Run" />
+                                               </Canvas>
+                                             </Canvas>
+                                             """;
+
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+            viewModel.SelectedVisualEditorNode = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "Action");
+            viewModel.UpdateVisualEditorPreviewSelectionBounds(new Rect(200, 80, 100, 30));
+
+            Assert.True(viewModel.MoveVisualEditorSelectionBy(10, 5));
+            Assert.Contains("Canvas.Left=\"10\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.Contains("Canvas.Top=\"5\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Canvas.Left=\"210\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Canvas.Top=\"85\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
         });
     }
 
@@ -2811,6 +2971,19 @@ public sealed class VisualEditingTests
     private static string NormalizeLineEndings(string text)
     {
         return text.Replace("\r\n", "\n", StringComparison.Ordinal);
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        var offset = 0;
+        while ((offset = text.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += value.Length;
+        }
+
+        return count;
     }
 
     private static string GetScreenshotPath(string fileName)
