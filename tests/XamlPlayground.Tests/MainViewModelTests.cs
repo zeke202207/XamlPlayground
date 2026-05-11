@@ -629,6 +629,47 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void CreateCustomControlThemeCommand_CreatesThemeFromSelectedFluentTemplateWithoutPreviewSelection()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var themeRoot = CreateTemporaryFluentThemeRoot();
+        var previousThemeRoot = Environment.GetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH");
+        Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", themeRoot);
+
+        try
+        {
+            var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
+            var mainFile = viewModel.ActiveXamlFile!;
+            var template = Assert.Single(
+                viewModel.FluentControlThemeTemplates,
+                candidate => candidate.TargetType == "Button");
+
+            viewModel.SelectedFluentControlThemeTemplate = template;
+
+            Assert.Equal("Fluent template: Button", viewModel.ControlThemeSelectedTargetType);
+            Assert.True(viewModel.CreateCustomControlThemeCommand.CanExecute(null));
+
+            viewModel.CreateCustomControlThemeCommand.Execute(null);
+
+            var themeFile = viewModel.ActiveProject!.FindFile("Themes/MyButtonTheme1.axaml");
+            Assert.NotNull(themeFile);
+            Assert.Contains("x:Key=\"MyButtonTheme1\"", themeFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Theme=\"{StaticResource MyButtonTheme1}\"", mainFile.Text, StringComparison.Ordinal);
+            Assert.Same(themeFile, viewModel.ActiveXamlFile);
+            Assert.Contains(viewModel.ControlThemes, theme => theme.Key == "MyButtonTheme1" && theme.TargetType == "Button");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", previousThemeRoot);
+            Directory.Delete(themeRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void CreateCustomControlThemeCommand_PreservesExistingCustomThemesWhenCreatingAnotherTargetType()
     {
         TestApplication.EnsureAvaloniaInitialized();
