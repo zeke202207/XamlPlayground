@@ -1791,6 +1791,9 @@ public sealed class VisualEditingTests
 
                 viewModel.SelectedVisualEditorNode = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "Root");
                 PumpLayout(window);
+                actionButton = Assert.Single(
+                    preview.GetVisualDescendants().OfType<Button>(),
+                    button => button.Name == "Action");
                 ClickPreviewControl(preview, actionButton, KeyModifiers.Control);
                 PumpLayout(window);
 

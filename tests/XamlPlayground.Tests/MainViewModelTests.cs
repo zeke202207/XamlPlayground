@@ -523,6 +523,64 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void CreateCustomControlThemeCommand_PreservesExistingCustomThemesWhenCreatingAnotherTargetType()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var themeRoot = CreateTemporaryFluentThemeRoot();
+        var previousThemeRoot = Environment.GetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH");
+        Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", themeRoot);
+
+        try
+        {
+            var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
+            var mainFile = viewModel.ActiveXamlFile!;
+            mainFile.Text = """
+                            <UserControl xmlns="https://github.com/avaloniaui"
+                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <StackPanel>
+                                <Button x:Name="ActionButton" Content="Save" />
+                                <CheckBox x:Name="AcceptCheckBox" Content="Accept" />
+                              </StackPanel>
+                            </UserControl>
+                            """;
+            var buttonStart = mainFile.Text.IndexOf("<Button", StringComparison.Ordinal);
+
+            Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, buttonStart, 0, buttonStart));
+            viewModel.CreateCustomControlThemeCommand.Execute(null);
+
+            Assert.NotNull(viewModel.ActiveProject!.FindFile("Themes/MyButtonTheme1.axaml"));
+            Assert.Contains(viewModel.ControlThemes, theme => theme.Key == "MyButtonTheme1" && theme.TargetType == "Button");
+
+            viewModel.ReturnFromThemeEditScopeCommand.Execute(null);
+            Assert.Same(mainFile, viewModel.ActiveXamlFile);
+            viewModel.ControlThemeSearchText = "CheckBox";
+            Assert.Empty(viewModel.FilteredControlThemes);
+
+            var checkBoxStart = mainFile.Text.IndexOf("<CheckBox", StringComparison.Ordinal);
+            Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, checkBoxStart, 0, checkBoxStart));
+            viewModel.CreateCustomControlThemeCommand.Execute(null);
+
+            Assert.Equal(string.Empty, viewModel.ControlThemeSearchText);
+            Assert.NotNull(viewModel.ActiveProject.FindFile("Themes/MyButtonTheme1.axaml"));
+            Assert.NotNull(viewModel.ActiveProject.FindFile("Themes/MyCheckBoxTheme1.axaml"));
+            Assert.Equal(2, viewModel.FilteredControlThemes.Count);
+            Assert.Contains(viewModel.ControlThemes, theme => theme.Key == "MyButtonTheme1" && theme.TargetType == "Button");
+            Assert.Contains(viewModel.ControlThemes, theme => theme.Key == "MyCheckBoxTheme1" && theme.TargetType == "CheckBox");
+            Assert.Contains("Theme=\"{StaticResource MyButtonTheme1}\"", mainFile.Text, StringComparison.Ordinal);
+            Assert.Contains("Theme=\"{StaticResource MyCheckBoxTheme1}\"", mainFile.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", previousThemeRoot);
+            Directory.Delete(themeRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ControlThemeSearchText_FiltersCustomAndFluentThemeLists()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -894,6 +952,22 @@ public sealed class MainViewModelTests
             <ResourceDictionary xmlns="https://github.com/avaloniaui"
                                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
               <ControlTheme x:Key="{x:Type Button}" TargetType="Button">
+                <Setter Property="Padding" Value="8" />
+                <Setter Property="Template">
+                  <ControlTemplate>
+                    <ContentPresenter Content="{TemplateBinding Content}"
+                                      Padding="{TemplateBinding Padding}" />
+                  </ControlTemplate>
+                </Setter>
+              </ControlTheme>
+            </ResourceDictionary>
+            """);
+        File.WriteAllText(
+            Path.Combine(controls, "CheckBox.xaml"),
+            """
+            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+              <ControlTheme x:Key="{x:Type CheckBox}" TargetType="CheckBox">
                 <Setter Property="Padding" Value="8" />
                 <Setter Property="Template">
                   <ControlTemplate>

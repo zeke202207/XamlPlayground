@@ -2747,6 +2747,7 @@ public partial class MainViewModel
         var themeFile = _solutionFactory.AddControlThemeResource(project, themeKey, xaml);
         var ownerFile = ActiveXamlFile;
 
+        ClearControlThemeSearchFilter();
         SolutionExplorerNodes = Solution is { } solution
             ? BuildSolutionExplorer(solution)
             : new ObservableCollection<SolutionExplorerNodeViewModel>();
@@ -2766,7 +2767,15 @@ public partial class MainViewModel
         }
 
         OpenWorkspaceFile(themeFile);
-        ControlThemeStatus = $"Created {themeKey} from Fluent {targetType}.";
+        ControlThemeStatus = $"Created {themeKey} from Fluent {targetType}. {ControlThemes.Count} custom theme(s) available.";
+    }
+
+    private void ClearControlThemeSearchFilter()
+    {
+        if (!string.IsNullOrWhiteSpace(ControlThemeSearchText))
+        {
+            ControlThemeSearchText = string.Empty;
+        }
     }
 
     private string CreateUniqueControlThemeKey(InMemoryProject project, string targetType)
