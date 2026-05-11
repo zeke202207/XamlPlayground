@@ -362,21 +362,26 @@ Concrete first slice:
 
 ## Implementation Status
 
-The first implementation pass now covers the core Blend-inspired workflow:
+| Task | Status | Notes |
+| --- | --- | --- |
+| Resource graph: resources, usages, duplicates, unresolved references | Done | `ResourceDictionaryAnalyzer` feeds `Resources`, `Usages`, and `Diagnostics` tabs. |
+| Resource operations: rename, duplicate, delete, open, apply | Done | Rename updates references. Duplicate and open work from the resource list. Delete has a guarded confirmation path. |
+| Delete resources with usages and automated cleanup | Done | First delete reports usages; second delete removes simple `{StaticResource ...}` / `{DynamicResource ...}` attribute references and deletes the resource. |
+| Property-grid resource picker | Done | Property suggestions include compatible resource references for `Theme`, brush, thickness, number, string, and content-like properties, with static/dynamic options where appropriate. |
+| Edit referenced resource from property grid | Done | The property panel can open the resource referenced by the current property value. |
+| Scoped template editing breadcrumb and return | Done | Creating/opening a control theme records owner document and source selection, then supports returning. |
+| Template contract inspection | Done | Selected themes list named template parts and `TemplateBinding` usage. |
+| Pseudo-class state preview | Done | State selection forces matching preview pseudo-classes without mutating XAML. |
+| Visual state selector editing | Done | The state panel can add or update setters inside a `Style Selector="^:state"` block. |
+| Theme project save/load | Done | `.xamltheme` v2 includes format metadata, file kind, saved time, and inferred base/light/dark variants; v1 packages still load. |
+| Variant dictionary visibility | Done | The `Variants` tab groups resource dictionaries by inferred base/light/dark variant. |
+| Side-by-side light/dark fixture previews | Done | The `Variants` tab can generate a `Design.PreviewWith` fixture showing selected themes in light and dark columns. |
 
-- Resource graph: resources, usages, duplicate diagnostics, and missing-reference diagnostics.
-- Resource operations: rename with reference updates, duplicate, delete unused resources, open, and apply compatible `ControlTheme` resources.
-- Scoped template editing: creating or opening a control theme records a return breadcrumb back to the owning document and selected control.
-- State inspection: selected control themes expose pseudo-class states, matching selectors, template parts, and `TemplateBinding` usage.
-- Preview state forcing: selecting a pseudo-class state attempts to force that state on matching preview controls without mutating XAML.
-- Theme packaging: `.xamltheme` saves include format metadata, file kind, inferred base/light/dark variants, and remain compatible with version 1 packages.
+Possible later refinements:
 
-Remaining high-value follow-up work:
-
-- Add confirmation UI for deleting resources with usages and offer automated reference removal.
-- Add a richer resource picker from the property grid with property-type compatibility filtering beyond `ControlTheme`.
-- Add visual state editing commands that create or update selectors, not just inspect and preview them.
-- Add side-by-side light/dark fixture previews for variant dictionaries.
+- Replace the guarded delete action with a modal diff/confirmation dialog once dialog infrastructure exists.
+- Extend compatibility filtering to collection/template/data resources when the editor gains structured object-resource authoring.
+- Add selector-specific visual editing for template parts, beyond creating/updating simple state setters.
 
 ## Sources
 

@@ -624,8 +624,111 @@ public sealed class MainViewModelTests
             viewModel.SelectedThemeResource = Assert.Single(viewModel.ThemeResources, resource => resource.Key == "PrimaryButtonTheme");
             viewModel.DeleteSelectedThemeResourceCommand.Execute(null);
 
-            Assert.Contains("Cannot delete PrimaryButtonTheme", viewModel.ControlThemeStatus, StringComparison.Ordinal);
+            Assert.Contains("Press delete again", viewModel.ControlThemeStatus, StringComparison.Ordinal);
             Assert.Contains("x:Key=\"PrimaryButtonTheme\"", themeFile.Text, StringComparison.Ordinal);
+
+            viewModel.DeleteSelectedThemeResourceCommand.Execute(null);
+
+            Assert.DoesNotContain("Theme=\"{StaticResource PrimaryButtonTheme}\"", mainFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("x:Key=\"PrimaryButtonTheme\"", themeFile.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", previousThemeRoot);
+            Directory.Delete(themeRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void VisualPropertyResourcePicker_SuggestsCompatibleResourcesAndOpensReference()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            EnableAutoRun = false
+        };
+        var project = viewModel.ActiveProject!;
+        project.AddFile(new InMemoryProjectFile(
+            "Themes/Palette.axaml",
+            """
+            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+              <SolidColorBrush x:Key="PickerBrush" Color="Red" />
+            </ResourceDictionary>
+            """,
+            ProjectFileKind.Resource));
+        RefreshControlThemes(viewModel);
+        var mainFile = viewModel.ActiveXamlFile!;
+        mainFile.Text = """
+                        <UserControl xmlns="https://github.com/avaloniaui"
+                                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                          <Button x:Name="ActionButton" Content="Save" />
+                        </UserControl>
+                        """;
+        var buttonStart = mainFile.Text.IndexOf("<Button", StringComparison.Ordinal);
+        Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, buttonStart, 0, buttonStart));
+        viewModel.SelectedVisualEditorAvailableProperty =
+            viewModel.VisualEditorAvailableProperties.First(property => property.Name == "Background");
+
+        Assert.Contains("{DynamicResource PickerBrush}", viewModel.VisualEditorPropertyOptions);
+        Assert.Contains("{StaticResource PickerBrush}", viewModel.VisualEditorPropertyOptions);
+
+        viewModel.SelectedVisualEditorPropertyOption = "{DynamicResource PickerBrush}";
+        viewModel.ApplyVisualEditorPropertyCommand.Execute(null);
+
+        Assert.Contains("Background=\"{DynamicResource PickerBrush}\"", mainFile.Text, StringComparison.Ordinal);
+        Assert.True(viewModel.OpenVisualEditorPropertyResourceCommand.CanExecute(null));
+        viewModel.OpenVisualEditorPropertyResourceCommand.Execute(null);
+        Assert.Equal("Themes/Palette.axaml", viewModel.ActiveXamlFile!.Path);
+    }
+
+    [Fact]
+    public void ThemeStateAndVariantCommands_EditThemeDictionary()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var themeRoot = CreateTemporaryFluentThemeRoot();
+        var previousThemeRoot = Environment.GetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH");
+        Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", themeRoot);
+
+        try
+        {
+            var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
+            var mainFile = viewModel.ActiveXamlFile!;
+            mainFile.Text = """
+                            <UserControl xmlns="https://github.com/avaloniaui"
+                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <Button x:Name="ActionButton" Content="Save" />
+                            </UserControl>
+                            """;
+            var buttonStart = mainFile.Text.IndexOf("<Button", StringComparison.Ordinal);
+            Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, buttonStart, 0, buttonStart));
+            viewModel.CreateCustomControlThemeCommand.Execute(null);
+
+            var themeFile = viewModel.ActiveProject!.FindFile("Themes/MyButtonTheme1.axaml");
+            Assert.NotNull(themeFile);
+            viewModel.SelectedControlTheme = Assert.Single(viewModel.ControlThemes, theme => theme.Key == "MyButtonTheme1");
+            viewModel.SelectedThemePreviewState =
+                viewModel.ThemePreviewStates.First(state => state.State == "pointerover");
+            viewModel.ThemeStateSetterPropertyName = "Opacity";
+            viewModel.ThemeStateSetterValue = "0.8";
+
+            Assert.True(viewModel.ApplyThemeStateSetterCommand.CanExecute(null));
+            viewModel.ApplyThemeStateSetterCommand.Execute(null);
+
+            Assert.Contains("Selector=\"^:pointerover\"", themeFile.Text, StringComparison.Ordinal);
+            Assert.Contains("Property=\"Opacity\" Value=\"0.8\"", themeFile.Text, StringComparison.Ordinal);
+            Assert.Contains(viewModel.ThemeVariants, variant => variant.Name == ThemeProjectStorage.BaseVariant);
+
+            Assert.True(viewModel.CreateThemeVariantPreviewCommand.CanExecute(null));
+            viewModel.CreateThemeVariantPreviewCommand.Execute(null);
+
+            Assert.Contains("RequestedThemeVariant=\"Light\"", themeFile.Text, StringComparison.Ordinal);
+            Assert.Contains("RequestedThemeVariant=\"Dark\"", themeFile.Text, StringComparison.Ordinal);
         }
         finally
         {
@@ -820,6 +923,15 @@ public sealed class MainViewModelTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
         return Assert.IsAssignableFrom<Task>(method.Invoke(viewModel, null));
+    }
+
+    private static void RefreshControlThemes(MainViewModel viewModel)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "RefreshControlThemes",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method.Invoke(viewModel, null);
     }
 
     private static void AssertDiagnosticTreeTool(

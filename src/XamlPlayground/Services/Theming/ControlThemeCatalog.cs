@@ -195,6 +195,24 @@ public static class ControlThemeResourceBuilder
             "\n</ResourceDictionary>\n";
     }
 
+    public static string CreateVariantPreviewXaml(
+        string targetType,
+        string themeKey)
+    {
+        var samples = CreatePreviewSamples(targetType, themeKey);
+        return
+            "<Design.PreviewWith xmlns=\"https://github.com/avaloniaui\">\n" +
+            "  <Border Padding=\"24\">\n" +
+            "    <StackPanel Orientation=\"Horizontal\" Spacing=\"16\">\n" +
+            CreateVariantPreviewColumn("Light", "Light", samples) +
+            "\n" +
+            CreateVariantPreviewColumn("Dark", "Dark", samples) +
+            "\n" +
+            "    </StackPanel>\n" +
+            "  </Border>\n" +
+            "</Design.PreviewWith>";
+    }
+
     public static IReadOnlyList<ControlThemeDefinition> FindCustomThemes(
         IEnumerable<(string Path, string Text)> resourceFiles)
     {
@@ -241,7 +259,21 @@ public static class ControlThemeResourceBuilder
 
     private static string CreatePreviewXaml(string targetType, string themeKey)
     {
-        var samples = targetType switch
+        var samples = CreatePreviewSamples(targetType, themeKey);
+
+        return
+            "  <Design.PreviewWith>\n" +
+            "    <Border Padding=\"24\">\n" +
+            "      <StackPanel Spacing=\"12\">\n" +
+            string.Join("\n", samples.Select(sample => "        " + sample)) + "\n" +
+            "      </StackPanel>\n" +
+            "    </Border>\n" +
+            "  </Design.PreviewWith>";
+    }
+
+    private static string[] CreatePreviewSamples(string targetType, string themeKey)
+    {
+        return targetType switch
         {
             "TextBox" => new[]
             {
@@ -264,15 +296,20 @@ public static class ControlThemeResourceBuilder
             "RadioButton" => CreateContentControlPreview(targetType, themeKey, "Radio option", "Disabled"),
             _ => CreatePlainControlPreview(targetType, themeKey)
         };
+    }
 
+    private static string CreateVariantPreviewColumn(
+        string title,
+        string requestedThemeVariant,
+        IEnumerable<string> samples)
+    {
         return
-            "  <Design.PreviewWith>\n" +
-            "    <Border Padding=\"24\">\n" +
-            "      <StackPanel Spacing=\"12\">\n" +
-            string.Join("\n", samples.Select(sample => "        " + sample)) + "\n" +
-            "      </StackPanel>\n" +
-            "    </Border>\n" +
-            "  </Design.PreviewWith>";
+            "      <Border RequestedThemeVariant=\"" + requestedThemeVariant + "\" Padding=\"16\" BorderThickness=\"1\" BorderBrush=\"Gray\">\n" +
+            "        <StackPanel Spacing=\"12\">\n" +
+            "          <TextBlock Text=\"" + title + "\" FontWeight=\"SemiBold\" />\n" +
+            string.Join("\n", samples.Select(sample => "          " + sample)) + "\n" +
+            "        </StackPanel>\n" +
+            "      </Border>";
     }
 
     private static string[] CreateContentControlPreview(

@@ -42,6 +42,15 @@ public sealed record ControlThemeStateSelector(
 public static class ControlThemeAnalyzer
 {
     private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+    private static readonly string[] CommonStates =
+    {
+        "normal",
+        "pointerover",
+        "pressed",
+        "disabled",
+        "focus",
+        "checked"
+    };
     private static readonly Regex PseudoClassRegex = new(
         ":(?<state>[A-Za-z][A-Za-z0-9_-]*)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -74,7 +83,7 @@ public static class ControlThemeAnalyzer
         var stateSelectors = FindStateSelectors(theme).ToArray();
         var availableStates = stateSelectors
             .Select(static selector => selector.State)
-            .Append("normal")
+            .Concat(CommonStates)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(static state => state, ThemeStateComparer.Instance)
             .ToArray();

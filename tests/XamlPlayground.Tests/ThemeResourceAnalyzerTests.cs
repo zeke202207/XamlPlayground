@@ -77,6 +77,7 @@ public sealed class ThemeResourceAnalyzerTests
             "MyButtonTheme1",
             "PrimaryButtonTheme");
         var duplicated = ThemeResourceEditor.DuplicateResource(references, "PrimaryButtonTheme", "SecondaryButtonTheme");
+        var cleanedReferences = ThemeResourceEditor.RemoveResourceReferences(references, "PrimaryButtonTheme");
         var deleted = ThemeResourceEditor.DeleteResource(duplicated.Text, "AccentBrush");
 
         Assert.True(renamed.Changed);
@@ -84,6 +85,7 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.Contains("Theme=\"{StaticResource PrimaryButtonTheme}\"", references, System.StringComparison.Ordinal);
         Assert.True(duplicated.Changed);
         Assert.Contains("x:Key=\"SecondaryButtonTheme\"", duplicated.Text, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Theme=\"{StaticResource PrimaryButtonTheme}\"", cleanedReferences, System.StringComparison.Ordinal);
         Assert.True(deleted.Changed);
         Assert.DoesNotContain("AccentBrush", deleted.Text, System.StringComparison.Ordinal);
         Assert.False(deleted.RemovedLastResource);
@@ -121,7 +123,36 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.Contains(analysis.TemplateBindings, binding => binding.Property == "Padding");
         Assert.Contains(analysis.TemplateBindings, binding => binding.Property == "Content");
         Assert.Contains(analysis.AvailableStates, state => state == "normal");
+        Assert.Contains(analysis.AvailableStates, state => state == "checked");
         Assert.Contains(analysis.StateSelectors, selector => selector.State == "pointerover");
         Assert.Contains(analysis.StateSelectors, selector => selector.State == "pressed");
+    }
+
+    [Fact]
+    public void ControlThemeEditor_AddsStateSetterAndVariantPreview()
+    {
+        const string xaml = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <ControlTheme x:Key="MyButtonTheme1" TargetType="Button" />
+                            </ResourceDictionary>
+                            """;
+
+        var stateEdit = ControlThemeEditor.SetStateSetter(
+            xaml,
+            "MyButtonTheme1",
+            "pointerover",
+            "Opacity",
+            "0.8");
+        var previewEdit = ControlThemeEditor.SetDesignPreview(
+            stateEdit.Text,
+            ControlThemeResourceBuilder.CreateVariantPreviewXaml("Button", "MyButtonTheme1"));
+
+        Assert.True(stateEdit.Changed);
+        Assert.Contains("Selector=\"^:pointerover\"", stateEdit.Text, System.StringComparison.Ordinal);
+        Assert.Contains("Property=\"Opacity\" Value=\"0.8\"", stateEdit.Text, System.StringComparison.Ordinal);
+        Assert.True(previewEdit.Changed);
+        Assert.Contains("RequestedThemeVariant=\"Light\"", previewEdit.Text, System.StringComparison.Ordinal);
+        Assert.Contains("RequestedThemeVariant=\"Dark\"", previewEdit.Text, System.StringComparison.Ordinal);
     }
 }

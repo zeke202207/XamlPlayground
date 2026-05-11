@@ -72,6 +72,18 @@ public static class ThemeResourceEditor
         });
     }
 
+    public static string RemoveResourceReferences(
+        string xaml,
+        string key)
+    {
+        if (!IsValidKey(key))
+        {
+            return xaml;
+        }
+
+        return RemoveResourceReferenceAttributes(xaml, key);
+    }
+
     public static ThemeResourceEditResult DuplicateResource(
         string xaml,
         string sourceKey,
@@ -224,6 +236,30 @@ public static class ThemeResourceEditor
             .Where(static element => element.Name.LocalName == "Design.PreviewWith")
             .Where(element => element.ToString(SaveOptions.DisableFormatting).Contains(key, StringComparison.Ordinal))
             .Remove();
+    }
+
+    private static string RemoveResourceReferenceAttributes(string xaml, string key)
+    {
+        var attributeRegex = new Regex(
+            "\\s+[A-Za-z_][A-Za-z0-9_.:-]*\\s*=\\s*\"(?<value>[^\"]*)\"",
+            RegexOptions.CultureInvariant);
+
+        return attributeRegex.Replace(xaml, match =>
+        {
+            var value = match.Groups["value"].Value;
+            return IsExactResourceReference(value, key)
+                ? string.Empty
+                : match.Value;
+        });
+    }
+
+    private static bool IsExactResourceReference(string value, string key)
+    {
+        var match = ResourceReferenceRegex.Match(value.Trim());
+        return match.Success &&
+               match.Index == 0 &&
+               match.Length == value.Trim().Length &&
+               string.Equals(match.Groups["key"].Value, key, StringComparison.Ordinal);
     }
 
     private static bool IsValidKey(string key)

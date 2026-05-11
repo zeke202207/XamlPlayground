@@ -376,3 +376,21 @@ public sealed class ThemeTemplateBindingViewModel : ViewModelBase
         ? $"{Property} : line {Line}"
         : Property;
 }
+
+public sealed class ThemeVariantViewModel : ViewModelBase
+{
+    public ThemeVariantViewModel(string name, int fileCount, string files)
+    {
+        Name = name;
+        FileCount = fileCount;
+        Files = files;
+    }
+
+    public string Name { get; }
+
+    public int FileCount { get; }
+
+    public string Files { get; }
+
+    public string Title => $"{Name} ({FileCount})";
+}

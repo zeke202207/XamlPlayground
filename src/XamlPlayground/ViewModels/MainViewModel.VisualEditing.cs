@@ -45,6 +45,7 @@ public partial class MainViewModel
     private XamlElementSelector? _visualEditorCurrentContainerSelector;
     private ThemeEditScope? _themeEditScope;
     private ControlThemeAnalysis _selectedControlThemeAnalysis = ControlThemeAnalysis.Empty;
+    private string? _pendingThemeResourceDeleteKey;
 
     [ObservableProperty] private ObservableCollection<VisualEditorNodeViewModel> _visualEditorStructureNodes = new();
     [ObservableProperty] private HierarchicalModel<VisualEditorNodeViewModel>? _visualEditorStructureModel;
@@ -134,6 +135,9 @@ public partial class MainViewModel
     [ObservableProperty] private ObservableCollection<ThemeStateSelectorViewModel> _themeStateSelectors = new();
     [ObservableProperty] private ObservableCollection<ThemeTemplatePartViewModel> _themeTemplateParts = new();
     [ObservableProperty] private ObservableCollection<ThemeTemplateBindingViewModel> _themeTemplateBindings = new();
+    [ObservableProperty] private string _themeStateSetterPropertyName = "Opacity";
+    [ObservableProperty] private string _themeStateSetterValue = string.Empty;
+    [ObservableProperty] private ObservableCollection<ThemeVariantViewModel> _themeVariants = new();
 
     public bool VisualEditorPreviewContentHitTestVisible => !VisualEditorDesignerMode;
 
@@ -179,6 +183,8 @@ public partial class MainViewModel
 
     public ICommand ResetVisualEditorPropertyCommand { get; private set; } = null!;
 
+    public ICommand OpenVisualEditorPropertyResourceCommand { get; private set; } = null!;
+
     public ICommand DeleteVisualEditorElementCommand { get; private set; } = null!;
 
     public ICommand DuplicateVisualEditorElementCommand { get; private set; } = null!;
@@ -213,6 +219,10 @@ public partial class MainViewModel
 
     public ICommand ReturnFromThemeEditScopeCommand { get; private set; } = null!;
 
+    public ICommand ApplyThemeStateSetterCommand { get; private set; } = null!;
+
+    public ICommand CreateThemeVariantPreviewCommand { get; private set; } = null!;
+
     public ICommand ImportControlThemeFilesCommand { get; private set; } = null!;
 
     public ICommand ExportSelectedControlThemeCommand { get; private set; } = null!;
@@ -234,6 +244,7 @@ public partial class MainViewModel
         ApplyVisualEditorPropertyCommand = new RelayCommand(ApplyVisualEditorProperty);
         RemoveVisualEditorPropertyCommand = new RelayCommand(RemoveVisualEditorProperty);
         ResetVisualEditorPropertyCommand = new RelayCommand(ResetVisualEditorProperty);
+        OpenVisualEditorPropertyResourceCommand = new RelayCommand(OpenVisualEditorPropertyResource, CanOpenVisualEditorPropertyResource);
         DeleteVisualEditorElementCommand = new RelayCommand(DeleteVisualEditorElement);
         DuplicateVisualEditorElementCommand = new RelayCommand(DuplicateVisualEditorElement);
         MoveVisualEditorElementUpCommand = new RelayCommand(MoveVisualEditorElementUp);
@@ -251,6 +262,8 @@ public partial class MainViewModel
         DeleteSelectedThemeResourceCommand = new RelayCommand(DeleteSelectedThemeResource, () => SelectedThemeResource is not null);
         ApplySelectedThemeResourceCommand = new RelayCommand(ApplySelectedThemeResource, CanApplySelectedThemeResource);
         ReturnFromThemeEditScopeCommand = new RelayCommand(ReturnFromThemeEditScope, () => IsThemeEditScopeActive);
+        ApplyThemeStateSetterCommand = new RelayCommand(ApplyThemeStateSetter, CanApplyThemeStateSetter);
+        CreateThemeVariantPreviewCommand = new RelayCommand(CreateThemeVariantPreview, CanCreateThemeVariantPreview);
         ImportControlThemeFilesCommand = new AsyncRelayCommand(ImportControlThemeFiles, () => ActiveProject is not null);
         ExportSelectedControlThemeCommand = new AsyncRelayCommand(ExportSelectedControlTheme, () => SelectedControlTheme is not null);
         SaveControlThemeProjectCommand = new AsyncRelayCommand(SaveControlThemeProject, CanSaveControlThemeProject);
@@ -321,6 +334,11 @@ public partial class MainViewModel
         }
     }
 
+    partial void OnVisualEditorPropertyValueChanged(string value)
+    {
+        (OpenVisualEditorPropertyResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
+    }
+
     partial void OnSelectedVisualEditorAvailablePropertyChanged(VisualEditorAvailablePropertyViewModel? value)
     {
         if (value is null)
@@ -377,6 +395,7 @@ public partial class MainViewModel
 
     partial void OnSelectedThemeResourceChanged(ThemeResourceViewModel? value)
     {
+        _pendingThemeResourceDeleteKey = null;
         ThemeResourceKeyEditText = value?.Key ?? string.Empty;
         RefreshSelectedThemeResourceUsages();
         RefreshSelectedResourceThemeAnalysis(value);
@@ -391,9 +410,21 @@ public partial class MainViewModel
     partial void OnSelectedThemePreviewStateChanged(ThemePreviewStateViewModel? value)
     {
         RefreshThemeStateSelectors();
+        ThemeStateSetterValue = string.Empty;
         ControlThemeStatus = value is null || string.Equals(value.State, "normal", StringComparison.Ordinal)
             ? "Theme preview state: Normal."
             : $"Theme preview state: {value.PseudoClass}.";
+        NotifyControlThemeCommandsChanged();
+    }
+
+    partial void OnThemeStateSetterPropertyNameChanged(string value)
+    {
+        NotifyControlThemeCommandsChanged();
+    }
+
+    partial void OnThemeStateSetterValueChanged(string value)
+    {
+        NotifyControlThemeCommandsChanged();
     }
 
     partial void OnVisualEditorPropertyFilterChanged(string value)
@@ -981,11 +1012,15 @@ public partial class MainViewModel
     {
         var options = property is null
             ? Array.Empty<string>()
-            : GetSuggestedValues(property).ToArray();
+            : GetSuggestedValues(property)
+                .Concat(GetCompatibleResourceReferenceValues(property))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
 
         VisualEditorPropertyOptions = new ObservableCollection<string>(options);
         SelectedVisualEditorPropertyOption = options.FirstOrDefault(option =>
             string.Equals(option, VisualEditorPropertyValue, StringComparison.Ordinal));
+        (OpenVisualEditorPropertyResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
     }
 
     private static IEnumerable<string> GetSuggestedValues(ControlEditorProperty property)
@@ -1008,6 +1043,62 @@ public partial class MainViewModel
             ControlEditorValueKind.Thickness => new[] { "0", "4", "8", "12", "16", "0,8", "8,0", "4,8,4,8" },
             ControlEditorValueKind.Enum => GetEnumSuggestedValues(property.PropertyName),
             _ => Array.Empty<string>()
+        };
+    }
+
+    private IEnumerable<string> GetCompatibleResourceReferenceValues(ControlEditorProperty property)
+    {
+        foreach (var resource in ThemeResources.Where(resource => IsCompatibleResource(property, resource)))
+        {
+            if (string.Equals(property.PropertyName, "Theme", StringComparison.Ordinal))
+            {
+                yield return $"{{StaticResource {resource.Key}}}";
+                continue;
+            }
+
+            if (property.ValueKind == ControlEditorValueKind.Brush)
+            {
+                yield return $"{{DynamicResource {resource.Key}}}";
+            }
+
+            yield return $"{{StaticResource {resource.Key}}}";
+        }
+    }
+
+    private bool IsCompatibleResource(ControlEditorProperty property, ThemeResourceViewModel resource)
+    {
+        if (string.Equals(property.PropertyName, "Theme", StringComparison.Ordinal))
+        {
+            return resource.ResourceType == "ControlTheme" &&
+                   TryGetSelectedControlThemeTargetType(out var targetType) &&
+                   string.Equals(resource.TargetType, targetType, StringComparison.Ordinal);
+        }
+
+        var resourceType = resource.ResourceType;
+        if (property.ValueType is { } valueType &&
+            (string.Equals(resourceType, valueType.Name, StringComparison.Ordinal) ||
+             string.Equals(resource.TargetType, valueType.Name, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        return property.ValueKind switch
+        {
+            ControlEditorValueKind.Brush =>
+                resourceType.EndsWith("Brush", StringComparison.Ordinal) ||
+                resourceType.EndsWith("Color", StringComparison.Ordinal) ||
+                resource.Key.Contains("Brush", StringComparison.OrdinalIgnoreCase) ||
+                resource.Key.Contains("Color", StringComparison.OrdinalIgnoreCase),
+            ControlEditorValueKind.Thickness =>
+                resourceType is "Thickness" or "CornerRadius" ||
+                resource.Key.Contains("Padding", StringComparison.OrdinalIgnoreCase) ||
+                resource.Key.Contains("Margin", StringComparison.OrdinalIgnoreCase) ||
+                resource.Key.Contains("Radius", StringComparison.OrdinalIgnoreCase),
+            ControlEditorValueKind.Number =>
+                resourceType is "Double" or "Single" or "Int32" or "x:Double" or "sys:Double",
+            ControlEditorValueKind.String or ControlEditorValueKind.Content =>
+                resourceType is "String" or "x:String" or "sys:String",
+            _ => false
         };
     }
 
@@ -1049,6 +1140,65 @@ public partial class MainViewModel
     {
         var index = typeName.IndexOf(':', StringComparison.Ordinal);
         return index < 0 ? typeName : typeName[(index + 1)..];
+    }
+
+    private bool CanOpenVisualEditorPropertyResource()
+    {
+        return TryGetResourceReferenceKey(VisualEditorPropertyValue, out var key) &&
+               ThemeResources.Any(resource => string.Equals(resource.Key, key, StringComparison.Ordinal));
+    }
+
+    private void OpenVisualEditorPropertyResource()
+    {
+        if (!TryGetResourceReferenceKey(VisualEditorPropertyValue, out var key))
+        {
+            VisualEditorStatus = "Selected property value is not a resource reference.";
+            return;
+        }
+
+        SelectedThemeResource = ThemeResources.FirstOrDefault(resource =>
+            string.Equals(resource.Key, key, StringComparison.Ordinal));
+        if (SelectedThemeResource is null)
+        {
+            VisualEditorStatus = $"Resource '{key}' was not found.";
+            return;
+        }
+
+        OpenSelectedThemeResource();
+    }
+
+    private static bool TryGetResourceReferenceKey(
+        string? value,
+        [NotNullWhen(true)] out string? key)
+    {
+        key = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var trimmed = value.Trim();
+        foreach (var prefix in new[] { "{StaticResource", "{DynamicResource" })
+        {
+            if (!trimmed.StartsWith(prefix, StringComparison.Ordinal) ||
+                !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var content = trimmed[prefix.Length..^1].Trim();
+            const string resourceKeyPrefix = "ResourceKey=";
+            if (content.StartsWith(resourceKeyPrefix, StringComparison.Ordinal))
+            {
+                content = content[resourceKeyPrefix.Length..].Trim();
+            }
+
+            var separator = content.IndexOfAny(new[] { ',', ' ' });
+            key = separator < 0 ? content : content[..separator];
+            return !string.IsNullOrWhiteSpace(key);
+        }
+
+        return false;
     }
 
     private void ApplyVisualEditorProperty()
@@ -2203,6 +2353,7 @@ public partial class MainViewModel
                 diagnostic.FilePath,
                 diagnostic.Line)));
 
+        RefreshThemeVariants();
         RefreshThemeResourceFilters();
         SelectedThemeResource =
             FilteredThemeResources.FirstOrDefault(resource => string.Equals(resource.Key, previousKey, StringComparison.Ordinal)) ??
@@ -2224,6 +2375,22 @@ public partial class MainViewModel
                         reference.FilePath,
                         reference.Line,
                         reference.Snippet)));
+    }
+
+    private void RefreshThemeVariants()
+    {
+        ThemeVariants = ActiveProject is null
+            ? new ObservableCollection<ThemeVariantViewModel>()
+            : new ObservableCollection<ThemeVariantViewModel>(
+                ActiveProject
+                    .GetXamlFiles()
+                    .Where(static file => file.Kind == ProjectFileKind.Resource)
+                    .GroupBy(static file => ThemeProjectStorage.InferVariant(file.Path), StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static group => group.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(static group => new ThemeVariantViewModel(
+                        group.Key,
+                        group.Count(),
+                        string.Join(", ", group.Select(file => file.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase)))));
     }
 
     private void RefreshThemeResourceFilters()
@@ -2412,6 +2579,12 @@ public partial class MainViewModel
             return;
         }
 
+        if (SelectedControlTheme is not null)
+        {
+            RefreshSelectedControlThemeAnalysis();
+            return;
+        }
+
         _selectedControlThemeAnalysis = ControlThemeAnalysis.Empty;
         ThemePreviewStates = new ObservableCollection<ThemePreviewStateViewModel>();
         SelectedThemePreviewState = null;
@@ -2474,6 +2647,76 @@ public partial class MainViewModel
                         selector.State,
                         selector.Selector,
                         selector.Line)));
+    }
+
+    private bool CanApplyThemeStateSetter()
+    {
+        return ActiveProject is not null &&
+               SelectedControlTheme is not null &&
+               SelectedThemePreviewState is { } state &&
+               !string.Equals(state.State, "normal", StringComparison.Ordinal) &&
+               !string.IsNullOrWhiteSpace(ThemeStateSetterPropertyName);
+    }
+
+    private void ApplyThemeStateSetter()
+    {
+        if (ActiveProject is null ||
+            SelectedControlTheme is not { } selectedTheme ||
+            SelectedThemePreviewState is not { } selectedState ||
+            ActiveProject.FindFile(selectedTheme.FilePath) is not { } themeFile)
+        {
+            return;
+        }
+
+        var edit = ControlThemeEditor.SetStateSetter(
+            themeFile.Text,
+            selectedTheme.Key,
+            selectedState.State,
+            ThemeStateSetterPropertyName.Trim(),
+            ThemeStateSetterValue);
+        if (!edit.Changed)
+        {
+            ControlThemeStatus = edit.Error ?? $"Could not update {selectedState.PseudoClass}.";
+            return;
+        }
+
+        themeFile.Text = edit.Text;
+        RefreshWorkspaceAfterThemeFileChanges(themeFile);
+        SelectThemeResource(selectedTheme.Key);
+        SelectedThemePreviewState = ThemePreviewStates.FirstOrDefault(state =>
+            string.Equals(state.State, selectedState.State, StringComparison.Ordinal));
+        ControlThemeStatus = $"Updated {selectedState.PseudoClass} setter {ThemeStateSetterPropertyName}.";
+    }
+
+    private bool CanCreateThemeVariantPreview()
+    {
+        return ActiveProject is not null &&
+               SelectedControlTheme is not null;
+    }
+
+    private void CreateThemeVariantPreview()
+    {
+        if (ActiveProject is null ||
+            SelectedControlTheme is not { } selectedTheme ||
+            ActiveProject.FindFile(selectedTheme.FilePath) is not { } themeFile)
+        {
+            return;
+        }
+
+        var preview = ControlThemeResourceBuilder.CreateVariantPreviewXaml(
+            selectedTheme.TargetType,
+            selectedTheme.Key);
+        var edit = ControlThemeEditor.SetDesignPreview(themeFile.Text, preview);
+        if (!edit.Changed)
+        {
+            ControlThemeStatus = edit.Error ?? $"Could not create variant preview for {selectedTheme.Key}.";
+            return;
+        }
+
+        themeFile.Text = edit.Text;
+        RefreshWorkspaceAfterThemeFileChanges(themeFile);
+        SelectThemeResource(selectedTheme.Key);
+        ControlThemeStatus = $"Created side-by-side light/dark preview for {selectedTheme.Key}.";
     }
 
     private bool CanCreateCustomControlTheme()
@@ -2710,8 +2953,17 @@ public partial class MainViewModel
             .ToArray();
         if (usages.Length > 0)
         {
-            ControlThemeStatus = $"Cannot delete {selectedResource.Key}; it has {usages.Length} usage(s).";
-            return;
+            if (!string.Equals(_pendingThemeResourceDeleteKey, selectedResource.Key, StringComparison.Ordinal))
+            {
+                _pendingThemeResourceDeleteKey = selectedResource.Key;
+                ControlThemeStatus = $"{selectedResource.Key} has {usages.Length} usage(s). Press delete again to remove simple resource references and delete it.";
+                return;
+            }
+
+            foreach (var file in project.GetXamlFiles())
+            {
+                file.Text = ThemeResourceEditor.RemoveResourceReferences(file.Text, selectedResource.Key);
+            }
         }
 
         var delete = ThemeResourceEditor.DeleteResource(resourceFile.Text, selectedResource.Key);
@@ -2741,6 +2993,7 @@ public partial class MainViewModel
         }
 
         ControlThemeStatus = $"Deleted {selectedResource.Key}.";
+        _pendingThemeResourceDeleteKey = null;
     }
 
     private bool CanApplySelectedThemeResource()
@@ -3047,6 +3300,7 @@ public partial class MainViewModel
         (CreateCustomControlThemeCommand as RelayCommand)?.NotifyCanExecuteChanged();
         (ApplyControlThemeCommand as RelayCommand<ControlThemeDefinitionViewModel?>)?.NotifyCanExecuteChanged();
         (RemoveControlThemeCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (OpenVisualEditorPropertyResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
         (OpenSelectedControlThemeCommand as RelayCommand)?.NotifyCanExecuteChanged();
         (OpenSelectedThemeResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
         (RenameSelectedThemeResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
@@ -3054,6 +3308,8 @@ public partial class MainViewModel
         (DeleteSelectedThemeResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
         (ApplySelectedThemeResourceCommand as RelayCommand)?.NotifyCanExecuteChanged();
         (ReturnFromThemeEditScopeCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (ApplyThemeStateSetterCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (CreateThemeVariantPreviewCommand as RelayCommand)?.NotifyCanExecuteChanged();
         (ImportControlThemeFilesCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         (ExportSelectedControlThemeCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         (SaveControlThemeProjectCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
