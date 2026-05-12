@@ -397,6 +397,11 @@ public sealed class ErrorsDockViewModel : Tool, IDisposable
 
     public string? LastErrorMessage => Shell.LastErrorMessage;
 
+    public void NotifyLastErrorMessageChanged()
+    {
+        OnPropertyChanged(nameof(LastErrorMessage));
+    }
+
     public void Dispose()
     {
         Shell.PropertyChanged -= ShellOnPropertyChanged;
@@ -406,7 +411,7 @@ public sealed class ErrorsDockViewModel : Tool, IDisposable
     {
         if (e.PropertyName == nameof(MainViewModel.LastErrorMessage))
         {
-            OnPropertyChanged(nameof(LastErrorMessage));
+            NotifyLastErrorMessageChanged();
         }
     }
 }
