@@ -2548,6 +2548,11 @@ public sealed class VisualEditingTests
                     viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"Second\"", StringComparison.Ordinal) <
                     viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"MoveMe\"", StringComparison.Ordinal));
 
+                viewModel.Control = Assert.IsAssignableFrom<Control>(
+                    AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+                viewModel.RefreshVisualEditorCommand.Execute(null);
+                PumpLayout(window);
+
                 preview.RaiseEvent(CreateKeyDownArgs(preview, Key.Right, KeyModifiers.Alt));
                 PumpLayout(window);
 
