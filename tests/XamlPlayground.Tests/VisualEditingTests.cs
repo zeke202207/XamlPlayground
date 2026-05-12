@@ -1993,8 +1993,8 @@ public sealed class VisualEditingTests
                 preview.RaiseEvent(CreatePointerMovedArgs(preview, previewSurface, pointer, end));
                 PumpLayout(window);
 
-                Assert.Equal(150, actionButton.Width);
-                Assert.Equal(54, actionButton.Height);
+                Assert.Equal(150, viewModel.VisualEditorPreviewSelectionWidth, precision: 1);
+                Assert.Equal(54, viewModel.VisualEditorPreviewSelectionHeight, precision: 1);
                 Assert.DoesNotContain("Width=\"150\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
                 Assert.DoesNotContain("Height=\"54\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
 
