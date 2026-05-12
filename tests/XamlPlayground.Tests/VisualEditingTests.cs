@@ -2234,15 +2234,16 @@ public sealed class VisualEditingTests
                 var actionButton = Assert.Single(
                     preview.GetVisualDescendants().OfType<Button>(),
                     button => button.Name == "Action");
+                var actionPoint = GetPreviewControlCenter(preview, actionButton);
 
-                ClickPreviewControl(preview, actionButton);
+                ClickPreviewPoint(preview, actionPoint);
                 PumpLayout(window);
 
                 Assert.Equal("Inner", viewModel.SelectedVisualEditorNode?.Element.Name);
                 Assert.Equal("StackPanel #Inner", viewModel.VisualEditorCurrentContainerTitle);
                 Assert.True(viewModel.VisualEditorPreviewCurrentContainerVisible);
 
-                ClickPreviewControl(preview, actionButton);
+                ClickPreviewPoint(preview, actionPoint);
                 PumpLayout(window);
 
                 Assert.Equal("Action", viewModel.SelectedVisualEditorNode?.Element.Name);
@@ -3861,10 +3862,20 @@ public sealed class VisualEditingTests
 
     private static void ClickPreviewControl(PreviewView preview, Control control, KeyModifiers modifiers)
     {
+        var point = GetPreviewControlCenter(preview, control);
+        ClickPreviewPoint(preview, point, modifiers);
+    }
+
+    private static void ClickPreviewPoint(PreviewView preview, Point point)
+    {
+        ClickPreviewPoint(preview, point, KeyModifiers.None);
+    }
+
+    private static void ClickPreviewPoint(PreviewView preview, Point point, KeyModifiers modifiers)
+    {
         var previewSurface = Assert.Single(
             preview.GetVisualDescendants().OfType<Grid>(),
             grid => grid.Name == "PreviewSurface");
-        var point = GetPreviewControlCenter(preview, previewSurface, control);
         var pointer = new Avalonia.Input.Pointer(
             Avalonia.Input.Pointer.GetNextFreeId(),
             PointerType.Mouse,
@@ -3872,6 +3883,16 @@ public sealed class VisualEditingTests
 
         preview.RaiseEvent(CreatePointerPressedArgs(preview, previewSurface, pointer, point, modifiers));
         preview.RaiseEvent(CreatePointerReleasedArgs(preview, previewSurface, pointer, point, modifiers));
+    }
+
+    private static Point GetPreviewControlCenter(
+        PreviewView preview,
+        Control control)
+    {
+        var previewSurface = Assert.Single(
+            preview.GetVisualDescendants().OfType<Grid>(),
+            grid => grid.Name == "PreviewSurface");
+        return GetPreviewControlCenter(preview, previewSurface, control);
     }
 
     private static Point GetPreviewControlCenter(
