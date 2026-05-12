@@ -1,0 +1,173 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             mc:Ignorable="d" d:DesignWidth="980" d:DesignHeight="320"
+             x:Class="XamlPlayground.Views.Docking.StyleEditorDockView"
+             x:CompileBindings="True" x:DataType="vm:StyleEditorDockViewModel">
+  <UserControl.Styles>
+    <Style Selector="TextBox">
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="Button.editor-tool">
+      <Setter Property="Height" Value="28" />
+      <Setter Property="MinWidth" Value="72" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+  </UserControl.Styles>
+
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
+    <Border DockPanel.Dock="Bottom"
+            BorderThickness="0,1,0,0"
+            BorderBrush="{DynamicResource EditorBorderBrush}"
+            Padding="8,4">
+      <TextBlock Text="{Binding Shell.StyleEditorStatus}"
+                 FontSize="12"
+                 TextWrapping="Wrap"
+                 Opacity="0.78" />
+    </Border>
+
+    <Grid RowDefinitions="Auto,*"
+          MinHeight="260">
+      <Border BorderThickness="0,0,0,1"
+              BorderBrush="{DynamicResource EditorBorderBrush}"
+              Background="{DynamicResource DockSurfaceHeaderBrush}"
+              Padding="8,6">
+        <Grid RowDefinitions="Auto,Auto"
+              RowSpacing="6">
+          <WrapPanel Orientation="Horizontal">
+            <TextBlock Text="Style"
+                       FontWeight="SemiBold"
+                       Margin="0,0,10,0"
+                       VerticalAlignment="Center" />
+            <TextBox Width="360"
+                     Margin="0,0,8,0"
+                     PlaceholderText="Selector"
+                     Text="{Binding Shell.StyleEditorSelector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <ComboBox Width="220"
+                      Margin="0,0,8,0"
+                      ItemsSource="{Binding Shell.StyleEditorAvailableProperties}"
+                      SelectedItem="{Binding Shell.SelectedStyleEditorAvailableProperty, Mode=TwoWay}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="visualVm:VisualEditorAvailablePropertyViewModel">
+                  <TextBlock Text="{Binding DisplayName}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <ComboBox Width="220"
+                      Margin="0,0,8,0"
+                      ItemsSource="{Binding Shell.StyleEditorPropertyOptions}"
+                      SelectedItem="{Binding Shell.SelectedStyleEditorPropertyOption, Mode=TwoWay}"
+                      PlaceholderText="Known values/resources" />
+            <Button Classes="editor-tool"
+                    Content="Apply"
+                    Command="{Binding Shell.ApplyStyleEditorCommand}"
+                    Margin="0,0,8,0" />
+            <Button Classes="editor-tool"
+                    Content="Preview"
+                    Command="{Binding Shell.RefreshStylePreviewCommand}" />
+          </WrapPanel>
+
+          <WrapPanel Grid.Row="1"
+                     Orientation="Horizontal">
+            <TextBox Width="150"
+                     Margin="0,0,6,0"
+                     PlaceholderText="Type"
+                     Text="{Binding Shell.StyleSelectorTypeName, Mode=TwoWay}" />
+            <TextBox Width="130"
+                     Margin="0,0,6,0"
+                     PlaceholderText="Class"
+                     Text="{Binding Shell.StyleSelectorClass, Mode=TwoWay}" />
+            <TextBox Width="130"
+                     Margin="0,0,6,0"
+                     PlaceholderText="Name"
+                     Text="{Binding Shell.StyleSelectorName, Mode=TwoWay}" />
+            <TextBox Width="130"
+                     Margin="0,0,6,0"
+                     PlaceholderText="State"
+                     Text="{Binding Shell.StyleSelectorPseudoClass, Mode=TwoWay}" />
+            <TextBox Width="190"
+                     Margin="0,0,6,0"
+                     PlaceholderText="Template part"
+                     Text="{Binding Shell.StyleSelectorTemplatePart, Mode=TwoWay}" />
+            <Button Classes="editor-tool"
+                    Content="Build"
+                    Command="{Binding Shell.BuildStyleSelectorCommand}"
+                    Margin="0,0,10,0" />
+            <TextBox Width="190"
+                     Margin="0,0,6,0"
+                     PlaceholderText="Property"
+                     Text="{Binding Shell.StyleEditorPropertyName, Mode=TwoWay}" />
+            <TextBox Width="260"
+                     Margin="0,0,6,0"
+                     PlaceholderText="Value or object element"
+                     Text="{Binding Shell.StyleEditorValue, Mode=TwoWay}" />
+            <Button Classes="editor-tool"
+                    Content="Setter"
+                    Command="{Binding Shell.AddStyleSetterCommand}" />
+          </WrapPanel>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="1"
+            ColumnDefinitions="2*,*,1.1*"
+            ColumnSpacing="8"
+            Margin="8">
+        <DataGrid ItemsSource="{Binding Shell.StyleEditorSetters}"
+                  SelectedItem="{Binding Shell.SelectedStyleEditorSetter, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="Property"
+                                Binding="{Binding PropertyName, Mode=TwoWay}"
+                                Width="180"
+                                x:DataType="visualVm:StyleSetterEditorViewModel" />
+            <DataGridTextColumn Header="Value"
+                                Binding="{Binding Value, Mode=TwoWay}"
+                                Width="*"
+                                x:DataType="visualVm:StyleSetterEditorViewModel" />
+            <DataGridTextColumn Header="Kind"
+                                Binding="{Binding Kind}"
+                                IsReadOnly="True"
+                                Width="84"
+                                x:DataType="visualVm:StyleSetterEditorViewModel" />
+          </DataGrid.Columns>
+        </DataGrid>
+
+        <ListBox Grid.Column="1"
+                 ItemsSource="{Binding Shell.StyleSelectorTokens}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="visualVm:StyleSelectorTokenViewModel">
+              <TextBlock Text="{Binding Title}"
+                         Margin="0,3"
+                         TextTrimming="CharacterEllipsis" />
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <Border Grid.Column="2"
+                Background="{DynamicResource DockSurfaceEditorBrush}"
+                BorderBrush="{DynamicResource EditorBorderBrush}"
+                BorderThickness="1"
+                Padding="8">
+          <Grid RowDefinitions="Auto,*"
+                RowSpacing="6">
+            <TextBlock Text="Preview"
+                       FontWeight="SemiBold" />
+            <ContentControl Grid.Row="1"
+                            Content="{Binding Shell.StyleEditorPreviewControl}" />
+          </Grid>
+        </Border>
+      </Grid>
+    </Grid>
+  </DockPanel>
+</UserControl>

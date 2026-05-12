@@ -179,6 +179,48 @@ public sealed class VisualAnimationsDockViewModel : Tool
     public MainViewModel Shell { get; }
 }
 
+public sealed class StylesInspectorDockViewModel : Tool
+{
+    public StylesInspectorDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "StylesInspector";
+        Title = "Styles";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class BindingsInspectorDockViewModel : Tool
+{
+    public BindingsInspectorDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "BindingsInspector";
+        Title = "Bindings";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class ResourcesInspectorDockViewModel : Tool
+{
+    public ResourcesInspectorDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "ResourcesInspector";
+        Title = "Resources";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
 public sealed class AnimationTimelineSheetDockViewModel : Tool
 {
     public AnimationTimelineSheetDockViewModel(MainViewModel shell)
@@ -186,6 +228,48 @@ public sealed class AnimationTimelineSheetDockViewModel : Tool
         Shell = shell;
         Id = "AnimationTimelineSheet";
         Title = "Timeline";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class StyleEditorDockViewModel : Tool
+{
+    public StyleEditorDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "StyleEditor";
+        Title = "Style Editor";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class BindingEditorDockViewModel : Tool
+{
+    public BindingEditorDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "BindingEditor";
+        Title = "Binding Editor";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class ResourceEditorDockViewModel : Tool
+{
+    public ResourceEditorDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "ResourceEditor";
+        Title = "Resource Editor";
         CanClose = false;
         KeepPinnedDockableVisible = true;
     }

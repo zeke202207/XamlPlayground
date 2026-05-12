@@ -1,0 +1,90 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             xmlns:hier="clr-namespace:Avalonia.Controls.DataGridHierarchical;assembly=Avalonia.Controls.DataGrid"
+             mc:Ignorable="d" d:DesignWidth="320" d:DesignHeight="620"
+             x:Class="XamlPlayground.Views.Docking.BindingsInspectorDockView"
+             x:CompileBindings="True" x:DataType="vm:BindingsInspectorDockViewModel">
+  <UserControl.Styles>
+    <Style Selector="Button.inspector-tool">
+      <Setter Property="Height" Value="30" />
+      <Setter Property="MinWidth" Value="68" />
+      <Setter Property="Padding" Value="8,0" />
+    </Style>
+  </UserControl.Styles>
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
+    <Grid DockPanel.Dock="Top"
+          Margin="6"
+          RowDefinitions="Auto,Auto"
+          RowSpacing="6">
+      <TextBlock Text="{Binding Shell.DesignInspectionStatus}"
+                 FontWeight="SemiBold"
+                 TextTrimming="CharacterEllipsis" />
+      <WrapPanel Grid.Row="1">
+        <Button Classes="inspector-tool"
+                Content="Refresh"
+                Command="{Binding Shell.RefreshDesignInspectorsCommand}"
+                Margin="0,0,6,0" />
+        <Button Classes="inspector-tool"
+                Content="Open"
+                Command="{Binding Shell.OpenSelectedBindingSourceCommand}" />
+      </WrapPanel>
+    </Grid>
+
+    <Border DockPanel.Dock="Bottom"
+            BorderThickness="0,1,0,0"
+            BorderBrush="{DynamicResource EditorBorderBrush}"
+            Padding="6">
+      <TextBlock Text="{Binding Shell.BindingEditorStatus}"
+                 TextWrapping="Wrap"
+                 Opacity="0.75" />
+    </Border>
+
+    <DataGrid HierarchicalModel="{Binding Shell.BindingInspectorModel}"
+              HierarchicalRowsEnabled="True"
+              Classes="hierarchical"
+              SelectedItem="{Binding Shell.SelectedBindingInspectorNode, Mode=TwoWay}"
+              AutoScrollToSelectedItem="True"
+              AutoExpandSelectedItem="True"
+              SelectionMode="Single"
+              AutoGenerateColumns="False"
+              GridLinesVisibility="Horizontal"
+              HeadersVisibility="Column"
+              Margin="4">
+      <DataGrid.Columns>
+        <DataGridHierarchicalColumn Header="Binding"
+                                    Width="2*"
+                                    x:CompileBindings="False"
+                                    Binding="{Binding Item}">
+          <DataGridHierarchicalColumn.CellTemplate>
+            <DataTemplate x:DataType="visualVm:DesignInspectorNodeViewModel">
+              <StackPanel Spacing="1">
+                <TextBlock Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Detail}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </DataGridHierarchicalColumn.CellTemplate>
+        </DataGridHierarchicalColumn>
+        <DataGridTemplateColumn Header="Kind"
+                                Width="92"
+                                x:CompileBindings="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="hier:HierarchicalNode">
+              <TextBlock x:DataType="visualVm:DesignInspectorNodeViewModel"
+                         DataContext="{Binding Item}"
+                         Text="{Binding Kind}"
+                         TextTrimming="CharacterEllipsis" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

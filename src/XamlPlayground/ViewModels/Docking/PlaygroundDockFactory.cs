@@ -24,9 +24,15 @@ public sealed class PlaygroundDockFactory : Factory
     private VisualPropertiesDockViewModel? _visualProperties;
     private VisualToolboxDockViewModel? _visualToolbox;
     private VisualAnimationsDockViewModel? _visualAnimations;
+    private StylesInspectorDockViewModel? _stylesInspector;
+    private BindingsInspectorDockViewModel? _bindingsInspector;
+    private ResourcesInspectorDockViewModel? _resourcesInspector;
     private ControlThemesDockViewModel? _controlThemes;
     private PreviewDockViewModel? _preview;
     private AnimationTimelineSheetDockViewModel? _animationTimelineSheet;
+    private StyleEditorDockViewModel? _styleEditor;
+    private BindingEditorDockViewModel? _bindingEditor;
+    private ResourceEditorDockViewModel? _resourceEditor;
     private DiagnosticTreeDockViewModel? _combinedTree;
     private DiagnosticTreeDockViewModel? _logicalTree;
     private DiagnosticTreeDockViewModel? _visualTree;
@@ -48,9 +54,15 @@ public sealed class PlaygroundDockFactory : Factory
         _visualProperties = new VisualPropertiesDockViewModel(_shell);
         _visualToolbox = new VisualToolboxDockViewModel(_shell);
         _visualAnimations = new VisualAnimationsDockViewModel(_shell);
+        _stylesInspector = new StylesInspectorDockViewModel(_shell);
+        _bindingsInspector = new BindingsInspectorDockViewModel(_shell);
+        _resourcesInspector = new ResourcesInspectorDockViewModel(_shell);
         _controlThemes = new ControlThemesDockViewModel(_shell);
         _preview = new PreviewDockViewModel(_shell);
         _animationTimelineSheet = new AnimationTimelineSheetDockViewModel(_shell);
+        _styleEditor = new StyleEditorDockViewModel(_shell);
+        _bindingEditor = new BindingEditorDockViewModel(_shell);
+        _resourceEditor = new ResourceEditorDockViewModel(_shell);
         _combinedTree = CreateDiagnosticsTreeTool("DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree);
         _logicalTree = CreateDiagnosticsTreeTool("DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree);
         _visualTree = CreateDiagnosticsTreeTool("DiagnosticsVisualTree", "Visual Tree", DevToolsViewKind.VisualTree);
@@ -80,6 +92,9 @@ public sealed class PlaygroundDockFactory : Factory
         bottomDock.CanCloseLastDockable = false;
         bottomDock.VisibleDockables = CreateList<IDockable>(
             _animationTimelineSheet,
+            _styleEditor,
+            _bindingEditor,
+            _resourceEditor,
             _combinedTree,
             _logicalTree,
             _visualTree,
@@ -122,6 +137,9 @@ public sealed class PlaygroundDockFactory : Factory
             _visualProperties,
             _visualToolbox,
             _visualAnimations,
+            _stylesInspector,
+            _bindingsInspector,
+            _resourcesInspector,
             _controlThemes);
         solutionDock.ActiveDockable = _solutionExplorer;
 
@@ -176,9 +194,15 @@ public sealed class PlaygroundDockFactory : Factory
             ["VisualProperties"] = () => _visualProperties,
             ["VisualToolbox"] = () => _visualToolbox,
             ["VisualAnimations"] = () => _visualAnimations,
+            ["StylesInspector"] = () => _stylesInspector,
+            ["BindingsInspector"] = () => _bindingsInspector,
+            ["ResourcesInspector"] = () => _resourcesInspector,
             ["ControlThemes"] = () => _controlThemes,
             ["Preview"] = () => _preview,
             ["AnimationTimelineSheet"] = () => _animationTimelineSheet,
+            ["StyleEditor"] = () => _styleEditor,
+            ["BindingEditor"] = () => _bindingEditor,
+            ["ResourceEditor"] = () => _resourceEditor,
             ["DiagnosticsCombinedTree"] = () => _combinedTree,
             ["DiagnosticsLogicalTree"] = () => _logicalTree,
             ["DiagnosticsVisualTree"] = () => _visualTree,
