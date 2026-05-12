@@ -97,6 +97,7 @@ public sealed class ThemeResourceAnalyzerTests
                              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
                   <Button Theme="{StaticResource {x:Type Button}}" />
                   <Button Theme="{StaticResource ResourceKey={x:Type Button}}" />
+                  <Button Theme="{StaticResource ResourceKey='AccentBrush'}" />
                 </UserControl>
                 """,
                 IsResourceDictionary: false)
@@ -104,8 +105,11 @@ public sealed class ThemeResourceAnalyzerTests
 
         Assert.Contains(analysis.Resources, resource => resource.Key == "{x:Type Button}");
         Assert.Equal(2, analysis.References.Count(reference => reference.Key == "{x:Type Button}"));
+        Assert.Contains(analysis.References, reference => reference.Key == "AccentBrush");
         Assert.DoesNotContain(analysis.Diagnostics, diagnostic =>
             diagnostic.Message.Contains("{x:Type Button}", System.StringComparison.Ordinal));
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Resource 'AccentBrush' is referenced but not defined", System.StringComparison.Ordinal));
     }
 
     [Fact]
@@ -274,14 +278,17 @@ public sealed class ThemeResourceAnalyzerTests
                             <UserControl xmlns="https://github.com/avaloniaui"
                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
                               <Button Theme="{StaticResource {x:Type Button}}" />
+                              <Button Background="{StaticResource ResourceKey='AccentBrush'}" />
                             </UserControl>
                             """;
 
         var renamed = ThemeResourceEditor.RenameResourceReferences(xaml, "{x:Type Button}", "PrimaryButtonTheme");
-        var cleaned = ThemeResourceEditor.RemoveResourceReferences(xaml, "{x:Type Button}");
+        renamed = ThemeResourceEditor.RenameResourceReferences(renamed, "AccentBrush", "PrimaryBrush");
+        var cleaned = ThemeResourceEditor.RemoveResourceReferences(xaml, "AccentBrush");
 
         Assert.Contains("Theme=\"{StaticResource PrimaryButtonTheme}\"", renamed, System.StringComparison.Ordinal);
-        Assert.DoesNotContain("Theme=", cleaned, System.StringComparison.Ordinal);
+        Assert.Contains("Background=\"{StaticResource ResourceKey='PrimaryBrush'}\"", renamed, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Background=", cleaned, System.StringComparison.Ordinal);
     }
 
     [Fact]

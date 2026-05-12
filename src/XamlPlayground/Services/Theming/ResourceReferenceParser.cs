@@ -142,6 +142,25 @@ internal static class ResourceReferenceParser
             return false;
         }
 
+        if (text[keyStart] is '"' or '\'')
+        {
+            var quote = text[keyStart];
+            var quotedEnd = keyStart + keyLength - 1;
+            keyStart++;
+            keyLength--;
+            if (keyLength > 0 &&
+                quotedEnd < text.Length &&
+                text[quotedEnd] == quote)
+            {
+                keyLength--;
+            }
+        }
+
+        if (keyLength <= 0)
+        {
+            return false;
+        }
+
         match = new ResourceReferenceMatch(
             kind,
             text.Substring(keyStart, keyLength),
