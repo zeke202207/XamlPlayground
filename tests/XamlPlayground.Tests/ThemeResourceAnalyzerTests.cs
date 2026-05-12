@@ -586,4 +586,36 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.DoesNotContain("Setter.Value", edit.Text, System.StringComparison.Ordinal);
         Assert.DoesNotContain("SolidColorBrush", edit.Text, System.StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void ControlThemeEditor_PreservesSurroundingWhitespaceWhenSettingSetter()
+    {
+        var xaml = string.Join(
+            "\r\n",
+            "<ResourceDictionary xmlns=\"https://github.com/avaloniaui\"",
+            "                    xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">",
+            "\t<ControlTheme x:Key=\"MyButtonTheme1\" TargetType=\"Button\">",
+            "\t\t<Setter Property=\"Padding\" Value=\"4\" />",
+            "\t\t<Style Selector=\"^:pointerover\">",
+            "\t\t\t<Setter Property=\"Background\">",
+            "\t\t\t\t<Setter.Value>",
+            "\t\t\t\t\t<SolidColorBrush Color=\"Red\" />",
+            "\t\t\t\t</Setter.Value>",
+            "\t\t\t</Setter>",
+            "\t\t</Style>",
+            "\t</ControlTheme>",
+            "</ResourceDictionary>") + "\r\n";
+
+        var edit = ControlThemeEditor.SetSelectorSetter(
+            xaml,
+            "MyButtonTheme1",
+            "^:pointerover",
+            "Background",
+            "{DynamicResource AccentBrush}");
+
+        Assert.True(edit.Changed);
+        Assert.Contains("\r\n\t\t<Setter Property=\"Padding\" Value=\"4\" />\r\n", edit.Text, System.StringComparison.Ordinal);
+        Assert.Contains("\r\n\t\t\t<Setter Property=\"Background\" Value=\"{DynamicResource AccentBrush}\" />\r\n", edit.Text, System.StringComparison.Ordinal);
+        Assert.EndsWith("</ResourceDictionary>\r\n", edit.Text, System.StringComparison.Ordinal);
+    }
 }
