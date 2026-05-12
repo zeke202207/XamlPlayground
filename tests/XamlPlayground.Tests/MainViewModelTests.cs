@@ -1272,7 +1272,10 @@ public sealed class MainViewModelTests
         {
             EnsureDockTestApplicationResources();
 
-            var viewModel = new MainViewModel(null);
+            var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
             var root = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
             var factory = Assert.IsAssignableFrom<IFactory>(viewModel.DockFactory);
             var editorDock = Assert.Single(Enumerate(root).OfType<IDocumentDock>(), dock => dock.Id == "Editors");
