@@ -284,6 +284,21 @@ public sealed class ThemeResourceAnalyzerTests
                               <Button Background="{StaticResource ResourceKey='AccentBrush'}" />
                               <Border ToolTip='{StaticResource AccentBrush}' />
                               <ContentControl Tag='{Binding Name, Converter={StaticResource AccentBrush}}' />
+                              <Button>
+                                <Button.Background>
+                                  <StaticResource ResourceKey="AccentBrush" />
+                                </Button.Background>
+                              </Button>
+                              <Border>
+                                <Border.BorderBrush>
+                                  <DynamicResource>AccentBrush</DynamicResource>
+                                </Border.BorderBrush>
+                              </Border>
+                              <ContentControl>
+                                <ContentControl.Tag>
+                                  <StaticResource ResourceKey="OtherBrush" />
+                                </ContentControl.Tag>
+                              </ContentControl>
                               <TextBlock Text="{Binding Name, Converter={StaticResource AccentBrush}}" />
                             </UserControl>
                             """;
@@ -298,8 +313,13 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.DoesNotContain("Background=", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("ToolTip=", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Tag=", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Button.Background", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Border.BorderBrush", cleaned, System.StringComparison.Ordinal);
+        Assert.Contains("ResourceKey=\"OtherBrush\"", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Text=", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("{StaticResource AccentBrush}", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("ResourceKey=\"AccentBrush\"", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("<DynamicResource>AccentBrush</DynamicResource>", cleaned, System.StringComparison.Ordinal);
     }
 
     [Fact]

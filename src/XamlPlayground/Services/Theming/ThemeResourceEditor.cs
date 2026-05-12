@@ -253,6 +253,7 @@ public static class ThemeResourceEditor
     private static string RemoveResourceReferenceAttributes(string xaml, string key)
     {
         xaml = RemoveResourceReferenceSetters(xaml, key);
+        xaml = RemoveObjectElementResourceReferences(xaml, key);
 
         var attributeRegex = new Regex(
             "\\s+[A-Za-z_][A-Za-z0-9_.:-]*\\s*=\\s*(?:\"(?<doubleValue>[^\"]*)\"|'(?<singleValue>[^']*)')",
@@ -296,6 +297,51 @@ public static class ThemeResourceEditor
         }
 
         return Serialize(document);
+    }
+
+    private static string RemoveObjectElementResourceReferences(string xaml, string key)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+        }
+        catch (XmlException)
+        {
+            return xaml;
+        }
+
+        var references = document
+            .Descendants()
+            .Where(element => IsResourceReferenceElement(element, key))
+            .ToArray();
+        if (references.Length == 0)
+        {
+            return xaml;
+        }
+
+        foreach (var reference in references)
+        {
+            var removable = TryGetSingleReferencePropertyElement(reference) ?? reference;
+            removable.Remove();
+        }
+
+        return Serialize(document);
+    }
+
+    private static XElement? TryGetSingleReferencePropertyElement(XElement reference)
+    {
+        var parent = reference.Parent;
+        if (parent is null || !parent.Name.LocalName.Contains('.', StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return parent.Nodes().All(node =>
+            ReferenceEquals(node, reference) ||
+            node is XText text && string.IsNullOrWhiteSpace(text.Value))
+                ? parent
+                : null;
     }
 
     private static bool SetterReferencesResource(XElement setter, string key)
