@@ -66,10 +66,14 @@ public sealed class AnimationTimelineEditor
         }
 
         var elementSelector = NormalizeElementStyleSelector(target, targetSelector);
+        var ownerSelector = GetOwnerScopedElementStyleSelector(target, elementSelector);
         var style = FindElementStyle(target, elementSelector) ??
                     (string.Equals(elementSelector, targetSelector, StringComparison.Ordinal)
                         ? null
-                        : FindElementStyle(target, targetSelector));
+                        : FindElementStyle(target, targetSelector)) ??
+                    (ownerSelector is null
+                        ? null
+                        : FindElementStyle(target, ownerSelector));
         return style is null
             ? AnimationTimelineDefinition.CreateEmpty(elementSelector)
             : ReadStyleAnimation(style, elementSelector);
@@ -148,11 +152,15 @@ public sealed class AnimationTimelineEditor
         }
 
         var styleSelector = NormalizeElementStyleSelector(target, timeline.TargetSelector);
+        var ownerSelector = GetOwnerScopedElementStyleSelector(target, styleSelector);
         var member = EnsureMemberElement(target, $"{target.Name.LocalName}.Styles");
         var style = FindDirectStyle(member, styleSelector) ??
                     (string.Equals(styleSelector, timeline.TargetSelector, StringComparison.Ordinal)
                         ? null
                         : FindDirectStyle(member, timeline.TargetSelector)) ??
+                    (ownerSelector is null
+                        ? null
+                        : FindDirectStyle(member, ownerSelector)) ??
                     EnsureDirectStyle(member, styleSelector);
         style.SetAttributeValue("Selector", styleSelector);
         SetStyleAnimation(style, timeline with { TargetSelector = styleSelector });
@@ -490,6 +498,20 @@ public sealed class AnimationTimelineEditor
         return string.IsNullOrWhiteSpace(prefix)
             ? localName
             : $"{prefix}|{localName}";
+    }
+
+    private static string? GetOwnerScopedElementStyleSelector(XElement target, string selector)
+    {
+        var typeSelector = GetElementStyleTypeSelector(target);
+        if (!selector.StartsWith(typeSelector, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var suffix = selector[typeSelector.Length..];
+        return suffix.Length == 0 || suffix[0] is ':' or ' '
+            ? "^" + suffix
+            : null;
     }
 
     private static XElement? FindTheme(XDocument document, string themeKey)

@@ -104,6 +104,46 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void AnimationTimelineEditor_ReusesExistingCaretElementStyleForTypeTarget()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var editor = new AnimationTimelineEditor();
+        var xaml = """
+                   <Grid xmlns="https://github.com/avaloniaui"
+                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                     <Button x:Name="SaveButton" Content="Save">
+                       <Button.Styles>
+                         <Style Selector="^">
+                           <Setter Property="MinWidth" Value="80" />
+                           <Style.Animations>
+                             <Animation Duration="0:0:0.1">
+                               <KeyFrame Cue="100%">
+                                 <Setter Property="Opacity" Value="0.4" />
+                               </KeyFrame>
+                             </Animation>
+                           </Style.Animations>
+                         </Style>
+                       </Button.Styles>
+                     </Button>
+                   </Grid>
+                   """;
+        var timeline = CreateOpacityTimeline("Button", "0", "1");
+
+        var loaded = editor.ReadElementAnimation(xaml, XamlElementSelector.ByName("SaveButton"), "Button");
+        var edit = editor.SetElementAnimation(xaml, XamlElementSelector.ByName("SaveButton"), timeline);
+
+        Assert.Equal("Opacity", Assert.Single(loaded.Tracks).PropertyName);
+        Assert.True(edit.Changed, edit.Error);
+        Assert.Equal(1, edit.Text.Split("<Style Selector=", StringSplitOptions.None).Length - 1);
+        Assert.Contains("<Style Selector=\"Button\">", edit.Text, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"MinWidth\" Value=\"80\" />", edit.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Selector=\"^\"", edit.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Value=\"0.4\"", edit.Text, StringComparison.Ordinal);
+        Assert.IsAssignableFrom<Grid>(AvaloniaRuntimeXamlLoader.Load(edit.Text));
+    }
+
+    [Fact]
     public void AnimationTimelineEditor_DeduplicatesPropertySettersAtSameCue()
     {
         var editor = new AnimationTimelineEditor();
