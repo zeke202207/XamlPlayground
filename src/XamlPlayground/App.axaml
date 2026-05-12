@@ -26,6 +26,12 @@
     <DataTemplate DataType="dockVm:VisualToolboxDockViewModel">
       <dockViews:VisualToolboxDockView />
     </DataTemplate>
+    <DataTemplate DataType="dockVm:VisualAnimationsDockViewModel">
+      <dockViews:AnimationTimelineDockView />
+    </DataTemplate>
+    <DataTemplate DataType="dockVm:AnimationTimelineSheetDockViewModel">
+      <dockViews:AnimationTimelineSheetDockView />
+    </DataTemplate>
     <DataTemplate DataType="dockVm:ControlThemesDockViewModel">
       <dockViews:ControlThemesDockView />
     </DataTemplate>

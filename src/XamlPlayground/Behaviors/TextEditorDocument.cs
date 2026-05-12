@@ -32,6 +32,12 @@ public sealed class TextEditorDocument : AvaloniaObject
     {
         if (e.NewValue is TextDocument document)
         {
+            if (ReferenceEquals(editor.Document, document))
+            {
+                return;
+            }
+
+            TextEditorBehavior.PrepareForDocumentReplacement(editor);
             editor.Document = document;
             return;
         }

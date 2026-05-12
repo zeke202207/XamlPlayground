@@ -14,9 +14,11 @@ using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.DataGridHierarchical;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using XamlPlayground.Services;
+using XamlPlayground.Services.Animation;
 using XamlPlayground.Services.Theming;
 using XamlPlayground.Services.VisualEditing;
 using XamlPlayground.ViewModels.VisualEditing;
@@ -30,6 +32,7 @@ public partial class MainViewModel
     private IXamlMutationEngine _visualMutationEngine = null!;
     private XamlToolboxInsertionService _visualToolboxInsertion = null!;
     private ControlEditorRegistry _visualEditorRegistry = null!;
+    private AnimationTimelineEditor _animationTimelineEditor = null!;
     private FluentControlThemeCatalog _controlThemeCatalog = null!;
     private IVisualTreeSnapshotService _visualTreeSnapshotService = null!;
     private VisualEditorSelectionService _visualSelectionService = null!;
@@ -46,6 +49,11 @@ public partial class MainViewModel
     private ThemeEditScope? _themeEditScope;
     private ControlThemeAnalysis _selectedControlThemeAnalysis = ControlThemeAnalysis.Empty;
     private ThemeResourceDeletePlan? _pendingThemeResourceDeletePlan;
+    private bool _isRecordingAnimationKeyFrame;
+    private DispatcherTimer? _animationPlaybackTimer;
+    private DateTime _animationPlaybackStartedUtc;
+    private int _animationPlaybackStartPercent;
+    private double _animationPlaybackDurationMilliseconds = 300;
 
     [ObservableProperty] private ObservableCollection<VisualEditorNodeViewModel> _visualEditorStructureNodes = new();
     [ObservableProperty] private HierarchicalModel<VisualEditorNodeViewModel>? _visualEditorStructureModel;
@@ -148,6 +156,32 @@ public partial class MainViewModel
     [ObservableProperty] private string _themeTemplatePartSetterPropertyName = "Opacity";
     [ObservableProperty] private string _themeTemplatePartSetterValue = string.Empty;
     [ObservableProperty] private ObservableCollection<ThemeVariantViewModel> _themeVariants = new();
+    [ObservableProperty] private ObservableCollection<AnimationTargetOptionViewModel> _animationTargetOptions = new();
+    [ObservableProperty] private AnimationTargetOptionViewModel? _selectedAnimationTargetOption;
+    [ObservableProperty] private ObservableCollection<AnimationTimelineTrackViewModel> _animationTimelineTracks = new();
+    [ObservableProperty] private AnimationTimelineTrackViewModel? _selectedAnimationTimelineTrack;
+    [ObservableProperty] private AnimationTimelineKeyFrameViewModel? _selectedAnimationTimelineKeyFrame;
+    [ObservableProperty] private ObservableCollection<AnimationPresetViewModel> _animationPresets = new();
+    [ObservableProperty] private AnimationPresetViewModel? _selectedAnimationPreset;
+    [ObservableProperty] private string _animationTargetSelector = "^";
+    [ObservableProperty] private string _animationDurationText = "0:0:0.3";
+    [ObservableProperty] private string _animationDelayText = string.Empty;
+    [ObservableProperty] private string _animationIterationCountText = string.Empty;
+    [ObservableProperty] private string _animationPlaybackDirectionText = "Normal";
+    [ObservableProperty] private string _animationFillModeText = "Both";
+    [ObservableProperty] private string _animationEasingText = "CubicEaseOut";
+    [ObservableProperty] private string _animationPropertyName = "Opacity";
+    [ObservableProperty] private int _animationCuePercent = 100;
+    [ObservableProperty] private string _animationKeyFrameValue = "1";
+    [ObservableProperty] private string _animationKeySplineText = string.Empty;
+    [ObservableProperty] private int _animationCurrentTimePercent;
+    [ObservableProperty] private bool _animationTimelinePlaying;
+    [ObservableProperty] private bool _animationRecordModeEnabled;
+    [ObservableProperty] private string _animationPlaybackStatus = "Select a visual element or control theme to edit animations.";
+
+    public string AnimationCurrentTimeText => $"{AnimationCurrentTimePercent}%";
+
+    public string AnimationPlaybackButtonText => AnimationTimelinePlaying ? "Pause" : "Play";
 
     public bool VisualEditorPreviewContentHitTestVisible => !VisualEditorDesignerMode;
 
@@ -247,11 +281,52 @@ public partial class MainViewModel
 
     public ICommand LoadControlThemeProjectCommand { get; private set; } = null!;
 
+    public ICommand AddAnimationTrackCommand { get; private set; } = null!;
+
+    public ICommand AddAnimationKeyFrameCommand { get; private set; } = null!;
+
+    public ICommand UpdateAnimationKeyFrameCommand { get; private set; } = null!;
+
+    public ICommand CommitAnimationKeyFrameEditCommand { get; private set; } = null!;
+
+    public ICommand RemoveAnimationKeyFrameCommand { get; private set; } = null!;
+
+    public ICommand ApplyAnimationTimelineCommand { get; private set; } = null!;
+
+    public ICommand PreviewAnimationTimelineCommand { get; private set; } = null!;
+
+    public ICommand ApplyAnimationFrameToTargetCommand { get; private set; } = null!;
+
+    public ICommand CaptureAnimationKeyFrameCommand { get; private set; } = null!;
+
+    public ICommand DuplicateAnimationKeyFrameCommand { get; private set; } = null!;
+
+    public ICommand SelectPreviousAnimationKeyFrameCommand { get; private set; } = null!;
+
+    public ICommand SelectNextAnimationKeyFrameCommand { get; private set; } = null!;
+
+    public ICommand NudgeAnimationKeyFrameLeftCommand { get; private set; } = null!;
+
+    public ICommand NudgeAnimationKeyFrameRightCommand { get; private set; } = null!;
+
+    public ICommand NudgeAnimationKeyFrameLeftLargeCommand { get; private set; } = null!;
+
+    public ICommand NudgeAnimationKeyFrameRightLargeCommand { get; private set; } = null!;
+
+    public ICommand SeekAnimationStartCommand { get; private set; } = null!;
+
+    public ICommand SeekAnimationEndCommand { get; private set; } = null!;
+
+    public ICommand PlayAnimationTimelineCommand { get; private set; } = null!;
+
+    public ICommand StopAnimationTimelineCommand { get; private set; } = null!;
+
     private void InitializeVisualEditing()
     {
         _visualMutationEngine = new XamlMutationEngine();
         _visualToolboxInsertion = new XamlToolboxInsertionService(_visualMutationEngine);
         _visualEditorRegistry = new ControlEditorRegistry();
+        _animationTimelineEditor = new AnimationTimelineEditor();
         _controlThemeCatalog = new FluentControlThemeCatalog();
         _visualTreeSnapshotService = new AvaloniaVisualTreeSnapshotService();
         _visualSelectionService = new VisualEditorSelectionService(_visualMutationEngine, new XamlVisualTreeMapper());
@@ -287,10 +362,32 @@ public partial class MainViewModel
         ExportSelectedControlThemeCommand = new AsyncRelayCommand(ExportSelectedControlTheme, () => SelectedControlTheme is not null);
         SaveControlThemeProjectCommand = new AsyncRelayCommand(SaveControlThemeProject, CanSaveControlThemeProject);
         LoadControlThemeProjectCommand = new AsyncRelayCommand(LoadControlThemeProject, () => ActiveProject is not null);
+        AddAnimationTrackCommand = new RelayCommand(AddAnimationTrack, CanAddAnimationTrack);
+        AddAnimationKeyFrameCommand = new RelayCommand(AddAnimationKeyFrame, CanEditAnimationKeyFrames);
+        UpdateAnimationKeyFrameCommand = new RelayCommand(UpdateAnimationKeyFrame, () => SelectedAnimationTimelineKeyFrame is not null);
+        CommitAnimationKeyFrameEditCommand = new RelayCommand(CommitAnimationKeyFrameEdit, () => SelectedAnimationTimelineKeyFrame is not null);
+        RemoveAnimationKeyFrameCommand = new RelayCommand(RemoveAnimationKeyFrame, () => SelectedAnimationTimelineKeyFrame is not null);
+        ApplyAnimationTimelineCommand = new RelayCommand(ApplyAnimationTimeline, CanApplyAnimationTimeline);
+        PreviewAnimationTimelineCommand = new RelayCommand(PreviewAnimationTimeline, CanApplyAnimationTimeline);
+        ApplyAnimationFrameToTargetCommand = new RelayCommand(ApplyAnimationFrameToTarget, CanApplyAnimationFrameToTarget);
+        CaptureAnimationKeyFrameCommand = new RelayCommand(CaptureAnimationKeyFrame, CanCaptureAnimationKeyFrame);
+        DuplicateAnimationKeyFrameCommand = new RelayCommand(DuplicateAnimationKeyFrame, CanDuplicateAnimationKeyFrame);
+        SelectPreviousAnimationKeyFrameCommand = new RelayCommand(() => SelectAdjacentAnimationKeyFrame(previous: true), CanSelectAdjacentAnimationKeyFrame);
+        SelectNextAnimationKeyFrameCommand = new RelayCommand(() => SelectAdjacentAnimationKeyFrame(previous: false), CanSelectAdjacentAnimationKeyFrame);
+        NudgeAnimationKeyFrameLeftCommand = new RelayCommand(() => NudgeAnimationKeyFrame(-1), CanNudgeAnimationKeyFrame);
+        NudgeAnimationKeyFrameRightCommand = new RelayCommand(() => NudgeAnimationKeyFrame(1), CanNudgeAnimationKeyFrame);
+        NudgeAnimationKeyFrameLeftLargeCommand = new RelayCommand(() => NudgeAnimationKeyFrame(-10), CanNudgeAnimationKeyFrame);
+        NudgeAnimationKeyFrameRightLargeCommand = new RelayCommand(() => NudgeAnimationKeyFrame(10), CanNudgeAnimationKeyFrame);
+        SeekAnimationStartCommand = new RelayCommand(() => SeekAnimationPlayhead(0), CanSeekAnimationTimeline);
+        SeekAnimationEndCommand = new RelayCommand(() => SeekAnimationPlayhead(100), CanSeekAnimationTimeline);
+        PlayAnimationTimelineCommand = new RelayCommand(PlayAnimationTimeline, CanPlayAnimationTimeline);
+        StopAnimationTimelineCommand = new RelayCommand(() => StopAnimationTimeline(completed: false), () => AnimationTimelinePlaying);
 
         LoadVisualEditorToolbox();
+        LoadAnimationPresets();
         LoadFluentControlThemeTemplates();
         RefreshControlThemes();
+        RefreshAnimationTargetOptions();
     }
 
     partial void OnSelectedVisualEditorNodeChanged(VisualEditorNodeViewModel? value)
@@ -404,6 +501,7 @@ public partial class MainViewModel
     partial void OnSelectedControlThemeChanged(ControlThemeDefinitionViewModel? value)
     {
         RefreshSelectedControlThemeAnalysis();
+        RefreshAnimationTargetOptions();
         NotifyControlThemeCommandsChanged();
     }
 
@@ -435,6 +533,7 @@ public partial class MainViewModel
     {
         RefreshThemeStateSelectors();
         RefreshThemeTemplatePartSelectors();
+        RefreshAnimationTargetOptions();
         ThemeStateSetterValue = string.Empty;
         ThemeTemplatePartSetterValue = string.Empty;
         ControlThemeStatus = value is null || string.Equals(value.State, "normal", StringComparison.Ordinal)
@@ -456,6 +555,7 @@ public partial class MainViewModel
     partial void OnSelectedThemeTemplatePartChanged(ThemeTemplatePartViewModel? value)
     {
         RefreshThemeTemplatePartSelectors();
+        RefreshAnimationTargetOptions();
         NotifyControlThemeCommandsChanged();
     }
 
@@ -491,6 +591,93 @@ public partial class MainViewModel
     partial void OnVisualEditorToolboxSearchChanged(string value)
     {
         FilterVisualEditorToolbox();
+    }
+
+    partial void OnSelectedAnimationTargetOptionChanged(AnimationTargetOptionViewModel? value)
+    {
+        StopAnimationTimeline(completed: false);
+        if (value is null)
+        {
+            ClearAnimationTimelineEditor();
+            NotifyAnimationCommandsChanged();
+            return;
+        }
+
+        AnimationTargetSelector = value.Selector;
+        LoadAnimationTimelineFromTarget();
+        NotifyAnimationCommandsChanged();
+    }
+
+    partial void OnAnimationTargetSelectorChanged(string value)
+    {
+        NotifyAnimationCommandsChanged();
+    }
+
+    partial void OnAnimationPropertyNameChanged(string value)
+    {
+        NotifyAnimationCommandsChanged();
+    }
+
+    partial void OnSelectedAnimationTimelineTrackChanged(AnimationTimelineTrackViewModel? value)
+    {
+        if (value is null)
+        {
+            SelectedAnimationTimelineKeyFrame = null;
+        }
+        else
+        {
+            AnimationPropertyName = value.PropertyName;
+            SelectedAnimationTimelineKeyFrame = value.KeyFrames
+                .OrderBy(static frame => frame.CuePercent)
+                .FirstOrDefault();
+        }
+
+        NotifyAnimationCommandsChanged();
+    }
+
+    partial void OnSelectedAnimationTimelineKeyFrameChanged(AnimationTimelineKeyFrameViewModel? value)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        AnimationCuePercent = value.CuePercent;
+        AnimationKeyFrameValue = value.Value;
+        AnimationKeySplineText = value.KeySpline;
+        AnimationCurrentTimePercent = value.CuePercent;
+        NotifyAnimationCommandsChanged();
+    }
+
+    partial void OnAnimationCurrentTimePercentChanged(int value)
+    {
+        var clamped = Math.Clamp(value, 0, 100);
+        if (clamped != value)
+        {
+            AnimationCurrentTimePercent = clamped;
+            return;
+        }
+
+        OnPropertyChanged(nameof(AnimationCurrentTimeText));
+    }
+
+    partial void OnAnimationTimelinePlayingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(AnimationPlaybackButtonText));
+        NotifyAnimationCommandsChanged();
+    }
+
+    partial void OnSelectedAnimationPresetChanged(AnimationPresetViewModel? value)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        AnimationPropertyName = value.PropertyName;
+        AnimationDurationText = value.Duration;
+        AnimationEasingText = value.Easing;
+        AnimationKeyFrameValue = value.ToValue;
     }
 
     partial void OnVisualEditorDesignerModeChanged(bool value)
@@ -622,6 +809,7 @@ public partial class MainViewModel
         VisualEditorCurrentContainerTitle = "No container";
         VisualEditorStatus = status;
         RefreshControlThemeSelectionState();
+        RefreshAnimationTargetOptions();
     }
 
     private void SelectVisualEditorElement(XamlElementSnapshot? element)
@@ -645,6 +833,7 @@ public partial class MainViewModel
             ClearVisualEditorSourceSelection();
             VisualEditorStatus = _visualEditorDocument?.Diagnostics.FirstOrDefault() ?? "No XAML element selected.";
             RefreshControlThemeSelectionState();
+            RefreshAnimationTargetOptions();
             return;
         }
 
@@ -701,6 +890,7 @@ public partial class MainViewModel
         }
         VisualEditorStatus = $"{element.TypeName}: {element.Attributes.Count} attribute(s), {element.ChildElementCount} child element(s)";
         RefreshControlThemeSelectionState();
+        RefreshAnimationTargetOptions();
     }
 
     private IReadOnlyList<VisualEditorPropertyViewModel> BuildVisualEditorPropertyRows(XamlElementSnapshot element)
@@ -837,6 +1027,15 @@ public partial class MainViewModel
             : $"{element.TypeName} #{element.Name}";
     }
 
+    private static string CreateElementStyleSelector(XamlElementSnapshot element)
+    {
+        var typeName = element.TypeName.Trim();
+        var colonIndex = typeName.IndexOf(':', StringComparison.Ordinal);
+        return colonIndex > 0
+            ? $"{typeName[..colonIndex]}|{typeName[(colonIndex + 1)..]}"
+            : typeName;
+    }
+
     private void ApplyVisualEditorPropertyFromGrid(VisualEditorPropertyViewModel property, string value)
     {
         if (_isApplyingVisualEditorMutation ||
@@ -856,6 +1055,9 @@ public partial class MainViewModel
                 selector,
                 property.MutationName,
                 value));
+            RecordAnimationKeyFrameFromVisualEdit(
+                new[] { (PropertyName: property.MutationName, Value: value) },
+                applyTimeline: true);
         }
         finally
         {
@@ -1811,11 +2013,13 @@ public partial class MainViewModel
         var requests = UsesCanvasPositioning(selected)
             ? CreateCanvasMoveRequests(selected, selector, deltaX, deltaY)
             : CreateMarginMoveRequests(selected, selector, deltaX, deltaY);
-        var result = _visualMutationEngine.Batch(xamlFile.Text, requests);
+        var requestList = requests.ToArray();
+        var result = _visualMutationEngine.Batch(xamlFile.Text, requestList);
         ApplyVisualEditorMutation(result);
 
         if (result.Success)
         {
+            RecordAnimationKeyFrameFromVisualEdit(requestList, applyTimeline: true);
             VisualEditorStatus = UsesCanvasPositioning(selected)
                 ? "Moved selection using Canvas.Left and Canvas.Top."
                 : "Moved selection using Margin.";
@@ -1890,6 +2094,7 @@ public partial class MainViewModel
 
         if (result.Success)
         {
+            RecordAnimationKeyFrameFromVisualEdit(requests, applyTimeline: true);
             VisualEditorStatus = "Resized selection using Width and Height.";
         }
 
@@ -2941,6 +3146,1094 @@ public partial class MainViewModel
         ControlThemeStatus = $"Created side-by-side light/dark preview for {selectedTheme.Key}.";
     }
 
+    private void LoadAnimationPresets()
+    {
+        AnimationPresets = new ObservableCollection<AnimationPresetViewModel>
+        {
+            new("Fade in", "Opacity", "0", "1", "0:0:0.25", "CubicEaseOut"),
+            new("Fade out", "Opacity", "1", "0", "0:0:0.2", "CubicEaseIn"),
+            new("Subtle scale", "ScaleTransform.ScaleX", "1", "1.04", "0:0:0.16", "CubicEaseOut"),
+            new("Slide right", "TranslateTransform.X", "0", "12", "0:0:0.22", "CubicEaseOut"),
+            new("Rotate", "RotateTransform.Angle", "0", "8", "0:0:0.22", "BackEaseOut")
+        };
+        SelectedAnimationPreset = AnimationPresets.FirstOrDefault();
+    }
+
+    private void RefreshAnimationTargetOptions()
+    {
+        var previousId = SelectedAnimationTargetOption?.Id;
+        var previousSelector = AnimationTargetSelector;
+        var options = new List<AnimationTargetOptionViewModel>();
+
+        if (_visualEditorSelectedSelector is not null &&
+            SelectedVisualEditorNode?.Element is { } selectedElement)
+        {
+            options.Add(new AnimationTargetOptionViewModel(
+                "visual-selection",
+                $"Selected {FormatVisualEditorElementTitle(selectedElement)}",
+                "Visual",
+                CreateElementStyleSelector(selectedElement)));
+        }
+
+        if (ActiveXamlFile is { IsXaml: true } xamlFile)
+        {
+            foreach (var styleTarget in _animationTimelineEditor.GetDocumentStyleTargets(xamlFile.Text))
+            {
+                options.Add(new AnimationTargetOptionViewModel(
+                    $"style:{styleTarget.Index}",
+                    $"Style {styleTarget.Index + 1}: {styleTarget.Selector}",
+                    "Style",
+                    styleTarget.Selector,
+                    styleTarget.Index));
+            }
+        }
+
+        if (SelectedControlTheme is { } selectedTheme)
+        {
+            options.Add(new AnimationTargetOptionViewModel(
+                "theme-root",
+                $"{selectedTheme.Key} root",
+                "Theme",
+                "^"));
+
+            if (SelectedThemePreviewState is { } selectedState &&
+                !string.Equals(selectedState.State, "normal", StringComparison.Ordinal))
+            {
+                options.Add(new AnimationTargetOptionViewModel(
+                    $"theme-state:{selectedState.State}",
+                    $"{selectedTheme.Key} {selectedState.PseudoClass}",
+                    "Theme state",
+                    $"^:{selectedState.State.TrimStart(':')}"));
+            }
+
+            if (SelectedThemeTemplatePart is { } selectedPart)
+            {
+                options.Add(new AnimationTargetOptionViewModel(
+                    $"theme-part:{selectedPart.Name}",
+                    selectedPart.Title,
+                    "Template part",
+                    CreateTemplatePartSelector(selectedPart, SelectedThemePreviewState)));
+            }
+        }
+
+        AnimationTargetOptions = new ObservableCollection<AnimationTargetOptionViewModel>(options);
+        SelectedAnimationTargetOption =
+            AnimationTargetOptions.FirstOrDefault(option => string.Equals(option.Id, previousId, StringComparison.Ordinal)) ??
+            AnimationTargetOptions.FirstOrDefault(option => string.Equals(option.Selector, previousSelector, StringComparison.Ordinal)) ??
+            AnimationTargetOptions.FirstOrDefault();
+
+        if (SelectedAnimationTargetOption is null)
+        {
+            ClearAnimationTimelineEditor();
+        }
+
+        NotifyAnimationCommandsChanged();
+    }
+
+    private void ClearAnimationTimelineEditor()
+    {
+        StopAnimationTimeline(completed: false);
+        AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel>();
+        SelectedAnimationTimelineTrack = null;
+        SelectedAnimationTimelineKeyFrame = null;
+        AnimationPlaybackStatus = "Select a visual element or control theme to edit animations.";
+    }
+
+    private void LoadAnimationTimelineFromTarget()
+    {
+        var target = SelectedAnimationTargetOption;
+        if (target is null)
+        {
+            return;
+        }
+
+        var selector = string.IsNullOrWhiteSpace(AnimationTargetSelector)
+            ? target.Selector
+            : AnimationTargetSelector.Trim();
+        var timeline = AnimationTimelineDefinition.CreateEmpty(selector);
+
+        if (IsVisualAnimationTarget(target) &&
+            ActiveXamlFile is { } xamlFile &&
+            _visualEditorSelectedSelector is { } selectedSelector)
+        {
+            timeline = _animationTimelineEditor.ReadElementAnimation(
+                xamlFile.Text,
+                selectedSelector,
+                selector);
+        }
+        else if (IsDocumentStyleAnimationTarget(target) &&
+                 ActiveXamlFile is { } styleFile)
+        {
+            timeline = _animationTimelineEditor.ReadDocumentStyleAnimation(
+                styleFile.Text,
+                target.StyleIndex ?? -1,
+                target.Selector,
+                selector);
+        }
+        else if (IsThemeAnimationTarget(target) &&
+                 ActiveProject is { } project &&
+                 SelectedControlTheme is { } selectedTheme &&
+                 project.FindFile(selectedTheme.FilePath) is { } themeFile)
+        {
+            timeline = _animationTimelineEditor.ReadControlThemeAnimation(
+                themeFile.Text,
+                selectedTheme.Key,
+                selector);
+        }
+
+        ApplyAnimationTimelineDefinitionToEditor(timeline);
+        AnimationPlaybackStatus = timeline.Tracks.Count == 0
+            ? $"No animation exists for {target.Title}."
+            : $"Loaded {timeline.Tracks.Count} animation track(s) for {target.Title}.";
+    }
+
+    private void ApplyAnimationTimelineDefinitionToEditor(AnimationTimelineDefinition timeline)
+    {
+        AnimationTargetSelector = timeline.TargetSelector;
+        AnimationDurationText = timeline.Duration;
+        AnimationDelayText = timeline.Delay;
+        AnimationIterationCountText = timeline.IterationCount;
+        AnimationPlaybackDirectionText = string.IsNullOrWhiteSpace(timeline.PlaybackDirection) ? "Normal" : timeline.PlaybackDirection;
+        AnimationFillModeText = string.IsNullOrWhiteSpace(timeline.FillMode) ? "Both" : timeline.FillMode;
+        AnimationEasingText = string.IsNullOrWhiteSpace(timeline.Easing) ? "CubicEaseOut" : timeline.Easing;
+        AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel>(
+            timeline.Tracks.Select(static track => new AnimationTimelineTrackViewModel(
+                track.TargetSelector,
+                track.PropertyName,
+                new ObservableCollection<AnimationTimelineKeyFrameViewModel>(
+                    track.KeyFrames.Select(static frame => new AnimationTimelineKeyFrameViewModel(
+                        frame.CuePercent,
+                        frame.Value,
+                        frame.KeySpline))))));
+        SelectedAnimationTimelineTrack = AnimationTimelineTracks.FirstOrDefault();
+        if (SelectedAnimationTimelineTrack is null &&
+            !string.IsNullOrWhiteSpace(AnimationPropertyName))
+        {
+            AnimationKeyFrameValue = "1";
+        }
+    }
+
+    private bool CanAddAnimationTrack()
+    {
+        return SelectedAnimationTargetOption is not null &&
+               !string.IsNullOrWhiteSpace(AnimationTargetSelector) &&
+               !string.IsNullOrWhiteSpace(AnimationPropertyName);
+    }
+
+    private void AddAnimationTrack()
+    {
+        if (!CanAddAnimationTrack())
+        {
+            return;
+        }
+
+        var propertyName = AnimationPropertyName.Trim();
+        var existing = AnimationTimelineTracks.FirstOrDefault(track =>
+            string.Equals(track.PropertyName, propertyName, StringComparison.Ordinal));
+        if (existing is not null)
+        {
+            SelectedAnimationTimelineTrack = existing;
+            AnimationPlaybackStatus = $"Selected existing {propertyName} track.";
+            return;
+        }
+
+        var preset = SelectedAnimationPreset;
+        var presetMatches = preset is not null &&
+                            string.Equals(preset.PropertyName, propertyName, StringComparison.Ordinal);
+        var fromValue = presetMatches
+            ? preset!.FromValue
+            : ResolveCurrentAnimationPropertyValue(propertyName);
+        var toValue = presetMatches
+            ? preset!.ToValue
+            : AnimationKeyFrameValue;
+        var track = new AnimationTimelineTrackViewModel(
+            AnimationTargetSelector.Trim(),
+            propertyName,
+            new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+            {
+                new(0, fromValue, string.Empty),
+                new(Math.Clamp(AnimationCuePercent, 1, 100), string.IsNullOrWhiteSpace(toValue) ? fromValue : toValue, AnimationKeySplineText)
+            });
+
+        AnimationTimelineTracks.Add(track);
+        SelectedAnimationTimelineTrack = track;
+        SelectedAnimationTimelineKeyFrame = track.KeyFrames.LastOrDefault();
+        AnimationPlaybackStatus = $"Added {propertyName} animation track.";
+        NotifyAnimationTimelineChanged();
+    }
+
+    private bool CanEditAnimationKeyFrames()
+    {
+        return SelectedAnimationTimelineTrack is not null;
+    }
+
+    private bool CanCaptureAnimationKeyFrame()
+    {
+        return SelectedAnimationTargetOption is not null &&
+               !string.IsNullOrWhiteSpace(AnimationPropertyName);
+    }
+
+    private void CaptureAnimationKeyFrame()
+    {
+        if (!CanCaptureAnimationKeyFrame())
+        {
+            return;
+        }
+
+        var propertyName = AnimationPropertyName.Trim();
+        var value = AnimationKeyFrameValue;
+        if (SelectedVisualEditorProperty is { } selectedProperty &&
+            (string.Equals(selectedProperty.MutationName, propertyName, StringComparison.Ordinal) ||
+             string.Equals(selectedProperty.Name, propertyName, StringComparison.Ordinal)))
+        {
+            value = selectedProperty.Value;
+        }
+        else if (TryGetVisualEditorPropertyValue(propertyName, out var currentValue) &&
+                 !string.IsNullOrWhiteSpace(currentValue))
+        {
+            value = currentValue;
+        }
+
+        AddOrUpdateAnimationKeyFrame(propertyName, value, AnimationCurrentTimePercent, AnimationKeySplineText);
+        ApplyAnimationTimeline();
+        AnimationPlaybackStatus = $"Captured {propertyName} at {AnimationCurrentTimePercent}%.";
+    }
+
+    private void AddAnimationKeyFrame()
+    {
+        if (SelectedAnimationTimelineTrack is not { } track)
+        {
+            return;
+        }
+
+        AddOrUpdateAnimationKeyFrame(track.PropertyName, AnimationKeyFrameValue, AnimationCuePercent, AnimationKeySplineText);
+    }
+
+    private AnimationTimelineTrackViewModel? AddOrUpdateAnimationKeyFrame(
+        string propertyName,
+        string value,
+        int cuePercent,
+        string keySpline)
+    {
+        var normalizedPropertyName = propertyName.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedPropertyName))
+        {
+            AnimationPlaybackStatus = "Animation property name is required.";
+            NotifyAnimationCommandsChanged();
+            return null;
+        }
+
+        var cue = Math.Clamp(cuePercent, 0, 100);
+        var track = AnimationTimelineTracks.FirstOrDefault(candidate =>
+            string.Equals(candidate.PropertyName, normalizedPropertyName, StringComparison.Ordinal));
+        if (track is null)
+        {
+            track = new AnimationTimelineTrackViewModel(
+                string.IsNullOrWhiteSpace(AnimationTargetSelector) ? "^" : AnimationTargetSelector.Trim(),
+                normalizedPropertyName,
+                new ObservableCollection<AnimationTimelineKeyFrameViewModel>());
+            AnimationTimelineTracks.Add(track);
+        }
+
+        var existing = track.KeyFrames.FirstOrDefault(frame => frame.CuePercent == cue);
+        if (existing is not null)
+        {
+            existing.Value = value;
+            existing.KeySpline = keySpline;
+            SelectedAnimationTimelineKeyFrame = existing;
+            AnimationPlaybackStatus = $"Updated {track.PropertyName} keyframe at {cue}%.";
+            NotifyAnimationTimelineChanged();
+            return track;
+        }
+
+        var keyFrame = new AnimationTimelineKeyFrameViewModel(cue, value, keySpline);
+        track.KeyFrames.Add(keyFrame);
+        SortAnimationTrackKeyFrames(track);
+        SelectedAnimationTimelineTrack = track;
+        SelectedAnimationTimelineKeyFrame = keyFrame;
+        AnimationPlaybackStatus = $"Added {track.PropertyName} keyframe at {cue}%.";
+        NotifyAnimationTimelineChanged();
+        return track;
+    }
+
+    private void UpdateAnimationKeyFrame()
+    {
+        if (SelectedAnimationTimelineTrack is not { } track ||
+            SelectedAnimationTimelineKeyFrame is not { } keyFrame)
+        {
+            return;
+        }
+
+        var requestedCue = Math.Clamp(AnimationCuePercent, 0, 100);
+        var cue = FindAvailableCue(track, requestedCue, keyFrame);
+        keyFrame.CuePercent = cue;
+        keyFrame.Value = AnimationKeyFrameValue;
+        keyFrame.KeySpline = AnimationKeySplineText;
+        SortAnimationTrackKeyFrames(track);
+        SelectedAnimationTimelineKeyFrame = keyFrame;
+        AnimationCuePercent = cue;
+        AnimationCurrentTimePercent = cue;
+        AnimationPlaybackStatus = cue == requestedCue
+            ? $"Updated {track.PropertyName} keyframe at {cue}%."
+            : $"Updated {track.PropertyName} keyframe at nearest available cue {cue}%.";
+        NotifyAnimationTimelineChanged();
+    }
+
+    private void CommitAnimationKeyFrameEdit()
+    {
+        if (SelectedAnimationTimelineKeyFrame is not { } keyFrame)
+        {
+            return;
+        }
+
+        AnimationCuePercent = keyFrame.CuePercent;
+        AnimationKeyFrameValue = keyFrame.Value;
+        AnimationKeySplineText = keyFrame.KeySpline;
+        UpdateAnimationKeyFrame();
+    }
+
+    private void RemoveAnimationKeyFrame()
+    {
+        if (SelectedAnimationTimelineTrack is not { } track ||
+            SelectedAnimationTimelineKeyFrame is not { } keyFrame)
+        {
+            return;
+        }
+
+        track.KeyFrames.Remove(keyFrame);
+        SelectedAnimationTimelineKeyFrame = track.KeyFrames
+            .OrderBy(static frame => frame.CuePercent)
+            .FirstOrDefault();
+        AnimationPlaybackStatus = $"Removed {track.PropertyName} keyframe.";
+        NotifyAnimationTimelineChanged();
+    }
+
+    private bool CanDuplicateAnimationKeyFrame()
+    {
+        return SelectedAnimationTimelineTrack is not null &&
+               SelectedAnimationTimelineKeyFrame is not null;
+    }
+
+    private void DuplicateAnimationKeyFrame()
+    {
+        if (SelectedAnimationTimelineTrack is not { } track ||
+            SelectedAnimationTimelineKeyFrame is not { } keyFrame)
+        {
+            return;
+        }
+
+        var cue = FindAvailableCue(track, Math.Min(100, keyFrame.CuePercent + 10), preferredDirection: 1);
+        var duplicate = new AnimationTimelineKeyFrameViewModel(cue, keyFrame.Value, keyFrame.KeySpline);
+        track.KeyFrames.Add(duplicate);
+        SortAnimationTrackKeyFrames(track);
+        SelectedAnimationTimelineKeyFrame = duplicate;
+        AnimationCuePercent = cue;
+        AnimationCurrentTimePercent = cue;
+        AnimationPlaybackStatus = $"Duplicated {track.PropertyName} keyframe at {cue}%.";
+        NotifyAnimationTimelineChanged();
+    }
+
+    private bool CanSelectAdjacentAnimationKeyFrame()
+    {
+        return SelectedAnimationTimelineTrack?.KeyFrames.Count > 0;
+    }
+
+    private void SelectAdjacentAnimationKeyFrame(bool previous)
+    {
+        if (SelectedAnimationTimelineTrack is not { } track ||
+            track.KeyFrames.Count == 0)
+        {
+            return;
+        }
+
+        var frames = track.KeyFrames
+            .OrderBy(static frame => frame.CuePercent)
+            .ToArray();
+        var currentIndex = SelectedAnimationTimelineKeyFrame is { } current
+            ? Array.IndexOf(frames, current)
+            : -1;
+        if (currentIndex < 0)
+        {
+            currentIndex = previous ? frames.Length : -1;
+        }
+
+        var nextIndex = previous
+            ? (currentIndex - 1 + frames.Length) % frames.Length
+            : (currentIndex + 1) % frames.Length;
+        SelectedAnimationTimelineKeyFrame = frames[nextIndex];
+        AnimationPlaybackStatus = $"Selected {track.PropertyName} keyframe at {frames[nextIndex].CuePercent}%.";
+    }
+
+    private bool CanNudgeAnimationKeyFrame()
+    {
+        return SelectedAnimationTimelineTrack is not null &&
+               SelectedAnimationTimelineKeyFrame is not null;
+    }
+
+    private void NudgeAnimationKeyFrame(int delta)
+    {
+        if (delta == 0 ||
+            SelectedAnimationTimelineTrack is not { } track ||
+            SelectedAnimationTimelineKeyFrame is not { } keyFrame)
+        {
+            return;
+        }
+
+        var requestedCue = Math.Clamp(keyFrame.CuePercent + delta, 0, 100);
+        var cue = FindAvailableCue(track, requestedCue, keyFrame, Math.Sign(delta));
+        keyFrame.CuePercent = cue;
+        SortAnimationTrackKeyFrames(track);
+        SelectedAnimationTimelineKeyFrame = keyFrame;
+        AnimationCuePercent = cue;
+        AnimationCurrentTimePercent = cue;
+        AnimationPlaybackStatus = $"Moved {track.PropertyName} keyframe to {cue}%.";
+        NotifyAnimationTimelineChanged();
+    }
+
+    private bool CanSeekAnimationTimeline()
+    {
+        return SelectedAnimationTargetOption is not null;
+    }
+
+    private void SeekAnimationPlayhead(int cuePercent)
+    {
+        AnimationCurrentTimePercent = Math.Clamp(cuePercent, 0, 100);
+        AnimationPlaybackStatus = $"Playhead at {AnimationCurrentTimePercent}%.";
+    }
+
+    private bool CanPlayAnimationTimeline()
+    {
+        return SelectedAnimationTargetOption is not null &&
+               AnimationTimelineTracks.Any(static track => track.KeyFrames.Count > 0);
+    }
+
+    private void PlayAnimationTimeline()
+    {
+        if (!CanPlayAnimationTimeline())
+        {
+            return;
+        }
+
+        if (AnimationTimelinePlaying)
+        {
+            StopAnimationTimeline(completed: false);
+            return;
+        }
+
+        EnsureAnimationPlaybackTimer();
+        _animationPlaybackDurationMilliseconds = ResolveAnimationPlaybackDurationMilliseconds();
+        _animationPlaybackStartPercent = AnimationCurrentTimePercent >= 100 ? 0 : Math.Clamp(AnimationCurrentTimePercent, 0, 100);
+        AnimationCurrentTimePercent = _animationPlaybackStartPercent;
+        _animationPlaybackStartedUtc = DateTime.UtcNow;
+        AnimationTimelinePlaying = true;
+        _animationPlaybackTimer!.Start();
+        AnimationPlaybackStatus = $"Playing timeline from {_animationPlaybackStartPercent}%.";
+    }
+
+    private void StopAnimationTimeline(bool completed)
+    {
+        _animationPlaybackTimer?.Stop();
+        if (!AnimationTimelinePlaying)
+        {
+            return;
+        }
+
+        AnimationTimelinePlaying = false;
+        AnimationPlaybackStatus = completed
+            ? "Timeline playback complete."
+            : $"Paused timeline at {AnimationCurrentTimePercent}%.";
+    }
+
+    private void EnsureAnimationPlaybackTimer()
+    {
+        if (_animationPlaybackTimer is not null)
+        {
+            return;
+        }
+
+        _animationPlaybackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Background, (_, _) => TickAnimationPlayback());
+    }
+
+    private void TickAnimationPlayback()
+    {
+        if (!AnimationTimelinePlaying)
+        {
+            _animationPlaybackTimer?.Stop();
+            return;
+        }
+
+        var duration = Math.Max(1, _animationPlaybackDurationMilliseconds);
+        var elapsed = Math.Max(0, (DateTime.UtcNow - _animationPlaybackStartedUtc).TotalMilliseconds);
+        var remainingPercent = Math.Max(0, 100 - _animationPlaybackStartPercent);
+        var cue = _animationPlaybackStartPercent + (int)Math.Round(elapsed / duration * remainingPercent);
+        AnimationCurrentTimePercent = Math.Clamp(cue, 0, 100);
+        if (AnimationCurrentTimePercent >= 100)
+        {
+            StopAnimationTimeline(completed: true);
+        }
+    }
+
+    private double ResolveAnimationPlaybackDurationMilliseconds()
+    {
+        if (TimeSpan.TryParse(AnimationDurationText, CultureInfo.InvariantCulture, out var duration) &&
+            duration.TotalMilliseconds > 0)
+        {
+            return duration.TotalMilliseconds;
+        }
+
+        return 300;
+    }
+
+    private bool CanApplyAnimationTimeline()
+    {
+        return SelectedAnimationTargetOption is not null &&
+               AnimationTimelineTracks.Count > 0 &&
+               AnimationTimelineTracks.Any(static track => track.KeyFrames.Count > 0);
+    }
+
+    private void ApplyAnimationTimeline()
+    {
+        if (SelectedAnimationTargetOption is not { } target)
+        {
+            return;
+        }
+
+        var timeline = CreateAnimationTimelineDefinition();
+        if (IsVisualAnimationTarget(target))
+        {
+            ApplyVisualAnimationTimeline(target, timeline, runPreview: false);
+            return;
+        }
+
+        if (IsDocumentStyleAnimationTarget(target))
+        {
+            ApplyDocumentStyleAnimationTimeline(target, timeline, runPreview: false);
+            return;
+        }
+
+        ApplyThemeAnimationTimeline(target, timeline, runPreview: false);
+    }
+
+    private void PreviewAnimationTimeline()
+    {
+        if (SelectedAnimationTargetOption is not { } target)
+        {
+            return;
+        }
+
+        var timeline = CreateAnimationTimelineDefinition();
+        if (IsVisualAnimationTarget(target))
+        {
+            ApplyVisualAnimationTimeline(target, timeline, runPreview: true);
+            return;
+        }
+
+        if (IsDocumentStyleAnimationTarget(target))
+        {
+            ApplyDocumentStyleAnimationTimeline(target, timeline, runPreview: true);
+            return;
+        }
+
+        ApplyThemeAnimationTimeline(target, timeline, runPreview: true);
+    }
+
+    private bool CanApplyAnimationFrameToTarget()
+    {
+        return SelectedAnimationTargetOption is not null &&
+               AnimationTimelineTracks.Any(static track => track.KeyFrames.Count > 0);
+    }
+
+    private void ApplyAnimationFrameToTarget()
+    {
+        if (SelectedAnimationTargetOption is not { } target)
+        {
+            return;
+        }
+
+        var setters = ResolveAnimationFrameSetters(AnimationCurrentTimePercent).ToArray();
+        if (setters.Length == 0)
+        {
+            AnimationPlaybackStatus = "No keyframe values exist at the current playhead.";
+            return;
+        }
+
+        if (IsVisualAnimationTarget(target))
+        {
+            if (!TryGetVisualEditingContext(out var xamlFile, out var selector))
+            {
+                return;
+            }
+
+            var requests = setters.Select(setter => new XamlMutationRequest(
+                XamlMutationKind.SetProperty,
+                selector,
+                setter.PropertyName,
+                setter.Value));
+            ApplyVisualEditorMutation(_visualMutationEngine.Batch(xamlFile.Text, requests));
+            AnimationPlaybackStatus = $"Applied playhead values at {AnimationCurrentTimePercent}% to selected element.";
+            return;
+        }
+
+        if (IsDocumentStyleAnimationTarget(target))
+        {
+            if (ActiveXamlFile is not { } styleFile)
+            {
+                return;
+            }
+
+            var styleText = styleFile.Text;
+            foreach (var setter in setters)
+            {
+                var edit = _animationTimelineEditor.SetDocumentStyleSetter(
+                    styleText,
+                    target.StyleIndex ?? -1,
+                    target.Selector,
+                    AnimationTargetSelector.Trim(),
+                    setter.PropertyName,
+                    setter.Value);
+                if (!edit.Changed)
+                {
+                    AnimationPlaybackStatus = edit.Error ?? "Could not apply playhead values.";
+                    return;
+                }
+
+                styleText = edit.Text;
+            }
+
+            ApplyVisualEditorMutation(new XamlMutationResult(
+                styleText,
+                _visualMutationEngine.Analyze(styleText),
+                Array.Empty<string>()));
+            AnimationPlaybackStatus = $"Applied playhead values at {AnimationCurrentTimePercent}% to {AnimationTargetSelector}.";
+            return;
+        }
+
+        if (ActiveProject is not { } project ||
+            SelectedControlTheme is not { } selectedTheme ||
+            project.FindFile(selectedTheme.FilePath) is not { } themeFile)
+        {
+            return;
+        }
+
+        var text = themeFile.Text;
+        foreach (var setter in setters)
+        {
+            var edit = ControlThemeEditor.SetSelectorSetter(
+                text,
+                selectedTheme.Key,
+                AnimationTargetSelector.Trim(),
+                setter.PropertyName,
+                setter.Value);
+            if (!edit.Changed)
+            {
+                AnimationPlaybackStatus = edit.Error ?? "Could not apply playhead values.";
+                return;
+            }
+
+            text = edit.Text;
+        }
+
+        themeFile.Text = text;
+        RefreshWorkspaceAfterThemeFileChanges(themeFile);
+        SelectThemeResource(selectedTheme.Key);
+        AnimationPlaybackStatus = $"Applied playhead values at {AnimationCurrentTimePercent}% to {AnimationTargetSelector}.";
+    }
+
+    private void ApplyVisualAnimationTimeline(
+        AnimationTargetOptionViewModel target,
+        AnimationTimelineDefinition timeline,
+        bool runPreview)
+    {
+        if (!TryGetVisualEditingContext(out var xamlFile, out var selector))
+        {
+            return;
+        }
+
+        var edit = _animationTimelineEditor.SetElementAnimation(xamlFile.Text, selector, timeline);
+        if (!edit.Changed)
+        {
+            AnimationPlaybackStatus = edit.Error ?? "Could not apply animation timeline.";
+            VisualEditorStatus = AnimationPlaybackStatus;
+            return;
+        }
+
+        ApplyVisualEditorMutation(new XamlMutationResult(
+            edit.Text,
+            _visualMutationEngine.Analyze(edit.Text),
+            Array.Empty<string>()));
+        AnimationPlaybackStatus = $"Applied animation timeline to {target.Title}.";
+        if (runPreview)
+        {
+            RunActiveDocument();
+        }
+    }
+
+    private void ApplyDocumentStyleAnimationTimeline(
+        AnimationTargetOptionViewModel target,
+        AnimationTimelineDefinition timeline,
+        bool runPreview)
+    {
+        if (ActiveXamlFile is not { } xamlFile)
+        {
+            return;
+        }
+
+        var edit = _animationTimelineEditor.SetDocumentStyleAnimation(
+            xamlFile.Text,
+            target.StyleIndex ?? -1,
+            target.Selector,
+            timeline);
+        if (!edit.Changed)
+        {
+            AnimationPlaybackStatus = edit.Error ?? "Could not apply animation timeline.";
+            VisualEditorStatus = AnimationPlaybackStatus;
+            return;
+        }
+
+        ApplyVisualEditorMutation(new XamlMutationResult(
+            edit.Text,
+            _visualMutationEngine.Analyze(edit.Text),
+            Array.Empty<string>()));
+        SelectedAnimationTargetOption = AnimationTargetOptions.FirstOrDefault(option =>
+            string.Equals(option.Id, target.Id, StringComparison.Ordinal));
+        AnimationPlaybackStatus = $"Applied animation timeline to {target.Title}.";
+        if (runPreview)
+        {
+            RunActiveDocument();
+        }
+    }
+
+    private void ApplyThemeAnimationTimeline(
+        AnimationTargetOptionViewModel target,
+        AnimationTimelineDefinition timeline,
+        bool runPreview)
+    {
+        if (ActiveProject is not { } project ||
+            SelectedControlTheme is not { } selectedTheme ||
+            project.FindFile(selectedTheme.FilePath) is not { } themeFile)
+        {
+            return;
+        }
+
+        var edit = _animationTimelineEditor.SetControlThemeAnimation(
+            themeFile.Text,
+            selectedTheme.Key,
+            timeline);
+        if (!edit.Changed)
+        {
+            AnimationPlaybackStatus = edit.Error ?? "Could not apply animation timeline.";
+            ControlThemeStatus = AnimationPlaybackStatus;
+            return;
+        }
+
+        themeFile.Text = edit.Text;
+        RefreshWorkspaceAfterThemeFileChanges(themeFile);
+        SelectThemeResource(selectedTheme.Key);
+        SelectedAnimationTargetOption = AnimationTargetOptions.FirstOrDefault(option =>
+            string.Equals(option.Id, target.Id, StringComparison.Ordinal));
+        AnimationPlaybackStatus = $"Applied animation timeline to {target.Title}.";
+        ControlThemeStatus = AnimationPlaybackStatus;
+        if (runPreview)
+        {
+            RunActiveDocument();
+        }
+    }
+
+    private AnimationTimelineDefinition CreateAnimationTimelineDefinition()
+    {
+        var selector = string.IsNullOrWhiteSpace(AnimationTargetSelector)
+            ? "^"
+            : AnimationTargetSelector.Trim();
+        return new AnimationTimelineDefinition(
+            selector,
+            string.IsNullOrWhiteSpace(AnimationDurationText) ? "0:0:0.3" : AnimationDurationText.Trim(),
+            AnimationDelayText.Trim(),
+            AnimationIterationCountText.Trim(),
+            string.IsNullOrWhiteSpace(AnimationPlaybackDirectionText) ? "Normal" : AnimationPlaybackDirectionText.Trim(),
+            string.IsNullOrWhiteSpace(AnimationFillModeText) ? "Both" : AnimationFillModeText.Trim(),
+            string.IsNullOrWhiteSpace(AnimationEasingText) ? "CubicEaseOut" : AnimationEasingText.Trim(),
+            AnimationTimelineTracks
+                .Where(static track => !string.IsNullOrWhiteSpace(track.PropertyName))
+                .Select(track =>
+                {
+                    track.TargetSelector = selector;
+                    return track.ToDefinition();
+                })
+                .ToArray());
+    }
+
+    private IEnumerable<(string PropertyName, string Value)> ResolveAnimationFrameSetters(int cuePercent)
+    {
+        var cue = Math.Clamp(cuePercent, 0, 100);
+        foreach (var track in AnimationTimelineTracks)
+        {
+            if (string.IsNullOrWhiteSpace(track.PropertyName))
+            {
+                continue;
+            }
+
+            var frames = track.KeyFrames
+                .OrderBy(static keyFrame => keyFrame.CuePercent)
+                .ToArray();
+            if (frames.Length == 0)
+            {
+                continue;
+            }
+
+            var first = frames[0];
+            if (cue <= first.CuePercent)
+            {
+                yield return (track.PropertyName, first.Value);
+                continue;
+            }
+
+            var last = frames[^1];
+            if (cue >= last.CuePercent)
+            {
+                yield return (track.PropertyName, last.Value);
+                continue;
+            }
+
+            var previous = frames.Last(keyFrame => keyFrame.CuePercent <= cue);
+            var next = frames.First(keyFrame => keyFrame.CuePercent >= cue);
+            if (ReferenceEquals(previous, next) ||
+                previous.CuePercent == next.CuePercent)
+            {
+                yield return (track.PropertyName, previous.Value);
+                continue;
+            }
+
+            var progress = (cue - previous.CuePercent) / (double)(next.CuePercent - previous.CuePercent);
+            var value = TryInterpolateAnimationValue(previous.Value, next.Value, progress, out var interpolated)
+                ? interpolated
+                : previous.Value;
+            yield return (track.PropertyName, value);
+        }
+    }
+
+    public bool IsVisualAnimationPlayheadPreviewActive()
+    {
+        return SelectedAnimationTargetOption is { } target &&
+               IsVisualAnimationTarget(target) &&
+               AnimationTimelineTracks.Count > 0;
+    }
+
+    public IReadOnlyList<(string PropertyName, string Value)> GetAnimationFrameSettersForCurrentTime()
+    {
+        return ResolveAnimationFrameSetters(AnimationCurrentTimePercent).ToArray();
+    }
+
+    private void RecordAnimationKeyFrameFromVisualEdit(
+        IEnumerable<XamlMutationRequest> requests,
+        bool applyTimeline)
+    {
+        RecordAnimationKeyFrameFromVisualEdit(
+            requests
+                .Where(static request => request.Kind == XamlMutationKind.SetProperty &&
+                                         !string.IsNullOrWhiteSpace(request.PropertyName))
+                .Select(static request => (request.PropertyName!, request.Value ?? string.Empty)),
+            applyTimeline);
+    }
+
+    private void RecordAnimationKeyFrameFromVisualEdit(
+        IEnumerable<(string PropertyName, string Value)> setters,
+        bool applyTimeline)
+    {
+        if (!AnimationRecordModeEnabled ||
+            _isRecordingAnimationKeyFrame ||
+            SelectedAnimationTargetOption is not { } target ||
+            !IsVisualAnimationTarget(target))
+        {
+            return;
+        }
+
+        var recorded = false;
+        try
+        {
+            _isRecordingAnimationKeyFrame = true;
+            foreach (var setter in setters)
+            {
+                if (string.IsNullOrWhiteSpace(setter.PropertyName))
+                {
+                    continue;
+                }
+
+                AddOrUpdateAnimationKeyFrame(
+                    setter.PropertyName,
+                    setter.Value,
+                    AnimationCurrentTimePercent,
+                    AnimationKeySplineText);
+                recorded = true;
+            }
+
+            if (recorded && applyTimeline)
+            {
+                ApplyAnimationTimeline();
+            }
+        }
+        finally
+        {
+            _isRecordingAnimationKeyFrame = false;
+        }
+    }
+
+    private string ResolveCurrentAnimationPropertyValue(string propertyName)
+    {
+        if (SelectedVisualEditorNode?.Element is { } element &&
+            TryGetVisualEditorAttributeValue(element, propertyName, out var value) &&
+            !string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        return propertyName switch
+        {
+            "Opacity" => "1",
+            "ScaleTransform.ScaleX" or "ScaleTransform.ScaleY" => "1",
+            "RotateTransform.Angle" => "0",
+            "TranslateTransform.X" or "TranslateTransform.Y" => "0",
+            _ => string.Empty
+        };
+    }
+
+    private static bool TryInterpolateAnimationValue(
+        string from,
+        string to,
+        double progress,
+        [NotNullWhen(true)] out string? value)
+    {
+        progress = Math.Clamp(progress, 0, 1);
+        if (TryParseInvariantDouble(from, out var fromDouble) &&
+            TryParseInvariantDouble(to, out var toDouble))
+        {
+            value = FormatDesignerDouble(fromDouble + (toDouble - fromDouble) * progress);
+            return true;
+        }
+
+        if (TryParseDesignerThickness(from, out var fromThickness) &&
+            TryParseDesignerThickness(to, out var toThickness))
+        {
+            value = FormatDesignerThickness(new DesignerThickness(
+                fromThickness.Left + (toThickness.Left - fromThickness.Left) * progress,
+                fromThickness.Top + (toThickness.Top - fromThickness.Top) * progress,
+                fromThickness.Right + (toThickness.Right - fromThickness.Right) * progress,
+                fromThickness.Bottom + (toThickness.Bottom - fromThickness.Bottom) * progress));
+            return true;
+        }
+
+        value = null;
+        return false;
+    }
+
+    private static bool TryParseInvariantDouble(string value, out double result)
+    {
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result) &&
+               !double.IsNaN(result) &&
+               !double.IsInfinity(result);
+    }
+
+    private static bool TryParseDesignerThickness(string value, out DesignerThickness thickness)
+    {
+        var values = value
+            .Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => double.TryParse(part, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : double.NaN)
+            .ToArray();
+
+        if (values.Any(static parsed => double.IsNaN(parsed) || double.IsInfinity(parsed)))
+        {
+            thickness = default;
+            return false;
+        }
+
+        thickness = values.Length switch
+        {
+            1 => new DesignerThickness(values[0], values[0], values[0], values[0]),
+            2 => new DesignerThickness(values[0], values[1], values[0], values[1]),
+            4 => new DesignerThickness(values[0], values[1], values[2], values[3]),
+            _ => default
+        };
+        return values.Length is 1 or 2 or 4;
+    }
+
+    private static void SortAnimationTrackKeyFrames(AnimationTimelineTrackViewModel track)
+    {
+        var sorted = track.KeyFrames
+            .OrderBy(static frame => frame.CuePercent)
+            .ToArray();
+        track.KeyFrames.Clear();
+        foreach (var frame in sorted)
+        {
+            track.KeyFrames.Add(frame);
+        }
+    }
+
+    private static int FindAvailableCue(
+        AnimationTimelineTrackViewModel track,
+        int preferredCue,
+        AnimationTimelineKeyFrameViewModel? ignoredFrame = null,
+        int preferredDirection = 0)
+    {
+        var used = track.KeyFrames
+            .Where(frame => !ReferenceEquals(frame, ignoredFrame))
+            .Select(static frame => frame.CuePercent)
+            .ToHashSet();
+        var cue = Math.Clamp(preferredCue, 0, 100);
+        if (!used.Contains(cue))
+        {
+            return cue;
+        }
+
+        for (var offset = 1; offset <= 100; offset++)
+        {
+            var next = cue + offset;
+            var previous = cue - offset;
+            if (preferredDirection < 0)
+            {
+                if (previous >= 0 && !used.Contains(previous))
+                {
+                    return previous;
+                }
+
+                if (next <= 100 && !used.Contains(next))
+                {
+                    return next;
+                }
+
+                continue;
+            }
+
+            if (next <= 100 && !used.Contains(next))
+            {
+                return next;
+            }
+
+            if (previous >= 0 && !used.Contains(previous))
+            {
+                return previous;
+            }
+        }
+
+        return cue;
+    }
+
+    private static bool IsVisualAnimationTarget(AnimationTargetOptionViewModel target)
+    {
+        return string.Equals(target.Scope, "Visual", StringComparison.Ordinal);
+    }
+
+    private static bool IsDocumentStyleAnimationTarget(AnimationTargetOptionViewModel target)
+    {
+        return string.Equals(target.Scope, "Style", StringComparison.Ordinal);
+    }
+
+    private static bool IsThemeAnimationTarget(AnimationTargetOptionViewModel target)
+    {
+        return !IsVisualAnimationTarget(target) &&
+               !IsDocumentStyleAnimationTarget(target);
+    }
+
     private bool CanCreateCustomControlTheme()
     {
         return ActiveProject is not null && TryResolveControlThemeTemplateForCreate(
@@ -3805,6 +5098,37 @@ public partial class MainViewModel
         (ExportSelectedControlThemeCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         (SaveControlThemeProjectCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         (LoadControlThemeProjectCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+        NotifyAnimationCommandsChanged();
+    }
+
+    private void NotifyAnimationCommandsChanged()
+    {
+        (AddAnimationTrackCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (AddAnimationKeyFrameCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (UpdateAnimationKeyFrameCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (CommitAnimationKeyFrameEditCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (RemoveAnimationKeyFrameCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (ApplyAnimationTimelineCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (PreviewAnimationTimelineCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (ApplyAnimationFrameToTargetCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (CaptureAnimationKeyFrameCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (DuplicateAnimationKeyFrameCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (SelectPreviousAnimationKeyFrameCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (SelectNextAnimationKeyFrameCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (NudgeAnimationKeyFrameLeftCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (NudgeAnimationKeyFrameRightCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (NudgeAnimationKeyFrameLeftLargeCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (NudgeAnimationKeyFrameRightLargeCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (SeekAnimationStartCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (SeekAnimationEndCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (PlayAnimationTimelineCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (StopAnimationTimelineCommand as RelayCommand)?.NotifyCanExecuteChanged();
+    }
+
+    private void NotifyAnimationTimelineChanged()
+    {
+        OnPropertyChanged(nameof(AnimationTimelineTracks));
+        NotifyAnimationCommandsChanged();
     }
 
     private bool TryGetVisualEditingContext(

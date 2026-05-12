@@ -23,8 +23,10 @@ public sealed class PlaygroundDockFactory : Factory
     private VisualStructureDockViewModel? _visualStructure;
     private VisualPropertiesDockViewModel? _visualProperties;
     private VisualToolboxDockViewModel? _visualToolbox;
+    private VisualAnimationsDockViewModel? _visualAnimations;
     private ControlThemesDockViewModel? _controlThemes;
     private PreviewDockViewModel? _preview;
+    private AnimationTimelineSheetDockViewModel? _animationTimelineSheet;
     private DiagnosticTreeDockViewModel? _combinedTree;
     private DiagnosticTreeDockViewModel? _logicalTree;
     private DiagnosticTreeDockViewModel? _visualTree;
@@ -45,8 +47,10 @@ public sealed class PlaygroundDockFactory : Factory
         _visualStructure = new VisualStructureDockViewModel(_shell);
         _visualProperties = new VisualPropertiesDockViewModel(_shell);
         _visualToolbox = new VisualToolboxDockViewModel(_shell);
+        _visualAnimations = new VisualAnimationsDockViewModel(_shell);
         _controlThemes = new ControlThemesDockViewModel(_shell);
         _preview = new PreviewDockViewModel(_shell);
+        _animationTimelineSheet = new AnimationTimelineSheetDockViewModel(_shell);
         _combinedTree = CreateDiagnosticsTreeTool("DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree);
         _logicalTree = CreateDiagnosticsTreeTool("DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree);
         _visualTree = CreateDiagnosticsTreeTool("DiagnosticsVisualTree", "Visual Tree", DevToolsViewKind.VisualTree);
@@ -75,6 +79,7 @@ public sealed class PlaygroundDockFactory : Factory
         bottomDock.Proportion = 0.28;
         bottomDock.CanCloseLastDockable = false;
         bottomDock.VisibleDockables = CreateList<IDockable>(
+            _animationTimelineSheet,
             _combinedTree,
             _logicalTree,
             _visualTree,
@@ -82,7 +87,7 @@ public sealed class PlaygroundDockFactory : Factory
             _resources,
             _assets,
             _errors);
-        bottomDock.ActiveDockable = Utilities.IsBrowser() ? _errors : _combinedTree;
+        bottomDock.ActiveDockable = Utilities.IsBrowser() ? _errors : _animationTimelineSheet;
         _bottomDock = bottomDock;
 
         var centerDock = CreateProportionalDock();
@@ -116,6 +121,7 @@ public sealed class PlaygroundDockFactory : Factory
             _visualStructure,
             _visualProperties,
             _visualToolbox,
+            _visualAnimations,
             _controlThemes);
         solutionDock.ActiveDockable = _solutionExplorer;
 
@@ -169,8 +175,10 @@ public sealed class PlaygroundDockFactory : Factory
             ["VisualStructure"] = () => _visualStructure,
             ["VisualProperties"] = () => _visualProperties,
             ["VisualToolbox"] = () => _visualToolbox,
+            ["VisualAnimations"] = () => _visualAnimations,
             ["ControlThemes"] = () => _controlThemes,
             ["Preview"] = () => _preview,
+            ["AnimationTimelineSheet"] = () => _animationTimelineSheet,
             ["DiagnosticsCombinedTree"] = () => _combinedTree,
             ["DiagnosticsLogicalTree"] = () => _logicalTree,
             ["DiagnosticsVisualTree"] = () => _visualTree,

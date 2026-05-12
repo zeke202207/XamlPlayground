@@ -19,6 +19,7 @@ public sealed class ControlThemesDockFactory : Factory
     private ControlThemeStatesDockViewModel? _states;
     private ControlThemeVariantsDockViewModel? _variants;
     private ControlThemePartsDockViewModel? _parts;
+    private ControlThemeAnimationsDockViewModel? _animations;
     private ControlThemeFluentDockViewModel? _fluent;
 
     public ControlThemesDockFactory(ControlThemesDockViewModel owner)
@@ -35,6 +36,7 @@ public sealed class ControlThemesDockFactory : Factory
         _states = new ControlThemeStatesDockViewModel(_owner.Shell);
         _variants = new ControlThemeVariantsDockViewModel(_owner.Shell);
         _parts = new ControlThemePartsDockViewModel(_owner.Shell);
+        _animations = new ControlThemeAnimationsDockViewModel(_owner.Shell);
         _fluent = new ControlThemeFluentDockViewModel(_owner.Shell);
 
         var toolDock = CreateToolDock();
@@ -50,6 +52,7 @@ public sealed class ControlThemesDockFactory : Factory
             _states,
             _variants,
             _parts,
+            _animations,
             _fluent);
         toolDock.ActiveDockable = _custom;
 
@@ -93,6 +96,7 @@ public sealed class ControlThemesDockFactory : Factory
             [_states!.Id!] = () => _states,
             [_variants!.Id!] = () => _variants,
             [_parts!.Id!] = () => _parts,
+            [_animations!.Id!] = () => _animations,
             [_fluent!.Id!] = () => _fluent
         };
 

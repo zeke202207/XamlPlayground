@@ -1,12 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using XamlPlayground.Controls;
@@ -35,11 +39,14 @@ public partial class PreviewView : UserControl
     private LiveResizeState? _liveResizeState;
     private MainViewModel? _sourceSelectionViewModel;
     private bool _previewStateApplyQueued;
+    private bool _animationPlayheadPreviewQueued;
     private string? _lastForcedThemePreviewState;
     private string? _lastForcedThemePreviewTargetType;
     private readonly IVisualTreeSnapshotService _sourceSelectionSnapshotService = new AvaloniaVisualTreeSnapshotService();
     private readonly IXamlMutationEngine _sourceSelectionMutationEngine = new XamlMutationEngine();
     private readonly XamlVisualTreeMapper _sourceSelectionMapper = new();
+    private readonly Dictionary<Control, Dictionary<string, object?>> _animationPreviewOriginalValues = new();
+    private readonly HashSet<TransformGroup> _animationPreviewLiveTransformGroups = new();
 
     public PreviewView()
     {
@@ -73,6 +80,8 @@ public partial class PreviewView : UserControl
             return;
         }
 
+        RestoreAnimationPlayheadPreview();
+
         if (_sourceSelectionViewModel is not null)
         {
             _sourceSelectionViewModel.PropertyChanged -= SourceSelectionViewModelOnPropertyChanged;
@@ -102,6 +111,17 @@ public partial class PreviewView : UserControl
             nameof(MainViewModel.Control))
         {
             QueueApplyForcedThemePreviewState();
+        }
+
+        if (e.PropertyName is nameof(MainViewModel.AnimationCurrentTimePercent) or
+            nameof(MainViewModel.SelectedAnimationTimelineTrack) or
+            nameof(MainViewModel.SelectedAnimationTimelineKeyFrame) or
+            nameof(MainViewModel.AnimationTimelineTracks) or
+            nameof(MainViewModel.SelectedAnimationTargetOption) or
+            nameof(MainViewModel.SelectedVisualEditorNode) or
+            nameof(MainViewModel.Control))
+        {
+            QueueApplyAnimationPlayheadPreview();
         }
     }
 
@@ -159,6 +179,45 @@ public partial class PreviewView : UserControl
 
         _lastForcedThemePreviewState = nextState;
         _lastForcedThemePreviewTargetType = targetType;
+    }
+
+    private void QueueApplyAnimationPlayheadPreview()
+    {
+        if (_animationPlayheadPreviewQueued)
+        {
+            return;
+        }
+
+        _animationPlayheadPreviewQueued = true;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                _animationPlayheadPreviewQueued = false;
+                ApplyAnimationPlayheadPreview();
+            },
+            DispatcherPriority.Loaded);
+    }
+
+    private void ApplyAnimationPlayheadPreview()
+    {
+        RestoreAnimationPlayheadPreview();
+
+        if (_sourceSelectionViewModel is not { Control: { } previewRoot } viewModel ||
+            !viewModel.IsVisualAnimationPlayheadPreviewActive())
+        {
+            return;
+        }
+
+        var control = FindCurrentSelectedPreviewControl(viewModel, previewRoot);
+        if (control is null)
+        {
+            return;
+        }
+
+        foreach (var setter in viewModel.GetAnimationFrameSettersForCurrentTime())
+        {
+            TryApplyLiveAnimationProperty(control, setter.PropertyName, setter.Value);
+        }
     }
 
     private static string? NormalizeThemePreviewState(string? state)
@@ -2403,6 +2462,432 @@ public partial class PreviewView : UserControl
                 yield return control;
             }
         }
+    }
+
+    private bool TryApplyLiveAnimationProperty(
+        Control control,
+        string propertyName,
+        string value)
+    {
+        if (string.IsNullOrWhiteSpace(propertyName))
+        {
+            return false;
+        }
+
+        switch (propertyName)
+        {
+            case "Canvas.Left" when TryParseDouble(value, out var left):
+                CaptureAnimationPreviewOriginalValue(control, "Canvas.Left", static target => Canvas.GetLeft(target));
+                Canvas.SetLeft(control, left);
+                return true;
+            case "Canvas.Top" when TryParseDouble(value, out var top):
+                CaptureAnimationPreviewOriginalValue(control, "Canvas.Top", static target => Canvas.GetTop(target));
+                Canvas.SetTop(control, top);
+                return true;
+            case "RenderTransform":
+                return TryApplyRenderTransform(control, value);
+            case "TranslateTransform.X" when TryParseDouble(value, out var translateX):
+                return ApplyTransformProperty<TranslateTransform>(
+                    control,
+                    propertyName,
+                    static transform => transform.X,
+                    static (transform, nextValue) => transform.X = nextValue,
+                    translateX);
+            case "TranslateTransform.Y" when TryParseDouble(value, out var translateY):
+                return ApplyTransformProperty<TranslateTransform>(
+                    control,
+                    propertyName,
+                    static transform => transform.Y,
+                    static (transform, nextValue) => transform.Y = nextValue,
+                    translateY);
+            case "ScaleTransform.ScaleX" when TryParseDouble(value, out var scaleX):
+                return ApplyTransformProperty<ScaleTransform>(
+                    control,
+                    propertyName,
+                    static transform => transform.ScaleX,
+                    static (transform, nextValue) => transform.ScaleX = nextValue,
+                    scaleX);
+            case "ScaleTransform.ScaleY" when TryParseDouble(value, out var scaleY):
+                return ApplyTransformProperty<ScaleTransform>(
+                    control,
+                    propertyName,
+                    static transform => transform.ScaleY,
+                    static (transform, nextValue) => transform.ScaleY = nextValue,
+                    scaleY);
+            case "RotateTransform.Angle" when TryParseDouble(value, out var angle):
+                return ApplyTransformProperty<RotateTransform>(
+                    control,
+                    propertyName,
+                    static transform => transform.Angle,
+                    static (transform, nextValue) => transform.Angle = nextValue,
+                    angle);
+        }
+
+        return TrySetClrProperty(control, propertyName, value);
+    }
+
+    private void CaptureAnimationPreviewOriginalValue(
+        Control control,
+        string propertyName,
+        Func<Control, object?> valueFactory)
+    {
+        if (!_animationPreviewOriginalValues.TryGetValue(control, out var values))
+        {
+            values = new Dictionary<string, object?>(StringComparer.Ordinal);
+            _animationPreviewOriginalValues[control] = values;
+        }
+
+        if (!values.ContainsKey(propertyName))
+        {
+            values[propertyName] = valueFactory(control);
+        }
+    }
+
+    private void RestoreAnimationPlayheadPreview()
+    {
+        foreach (var item in _animationPreviewOriginalValues.ToArray())
+        {
+            foreach (var value in item.Value)
+            {
+                RestoreLiveAnimationProperty(item.Key, value.Key, value.Value);
+            }
+        }
+
+        _animationPreviewOriginalValues.Clear();
+        _animationPreviewLiveTransformGroups.Clear();
+    }
+
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2075",
+        Justification = "The visual animation preview intentionally reflects public control properties in designer-only tooling.")]
+    private static void RestoreLiveAnimationProperty(
+        Control control,
+        string propertyName,
+        object? value)
+    {
+        switch (propertyName)
+        {
+            case "Canvas.Left" when value is double left:
+                Canvas.SetLeft(control, left);
+                return;
+            case "Canvas.Top" when value is double top:
+                Canvas.SetTop(control, top);
+                return;
+            case "RenderTransform":
+                control.RenderTransform = value as ITransform;
+                return;
+            case "TranslateTransform.X" when value is double translateX &&
+                                             TryFindTransform<TranslateTransform>(control, out var translateTransformX):
+                translateTransformX.X = translateX;
+                return;
+            case "TranslateTransform.Y" when value is double translateY &&
+                                             TryFindTransform<TranslateTransform>(control, out var translateTransformY):
+                translateTransformY.Y = translateY;
+                return;
+            case "ScaleTransform.ScaleX" when value is double scaleX &&
+                                             TryFindTransform<ScaleTransform>(control, out var scaleTransformX):
+                scaleTransformX.ScaleX = scaleX;
+                return;
+            case "ScaleTransform.ScaleY" when value is double scaleY &&
+                                             TryFindTransform<ScaleTransform>(control, out var scaleTransformY):
+                scaleTransformY.ScaleY = scaleY;
+                return;
+            case "RotateTransform.Angle" when value is double angle &&
+                                               TryFindTransform<RotateTransform>(control, out var rotateTransform):
+                rotateTransform.Angle = angle;
+                return;
+        }
+
+        var property = control.GetType().GetProperty(
+            propertyName,
+            BindingFlags.Instance | BindingFlags.Public);
+        if (property is null ||
+            !property.CanWrite ||
+            value is not null && !property.PropertyType.IsInstanceOfType(value))
+        {
+            return;
+        }
+
+        try
+        {
+            property.SetValue(control, value);
+        }
+        catch
+        {
+            // Best-effort designer preview restoration; source XAML remains authoritative.
+        }
+    }
+
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2075",
+        Justification = "The visual animation preview intentionally reflects public control properties in designer-only tooling.")]
+    private bool TrySetClrProperty(
+        Control control,
+        string propertyName,
+        string value)
+    {
+        var property = control.GetType().GetProperty(
+            propertyName,
+            BindingFlags.Instance | BindingFlags.Public);
+        if (property is null || !property.CanWrite)
+        {
+            return false;
+        }
+
+        if (!TryConvertAnimationValue(value, property.PropertyType, out var converted))
+        {
+            return false;
+        }
+
+        try
+        {
+            CaptureAnimationPreviewOriginalValue(control, propertyName, target => property.GetValue(target));
+            property.SetValue(control, converted);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryConvertAnimationValue(
+        string value,
+        Type targetType,
+        out object? converted)
+    {
+        var valueType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        converted = null;
+
+        if (valueType == typeof(string))
+        {
+            converted = value;
+            return true;
+        }
+
+        if (valueType == typeof(double) && TryParseDouble(value, out var doubleValue))
+        {
+            converted = doubleValue;
+            return true;
+        }
+
+        if (valueType == typeof(float) && TryParseDouble(value, out var floatValue))
+        {
+            converted = (float)floatValue;
+            return true;
+        }
+
+        if (valueType == typeof(int) &&
+            int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intValue))
+        {
+            converted = intValue;
+            return true;
+        }
+
+        if (valueType == typeof(bool) &&
+            bool.TryParse(value, out var boolValue))
+        {
+            converted = boolValue;
+            return true;
+        }
+
+        if (valueType == typeof(Thickness) &&
+            TryParseThickness(value, out var thickness))
+        {
+            converted = thickness;
+            return true;
+        }
+
+        if (valueType == typeof(CornerRadius))
+        {
+            try
+            {
+                converted = CornerRadius.Parse(value);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        if (typeof(IBrush).IsAssignableFrom(valueType))
+        {
+            try
+            {
+                converted = Brush.Parse(value);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        if (valueType == typeof(Color) &&
+            Color.TryParse(value, out var color))
+        {
+            converted = color;
+            return true;
+        }
+
+        if (typeof(ITransform).IsAssignableFrom(valueType))
+        {
+            try
+            {
+                converted = Transform.Parse(value);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        if (valueType.IsEnum &&
+            Enum.TryParse(valueType, value, ignoreCase: true, out var enumValue))
+        {
+            converted = enumValue;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryApplyRenderTransform(Control control, string value)
+    {
+        try
+        {
+            CaptureAnimationPreviewOriginalValue(control, "RenderTransform", static target => target.RenderTransform);
+            control.RenderTransform = Transform.Parse(value);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool ApplyTransformProperty<TTransform>(
+        Control control,
+        string propertyName,
+        Func<TTransform, double> getValue,
+        Action<TTransform, double> setValue,
+        double value)
+        where TTransform : Transform, new()
+    {
+        var transform = EnsureTransform<TTransform>(control, out var restoreRenderTransform);
+        if (!restoreRenderTransform)
+        {
+            CaptureAnimationPreviewOriginalValue(control, propertyName, _ => getValue(transform));
+        }
+
+        setValue(transform, value);
+        return true;
+    }
+
+    private TTransform EnsureTransform<TTransform>(
+        Control control,
+        out bool restoreRenderTransform)
+        where TTransform : Transform, new()
+    {
+        restoreRenderTransform = false;
+        if (control.RenderTransform is TTransform transform)
+        {
+            return transform;
+        }
+
+        if (control.RenderTransform is TransformGroup existingGroup)
+        {
+            if (_animationPreviewLiveTransformGroups.Contains(existingGroup))
+            {
+                var existingLiveTransform = existingGroup.Children.OfType<TTransform>().FirstOrDefault();
+                if (existingLiveTransform is not null)
+                {
+                    restoreRenderTransform = true;
+                    return existingLiveTransform;
+                }
+
+                transform = new TTransform();
+                existingGroup.Children.Add(transform);
+                restoreRenderTransform = true;
+                return transform;
+            }
+
+            var existingChildTransform = existingGroup.Children.OfType<TTransform>().FirstOrDefault();
+            if (existingChildTransform is not null)
+            {
+                return existingChildTransform;
+            }
+        }
+
+        CaptureAnimationPreviewOriginalValue(control, "RenderTransform", static target => target.RenderTransform);
+        var group = new TransformGroup();
+        if (control.RenderTransform is Transform existingTransform)
+        {
+            group.Children.Add(existingTransform);
+        }
+
+        transform = new TTransform();
+        group.Children.Add(transform);
+        control.RenderTransform = group;
+        _animationPreviewLiveTransformGroups.Add(group);
+        restoreRenderTransform = true;
+        return transform;
+    }
+
+    private static bool TryFindTransform<TTransform>(
+        Control control,
+        [NotNullWhen(true)] out TTransform? transform)
+        where TTransform : Transform
+    {
+        if (control.RenderTransform is TTransform direct)
+        {
+            transform = direct;
+            return true;
+        }
+
+        if (control.RenderTransform is TransformGroup group &&
+            group.Children.OfType<TTransform>().FirstOrDefault() is { } child)
+        {
+            transform = child;
+            return true;
+        }
+
+        transform = null;
+        return false;
+    }
+
+    private static bool TryParseDouble(string value, out double result)
+    {
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result) &&
+               !double.IsNaN(result) &&
+               !double.IsInfinity(result);
+    }
+
+    private static bool TryParseThickness(string value, out Thickness thickness)
+    {
+        var values = value
+            .Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => TryParseDouble(part, out var parsed) ? parsed : double.NaN)
+            .ToArray();
+
+        if (values.Any(static parsed => double.IsNaN(parsed) || double.IsInfinity(parsed)))
+        {
+            thickness = default;
+            return false;
+        }
+
+        thickness = values.Length switch
+        {
+            1 => new Thickness(values[0]),
+            2 => new Thickness(values[0], values[1]),
+            4 => new Thickness(values[0], values[1], values[2], values[3]),
+            _ => default
+        };
+        return values.Length is 1 or 2 or 4;
     }
 
     private static void SetPseudoClass(Control control, string pseudoClass, bool active)

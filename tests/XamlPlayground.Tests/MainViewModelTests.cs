@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Reflection;
 using Avalonia;
 using Avalonia.Diagnostics;
@@ -14,11 +15,13 @@ using Dock.Avalonia.Themes.Fluent;
 using Dock.Model.Controls;
 using Dock.Model.Core;
 using Microsoft.CodeAnalysis;
+using XamlPlayground.Controls;
 using XamlPlayground.Views.Docking;
 using XamlPlayground.Services;
 using XamlPlayground.Services.Theming;
 using XamlPlayground.ViewModels;
 using XamlPlayground.ViewModels.Docking;
+using XamlPlayground.ViewModels.VisualEditing;
 using XamlPlayground.ViewModels.Workspace;
 using XamlPlayground.Workspace;
 
@@ -214,6 +217,8 @@ public sealed class MainViewModelTests
         var visualStructure = Assert.Single(dockables.OfType<VisualStructureDockViewModel>());
         var visualProperties = Assert.Single(dockables.OfType<VisualPropertiesDockViewModel>());
         var visualToolbox = Assert.Single(dockables.OfType<VisualToolboxDockViewModel>());
+        var visualAnimations = Assert.Single(dockables.OfType<VisualAnimationsDockViewModel>());
+        var animationTimelineSheet = Assert.Single(dockables.OfType<AnimationTimelineSheetDockViewModel>());
         var controlThemes = Assert.Single(dockables.OfType<ControlThemesDockViewModel>());
         var preview = Assert.Single(dockables.OfType<PreviewDockViewModel>());
         var diagnosticTreeTools = dockables.OfType<DiagnosticTreeDockViewModel>().ToList();
@@ -236,6 +241,8 @@ public sealed class MainViewModelTests
         Assert.Same(viewModel, visualStructure.Shell);
         Assert.Same(viewModel, visualProperties.Shell);
         Assert.Same(viewModel, visualToolbox.Shell);
+        Assert.Same(viewModel, visualAnimations.Shell);
+        Assert.Same(viewModel, animationTimelineSheet.Shell);
         Assert.Same(viewModel, controlThemes.Shell);
         Assert.Same(viewModel, preview.Shell);
         Assert.All(diagnosticTreeTools, diagnosticTool => Assert.Same(viewModel, diagnosticTool.Shell));
@@ -261,6 +268,8 @@ public sealed class MainViewModelTests
         Assert.Same(visualStructure, contextLocator["VisualStructure"]());
         Assert.Same(visualProperties, contextLocator["VisualProperties"]());
         Assert.Same(visualToolbox, contextLocator["VisualToolbox"]());
+        Assert.Same(visualAnimations, contextLocator["VisualAnimations"]());
+        Assert.Same(animationTimelineSheet, contextLocator["AnimationTimelineSheet"]());
         Assert.Same(controlThemes, contextLocator["ControlThemes"]());
         Assert.Same(preview, contextLocator["Preview"]());
         Assert.Same(diagnosticTreeTools[0], contextLocator["DiagnosticsCombinedTree"]());
@@ -270,6 +279,300 @@ public sealed class MainViewModelTests
         Assert.Same(diagnosticTools[1], contextLocator["DiagnosticsResources"]());
         Assert.Same(diagnosticTools[2], contextLocator["DiagnosticsAssets"]());
         Assert.Same(errors, contextLocator["Errors"]());
+    }
+
+    [Fact]
+    public void AnimationTimelineSelection_ClearsStaleKeyFrameState()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var track = new AnimationTimelineTrackViewModel(
+            "^",
+            "Opacity",
+            new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+            {
+                new(0, "0", string.Empty),
+                new(100, "1", string.Empty)
+            });
+
+        viewModel.AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel> { track };
+        viewModel.SelectedAnimationTimelineTrack = track;
+
+        Assert.NotNull(viewModel.SelectedAnimationTimelineKeyFrame);
+
+        viewModel.SelectedAnimationTimelineTrack = null;
+
+        Assert.Null(viewModel.SelectedAnimationTimelineKeyFrame);
+
+        viewModel.AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel> { track };
+        viewModel.SelectedAnimationTargetOption = null;
+
+        Assert.Empty(viewModel.AnimationTimelineTracks);
+        Assert.Equal("Select a visual element or control theme to edit animations.", viewModel.AnimationPlaybackStatus);
+    }
+
+    [Fact]
+    public void AnimationTimelineKeyFrameCommands_EditSelectedTrack()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var track = new AnimationTimelineTrackViewModel(
+            "^",
+            "Opacity",
+            new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+            {
+                new(0, "0", string.Empty),
+                new(100, "1", string.Empty)
+            });
+
+        viewModel.AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel> { track };
+        viewModel.SelectedAnimationTimelineTrack = track;
+        viewModel.SelectedAnimationTimelineKeyFrame = track.KeyFrames[0];
+
+        Assert.True(viewModel.DuplicateAnimationKeyFrameCommand.CanExecute(null));
+        viewModel.DuplicateAnimationKeyFrameCommand.Execute(null);
+
+        var duplicate = Assert.Single(track.KeyFrames, frame => frame.CuePercent == 10);
+        Assert.Same(duplicate, viewModel.SelectedAnimationTimelineKeyFrame);
+        Assert.Equal("0", duplicate.Value);
+
+        Assert.True(viewModel.SelectNextAnimationKeyFrameCommand.CanExecute(null));
+        viewModel.SelectNextAnimationKeyFrameCommand.Execute(null);
+        Assert.Equal(100, viewModel.SelectedAnimationTimelineKeyFrame?.CuePercent);
+
+        viewModel.AnimationCuePercent = 25;
+        viewModel.AnimationKeyFrameValue = "0.25";
+        Assert.True(viewModel.UpdateAnimationKeyFrameCommand.CanExecute(null));
+        viewModel.UpdateAnimationKeyFrameCommand.Execute(null);
+
+        Assert.Contains(track.KeyFrames, frame => frame.CuePercent == 25 && frame.Value == "0.25");
+        Assert.DoesNotContain(track.KeyFrames, frame => frame.CuePercent == 100);
+    }
+
+    [Fact]
+    public void AnimationTimelineKeyFrameUpdate_AvoidsDuplicateCuePositions()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var track = new AnimationTimelineTrackViewModel(
+            "^",
+            "Opacity",
+            new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+            {
+                new(0, "0", string.Empty),
+                new(100, "1", string.Empty)
+            });
+
+        viewModel.AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel> { track };
+        viewModel.SelectedAnimationTimelineTrack = track;
+        viewModel.SelectedAnimationTimelineKeyFrame = track.KeyFrames[0];
+        viewModel.AnimationCuePercent = 100;
+        viewModel.AnimationKeyFrameValue = "0.9";
+
+        viewModel.UpdateAnimationKeyFrameCommand.Execute(null);
+
+        Assert.Equal(2, track.KeyFrames.Select(static frame => frame.CuePercent).Distinct().Count());
+        Assert.DoesNotContain(
+            track.KeyFrames.GroupBy(static frame => frame.CuePercent),
+            group => group.Count() > 1);
+        Assert.Equal(99, viewModel.SelectedAnimationTimelineKeyFrame?.CuePercent);
+        Assert.Equal("0.9", viewModel.SelectedAnimationTimelineKeyFrame?.Value);
+    }
+
+    [Fact]
+    public void AnimationTimelineKeyFrameCommit_UsesDraggedCueAndAvoidsDuplicatePositions()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var track = new AnimationTimelineTrackViewModel(
+            "^",
+            "Opacity",
+            new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+            {
+                new(0, "0", string.Empty),
+                new(50, "0.5", string.Empty)
+            });
+
+        viewModel.AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel> { track };
+        viewModel.SelectedAnimationTimelineTrack = track;
+        viewModel.SelectedAnimationTimelineKeyFrame = track.KeyFrames[0];
+        track.KeyFrames[0].CuePercent = 50;
+        track.KeyFrames[0].Value = "0.25";
+
+        viewModel.CommitAnimationKeyFrameEditCommand.Execute(null);
+
+        Assert.Equal(new[] { 50, 51 }, track.KeyFrames.Select(static frame => frame.CuePercent));
+        Assert.Equal(51, viewModel.SelectedAnimationTimelineKeyFrame?.CuePercent);
+        Assert.Equal(51, viewModel.AnimationCuePercent);
+        Assert.Equal("0.25", viewModel.SelectedAnimationTimelineKeyFrame?.Value);
+    }
+
+    [Fact]
+    public void AnimationTimelineKeyboardCommands_NudgeSeekAndPlayback()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var track = new AnimationTimelineTrackViewModel(
+            "^",
+            "Opacity",
+            new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+            {
+                new(0, "0", string.Empty),
+                new(50, "0.5", string.Empty),
+                new(100, "1", string.Empty)
+            });
+
+        viewModel.SelectedAnimationTargetOption = new AnimationTargetOptionViewModel("visual-selection", "Selected Button", "Visual", "^");
+        viewModel.AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel> { track };
+        viewModel.SelectedAnimationTimelineTrack = track;
+        viewModel.SelectedAnimationTimelineKeyFrame = track.KeyFrames[1];
+
+        Assert.True(viewModel.NudgeAnimationKeyFrameRightCommand.CanExecute(null));
+        viewModel.NudgeAnimationKeyFrameRightCommand.Execute(null);
+        Assert.Equal(51, viewModel.SelectedAnimationTimelineKeyFrame?.CuePercent);
+
+        viewModel.NudgeAnimationKeyFrameLeftLargeCommand.Execute(null);
+        Assert.Equal(41, viewModel.SelectedAnimationTimelineKeyFrame?.CuePercent);
+        Assert.Equal("41%", viewModel.AnimationCurrentTimeText);
+
+        Assert.True(viewModel.SeekAnimationEndCommand.CanExecute(null));
+        viewModel.SeekAnimationEndCommand.Execute(null);
+        Assert.Equal(100, viewModel.AnimationCurrentTimePercent);
+
+        Assert.True(viewModel.PlayAnimationTimelineCommand.CanExecute(null));
+        viewModel.AnimationDurationText = "0:0:1";
+        viewModel.PlayAnimationTimelineCommand.Execute(null);
+        Assert.True(viewModel.AnimationTimelinePlaying);
+        Assert.Equal(0, viewModel.AnimationCurrentTimePercent);
+        Assert.Equal("Pause", viewModel.AnimationPlaybackButtonText);
+
+        Assert.True(viewModel.StopAnimationTimelineCommand.CanExecute(null));
+        viewModel.StopAnimationTimelineCommand.Execute(null);
+        Assert.False(viewModel.AnimationTimelinePlaying);
+        Assert.Equal("Play", viewModel.AnimationPlaybackButtonText);
+    }
+
+    [Fact]
+    public void AnimationTimelineFrameSetters_InterpolateEditableValues()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel>
+        {
+            new(
+                "^",
+                "Opacity",
+                new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+                {
+                    new(0, "0", string.Empty),
+                    new(100, "1", string.Empty)
+                }),
+            new(
+                "^",
+                "Margin",
+                new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+                {
+                    new(0, "0,0,0,0", string.Empty),
+                    new(100, "10,20,30,40", string.Empty)
+                })
+        };
+        viewModel.AnimationCurrentTimePercent = 50;
+
+        var setters = viewModel.GetAnimationFrameSettersForCurrentTime();
+
+        Assert.Contains(setters, setter => setter.PropertyName == "Opacity" && setter.Value == "0.5");
+        Assert.Contains(setters, setter => setter.PropertyName == "Margin" && setter.Value == "5,10,15,20");
+    }
+
+    [Fact]
+    public void AnimationTimeline_CanEditDocumentStyleTarget()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        Assert.NotNull(viewModel.ActiveXamlFile);
+        var xamlFile = viewModel.ActiveXamlFile;
+        xamlFile.Text = """
+                        <Grid xmlns="https://github.com/avaloniaui">
+                          <Grid.Styles>
+                            <Style Selector="Button.primary" />
+                          </Grid.Styles>
+                          <Button Classes="primary" />
+                        </Grid>
+                        """;
+
+        viewModel.RefreshVisualEditorCommand.Execute(null);
+        var styleTarget = Assert.Single(
+            viewModel.AnimationTargetOptions,
+            option => option.Scope == "Style" && option.Selector == "Button.primary");
+        viewModel.SelectedAnimationTargetOption = styleTarget;
+        viewModel.AnimationPropertyName = "Opacity";
+        viewModel.AnimationKeyFrameValue = "1";
+
+        viewModel.AddAnimationTrackCommand.Execute(null);
+        viewModel.ApplyAnimationTimelineCommand.Execute(null);
+
+        Assert.Contains("<Style Selector=\"Button.primary\">", xamlFile.Text, StringComparison.Ordinal);
+        Assert.Contains("<Style.Animations>", xamlFile.Text, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Opacity\" Value=\"1\" />", xamlFile.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnimationTimelineTrack_KeySummaryTracksKeyFrameEdits()
+    {
+        var keyFrame = new AnimationTimelineKeyFrameViewModel(0, "0", string.Empty);
+        var track = new AnimationTimelineTrackViewModel(
+            "^",
+            "Opacity",
+            new ObservableCollection<AnimationTimelineKeyFrameViewModel> { keyFrame });
+        var changed = false;
+        track.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(AnimationTimelineTrackViewModel.KeySummary))
+            {
+                changed = true;
+            }
+        };
+
+        keyFrame.Value = "0.5";
+
+        Assert.True(changed);
+        Assert.Equal("0% = 0.5", track.KeySummary);
+
+        changed = false;
+        track.KeyFrames.Clear();
+        Assert.True(changed);
+
+        changed = false;
+        keyFrame.Value = "1";
+        Assert.False(changed);
+    }
+
+    [Fact]
+    public void AnimationTimelineTrack_ToDefinitionDeduplicatesCueCollisions()
+    {
+        var track = new AnimationTimelineTrackViewModel(
+            "^",
+            "Opacity",
+            new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+            {
+                new(0, "0", string.Empty),
+                new(50, "0.4", string.Empty),
+                new(50, "0.5", string.Empty),
+                new(100, "1", string.Empty)
+            });
+
+        var definition = track.ToDefinition();
+
+        Assert.Equal(new[] { 0, 50, 100 }, definition.KeyFrames.Select(static frame => frame.CuePercent));
+        Assert.Equal("0.5", Assert.Single(definition.KeyFrames, frame => frame.CuePercent == 50).Value);
+        Assert.Equal(420, track.KeyFrames[^1].TimelineLeft);
     }
 
     [Fact]
@@ -308,6 +611,120 @@ public sealed class MainViewModelTests
                 Assert.Contains(
                     view.GetVisualDescendants().OfType<ListBox>(),
                     listBox => ReferenceEquals(listBox.ItemsSource, viewModel.FilteredControlThemes));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void AnimationTimelineDockView_RendersForVisualAndThemeContexts()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            EnsureDockTestApplicationResources();
+
+            var viewModel = new MainViewModel(null);
+            var visualView = new AnimationTimelineDockView
+            {
+                Width = 360,
+                Height = 640,
+                DataContext = new VisualAnimationsDockViewModel(viewModel)
+            };
+            var themeView = new AnimationTimelineDockView
+            {
+                Width = 360,
+                Height = 640,
+                DataContext = new ControlThemeAnimationsDockViewModel(viewModel)
+            };
+            var window = new Window
+            {
+                Width = 760,
+                Height = 700,
+                Content = new StackPanel
+                {
+                    Orientation = Avalonia.Layout.Orientation.Horizontal,
+                    Children =
+                    {
+                        visualView,
+                        themeView
+                    }
+                }
+            };
+
+            try
+            {
+                window.Show();
+                PumpLayout(window);
+
+                Assert.NotEmpty(visualView.GetVisualDescendants().OfType<Slider>());
+                Assert.NotEmpty(themeView.GetVisualDescendants().OfType<Slider>());
+                Assert.Contains(
+                    visualView.GetVisualDescendants().OfType<ComboBox>(),
+                    comboBox => ReferenceEquals(comboBox.ItemsSource, viewModel.AnimationTargetOptions));
+                Assert.Contains(
+                    themeView.GetVisualDescendants().OfType<ComboBox>(),
+                    comboBox => ReferenceEquals(comboBox.ItemsSource, viewModel.AnimationTargetOptions));
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void AnimationTimelineSheetDockView_RendersClassicalTimelineTool()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            EnsureDockTestApplicationResources();
+
+            var viewModel = new MainViewModel(null);
+            var track = new AnimationTimelineTrackViewModel(
+                "^",
+                "Opacity",
+                new ObservableCollection<AnimationTimelineKeyFrameViewModel>
+                {
+                    new(0, "0", string.Empty),
+                    new(60, "1", string.Empty)
+                });
+            viewModel.AnimationTimelineTracks = new ObservableCollection<AnimationTimelineTrackViewModel> { track };
+            viewModel.SelectedAnimationTimelineTrack = track;
+            viewModel.SelectedAnimationTimelineKeyFrame = track.KeyFrames[1];
+
+            var view = new AnimationTimelineSheetDockView
+            {
+                Width = 900,
+                Height = 340,
+                DataContext = new AnimationTimelineSheetDockViewModel(viewModel)
+            };
+            var window = new Window
+            {
+                Width = 940,
+                Height = 380,
+                Content = view
+            };
+
+            try
+            {
+                window.Show();
+                PumpLayout(window);
+
+                var timeline = Assert.Single(view.GetVisualDescendants().OfType<AnimationKeyFrameTimelineControl>());
+                Assert.Same(viewModel.AnimationTimelineTracks, timeline.Tracks);
+                Assert.Same(track, timeline.SelectedTrack);
+                var preview = Assert.Single(view.GetVisualDescendants().OfType<AnimationMockPreviewControl>());
+                Assert.Same(viewModel.AnimationTimelineTracks, preview.Tracks);
+                Assert.Contains(
+                    view.GetVisualDescendants().OfType<ComboBox>(),
+                    comboBox => ReferenceEquals(comboBox.ItemsSource, viewModel.AnimationTargetOptions));
             }
             finally
             {
@@ -1495,6 +1912,7 @@ public sealed class MainViewModelTests
             tool => AssertControlThemeTool<ControlThemeStatesDockViewModel>(tool, "ControlThemeStates", "States", controlThemes.Shell),
             tool => AssertControlThemeTool<ControlThemeVariantsDockViewModel>(tool, "ControlThemeVariants", "Variants", controlThemes.Shell),
             tool => AssertControlThemeTool<ControlThemePartsDockViewModel>(tool, "ControlThemeParts", "Parts", controlThemes.Shell),
+            tool => AssertControlThemeTool<ControlThemeAnimationsDockViewModel>(tool, "ControlThemeAnimations", "Animations", controlThemes.Shell),
             tool => AssertControlThemeTool<ControlThemeFluentDockViewModel>(tool, "ControlThemeFluent", "Fluent", controlThemes.Shell));
 
         var factory = Assert.IsType<ControlThemesDockFactory>(controlThemes.DockFactory);
@@ -1506,7 +1924,8 @@ public sealed class MainViewModelTests
         Assert.Same(tools[4], factory.ContextLocator["ControlThemeStates"]());
         Assert.Same(tools[5], factory.ContextLocator["ControlThemeVariants"]());
         Assert.Same(tools[6], factory.ContextLocator["ControlThemeParts"]());
-        Assert.Same(tools[7], factory.ContextLocator["ControlThemeFluent"]());
+        Assert.Same(tools[7], factory.ContextLocator["ControlThemeAnimations"]());
+        Assert.Same(tools[8], factory.ContextLocator["ControlThemeFluent"]());
     }
 
     private static void AssertControlThemeTool<TTool>(
