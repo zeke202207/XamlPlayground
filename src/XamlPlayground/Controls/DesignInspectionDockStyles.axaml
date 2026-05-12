@@ -1,0 +1,84 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style Selector="Border.design-header">
+    <Setter Property="Background" Value="{DynamicResource DockSurfaceHeaderBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="Padding" Value="8,7" />
+  </Style>
+
+  <Style Selector="Border.design-status">
+    <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+    <Setter Property="Padding" Value="8,5" />
+  </Style>
+
+  <Style Selector="Border.design-panel">
+    <Setter Property="Background" Value="{DynamicResource DockSurfaceEditorBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="8" />
+  </Style>
+
+  <Style Selector="TextBlock.design-title">
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <Style Selector="TextBlock.design-caption">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Opacity" Value="0.68" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <Style Selector="TextBlock.design-label">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Opacity" Value="0.74" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="TextBox.design-field">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Padding" Value="7,3" />
+  </Style>
+
+  <Style Selector="ComboBox.design-field">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Padding" Value="7,3" />
+  </Style>
+
+  <Style Selector="Button.design-tool">
+    <Setter Property="Width" Value="30" />
+    <Setter Property="Height" Value="30" />
+    <Setter Property="MinWidth" Value="30" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.design-action">
+    <Setter Property="Height" Value="30" />
+    <Setter Property="MinWidth" Value="78" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+
+  <Style Selector="DataGrid.design-grid">
+    <Setter Property="AutoGenerateColumns" Value="False" />
+    <Setter Property="CanUserResizeColumns" Value="True" />
+    <Setter Property="GridLinesVisibility" Value="Horizontal" />
+    <Setter Property="HeadersVisibility" Value="Column" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="RowBackground" Value="Transparent" />
+    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+    <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+  </Style>
+
+  <Style Selector="ListBox.design-list">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+</Styles>
