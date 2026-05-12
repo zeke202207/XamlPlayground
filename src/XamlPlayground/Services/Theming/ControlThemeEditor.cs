@@ -89,6 +89,7 @@ public static class ControlThemeEditor
         }
         else
         {
+            setter.RemoveNodes();
             setter.SetAttributeValue("Value", value ?? string.Empty);
         }
 

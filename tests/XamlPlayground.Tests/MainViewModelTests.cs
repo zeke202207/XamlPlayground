@@ -660,6 +660,61 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ProjectResources_LoadDependenciesBeforeConsumers()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            const string themeXaml = """
+                                     <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                       <Design.PreviewWith>
+                                         <Button Theme="{StaticResource MyButtonTheme}" />
+                                       </Design.PreviewWith>
+                                       <ControlTheme x:Key="MyButtonTheme" TargetType="Button">
+                                         <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+                                       </ControlTheme>
+                                     </ResourceDictionary>
+                                     """;
+            const string colorsXaml = """
+                                      <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                        <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+                                      </ResourceDictionary>
+                                      """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+            try
+            {
+                RuntimeXamlPreviewLoader.ApplyProjectResources(
+                    new[]
+                    {
+                        ("Themes/Button.axaml", themeXaml),
+                        ("Themes/Colors.axaml", colorsXaml)
+                    },
+                    localAssembly: null,
+                    diagnostics);
+                var preview = RuntimeXamlPreviewLoader.LoadResourceDictionaryPreview(
+                    themeXaml,
+                    localAssembly: null,
+                    "Themes/Button.axaml",
+                    diagnostics);
+
+                Assert.NotNull(preview);
+                Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+            }
+            finally
+            {
+                RuntimeXamlPreviewLoader.ApplyProjectResources(
+                    Array.Empty<(string Path, string Text)>(),
+                    localAssembly: null,
+                    new List<RuntimeXamlDiagnostic>());
+            }
+        });
+    }
+
+    [Fact]
     public void CreateCustomControlThemeCommand_CreatesThemeFromSelectedFluentTemplateWithoutPreviewSelection()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -692,6 +747,53 @@ public sealed class MainViewModelTests
             Assert.DoesNotContain("Theme=\"{StaticResource MyButtonTheme1}\"", mainFile.Text, StringComparison.Ordinal);
             Assert.Same(themeFile, viewModel.ActiveXamlFile);
             Assert.Contains(viewModel.ControlThemes, theme => theme.Key == "MyButtonTheme1" && theme.TargetType == "Button");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", previousThemeRoot);
+            Directory.Delete(themeRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CreateCustomControlThemeCommand_FallsBackToSelectedFluentTemplateForUnsupportedSelection()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var themeRoot = CreateTemporaryFluentThemeRoot();
+        var previousThemeRoot = Environment.GetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH");
+        Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", themeRoot);
+
+        try
+        {
+            var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
+            var mainFile = viewModel.ActiveXamlFile!;
+            mainFile.Text = """
+                            <UserControl xmlns="https://github.com/avaloniaui"
+                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <StackPanel>
+                                <TextBlock Text="Unsupported selected container" />
+                              </StackPanel>
+                            </UserControl>
+                            """;
+            var stackPanelStart = mainFile.Text.IndexOf("<StackPanel", StringComparison.Ordinal);
+            var template = Assert.Single(
+                viewModel.FluentControlThemeTemplates,
+                candidate => candidate.TargetType == "Button");
+
+            Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, stackPanelStart, 0, stackPanelStart));
+            viewModel.SelectedFluentControlThemeTemplate = template;
+
+            Assert.True(viewModel.CreateCustomControlThemeCommand.CanExecute(null));
+            viewModel.CreateCustomControlThemeCommand.Execute(null);
+
+            var themeFile = viewModel.ActiveProject!.FindFile("Themes/MyButtonTheme1.axaml");
+            Assert.NotNull(themeFile);
+            Assert.Contains("x:Key=\"MyButtonTheme1\"", themeFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Theme=\"{StaticResource MyButtonTheme1}\"", mainFile.Text, StringComparison.Ordinal);
         }
         finally
         {
@@ -924,6 +1026,43 @@ public sealed class MainViewModelTests
         Assert.Contains("x:Key=\"VariantBrush\" Color=\"White\"", themeFile.Text, StringComparison.Ordinal);
         Assert.Contains("x:Key=\"DarkVariantBrush\" Color=\"Black\"", themeFile.Text, StringComparison.Ordinal);
         Assert.Contains("References were left unchanged", viewModel.ControlThemeStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThemeResourceCommands_AllowsRenameCollisionInDifferentThemeScope()
+    {
+        var viewModel = new MainViewModel(null)
+        {
+            EnableAutoRun = false
+        };
+        var project = viewModel.ActiveProject;
+        Assert.NotNull(project);
+        var themeFile = project.AddFile(new InMemoryProjectFile(
+            "Themes/Palette.axaml",
+            """
+            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+              <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                  <SolidColorBrush x:Key="PrimaryBrushLight" Color="White" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                  <SolidColorBrush x:Key="PrimaryBrush" Color="Black" />
+                </ResourceDictionary>
+              </ResourceDictionary.ThemeDictionaries>
+            </ResourceDictionary>
+            """,
+            ProjectFileKind.Resource));
+        RefreshControlThemes(viewModel);
+
+        viewModel.SelectedThemeResource = Assert.Single(viewModel.ThemeResources, resource => resource.Key == "PrimaryBrushLight");
+        viewModel.ThemeResourceKeyEditText = "PrimaryBrush";
+
+        Assert.True(viewModel.RenameSelectedThemeResourceCommand.CanExecute(null));
+        viewModel.RenameSelectedThemeResourceCommand.Execute(null);
+
+        Assert.Contains("x:Key=\"PrimaryBrush\" Color=\"White\"", themeFile.Text, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"PrimaryBrush\" Color=\"Black\"", themeFile.Text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -208,13 +208,15 @@ public sealed class ThemeResourceViewModel : ViewModelBase
         string resourceType,
         string? targetType,
         string filePath,
-        int? line)
+        int? line,
+        string themeScope)
     {
         Key = key;
         ResourceType = resourceType;
         TargetType = targetType ?? string.Empty;
         FilePath = filePath;
         Line = line;
+        ThemeScope = themeScope;
     }
 
     public string Key { get; }
@@ -226,6 +228,8 @@ public sealed class ThemeResourceViewModel : ViewModelBase
     public string FilePath { get; }
 
     public int? Line { get; }
+
+    public string ThemeScope { get; }
 
     public string Location => Line is { } line
         ? $"{FilePath}:{line}"

@@ -8,6 +8,7 @@ using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
+using XamlPlayground.Services.Theming;
 
 namespace XamlPlayground.Services;
 
@@ -30,7 +31,7 @@ public static class RuntimeXamlPreviewLoader
                 return;
             }
 
-            foreach (var resourceFile in resourceFiles)
+            foreach (var resourceFile in OrderResourceFilesForLoading(resourceFiles))
             {
                 if (string.IsNullOrWhiteSpace(resourceFile.Text))
                 {
@@ -50,6 +51,94 @@ public static class RuntimeXamlPreviewLoader
                 resources.MergedDictionaries.Add(resourceProvider);
                 s_projectPreviewResources.Add(resourceProvider);
             }
+        }
+    }
+
+    private static IReadOnlyList<(string Path, string Text)> OrderResourceFilesForLoading(
+        IEnumerable<(string Path, string Text)> resourceFiles)
+    {
+        var files = resourceFiles.ToArray();
+        if (files.Length < 2)
+        {
+            return files;
+        }
+
+        var analysis = ResourceDictionaryAnalyzer.Analyze(files.Select(static file =>
+            new ThemeResourceDocument(
+                file.Path,
+                RemoveDesignPreviewContent(file.Text),
+                IsResourceDictionary: true)));
+        var originalIndex = files
+            .Select(static (file, index) => (file.Path, Index: index))
+            .ToDictionary(static item => item.Path, static item => item.Index, StringComparer.OrdinalIgnoreCase);
+        var ownersByKey = analysis.Resources
+            .GroupBy(static resource => resource.Key, StringComparer.Ordinal)
+            .ToDictionary(
+                static group => group.Key,
+                group => group
+                    .Select(static resource => resource.FilePath)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Where(originalIndex.ContainsKey)
+                    .OrderBy(path => originalIndex[path])
+                    .ToArray(),
+                StringComparer.Ordinal);
+        var dependenciesByPath = files.ToDictionary(
+            static file => file.Path,
+            static _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var reference in analysis.References)
+        {
+            if (!dependenciesByPath.TryGetValue(reference.FilePath, out var dependencies) ||
+                !ownersByKey.TryGetValue(reference.Key, out var owners))
+            {
+                continue;
+            }
+
+            foreach (var owner in owners)
+            {
+                if (!string.Equals(owner, reference.FilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    dependencies.Add(owner);
+                }
+            }
+        }
+
+        var ordered = new List<(string Path, string Text)>();
+        var stateByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in files)
+        {
+            Visit(file.Path);
+        }
+
+        return ordered;
+
+        void Visit(string path)
+        {
+            if (!originalIndex.ContainsKey(path))
+            {
+                return;
+            }
+
+            if (stateByPath.TryGetValue(path, out var state))
+            {
+                if (state == 2)
+                {
+                    return;
+                }
+
+                return;
+            }
+
+            stateByPath[path] = 1;
+            foreach (var dependency in dependenciesByPath[path].OrderBy(dependency => originalIndex[dependency]))
+            {
+                Visit(dependency);
+            }
+
+            stateByPath[path] = 2;
+            ordered.Add(files[originalIndex[path]]);
         }
     }
 

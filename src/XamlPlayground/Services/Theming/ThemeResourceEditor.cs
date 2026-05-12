@@ -21,9 +21,6 @@ public sealed record ThemeResourceDeleteResult(
 public static class ThemeResourceEditor
 {
     private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
-    private static readonly Regex ResourceReferenceRegex = new(
-        "\\{\\s*(?<kind>StaticResource|DynamicResource)(?<leading>\\s+)(?:(?<name>ResourceKey)\\s*=\\s*)?(?<key>[^,}\\s]+)(?<tail>[^}]*)\\}",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static ThemeResourceEditResult RenameResourceKey(
         string xaml,
@@ -54,24 +51,7 @@ public static class ThemeResourceEditor
             return xaml;
         }
 
-        return ResourceReferenceRegex.Replace(xaml, match =>
-        {
-            if (!string.Equals(match.Groups["key"].Value, oldKey, StringComparison.Ordinal))
-            {
-                return match.Value;
-            }
-
-            var prefix = match.Groups["name"].Success
-                ? $"{match.Groups["name"].Value}="
-                : string.Empty;
-            return "{" +
-                   match.Groups["kind"].Value +
-                   match.Groups["leading"].Value +
-                   prefix +
-                   newKey +
-                   match.Groups["tail"].Value +
-                   "}";
-        });
+        return ResourceReferenceParser.ReplaceKeys(xaml, oldKey, newKey);
     }
 
     public static string RemoveResourceReferences(
@@ -161,13 +141,14 @@ public static class ThemeResourceEditor
         }
 
         element.Remove();
+        RemoveDesignPreviewReferences(root, key);
+
         var resourceCount = EnumerateTopLevelResources(root).Count();
         if (resourceCount == 0)
         {
             return new ThemeResourceDeleteResult(true, Serialize(parse.Document), RemovedLastResource: true);
         }
 
-        RemoveDesignPreviewReferences(root, key);
         return new ThemeResourceDeleteResult(true, Serialize(parse.Document), RemovedLastResource: false);
     }
 
@@ -331,11 +312,8 @@ public static class ThemeResourceEditor
 
     private static bool IsExactResourceReference(string value, string key)
     {
-        var match = ResourceReferenceRegex.Match(value.Trim());
-        return match.Success &&
-               match.Index == 0 &&
-               match.Length == value.Trim().Length &&
-               string.Equals(match.Groups["key"].Value, key, StringComparison.Ordinal);
+        return ResourceReferenceParser.TryGetExactKey(value, out var referenceKey) &&
+               string.Equals(referenceKey, key, StringComparison.Ordinal);
     }
 
     private static bool IsValidKey(string key)

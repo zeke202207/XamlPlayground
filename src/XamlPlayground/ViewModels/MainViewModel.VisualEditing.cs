@@ -2480,7 +2480,8 @@ public partial class MainViewModel
                 resource.ResourceType,
                 resource.TargetType,
                 resource.FilePath,
-                resource.Line)));
+                resource.Line,
+                resource.ThemeScope)));
 
         ThemeResourceDiagnostics = new ObservableCollection<ThemeResourceDiagnosticViewModel>(
             _themeResourceAnalysis.Diagnostics.Select(static diagnostic => new ThemeResourceDiagnosticViewModel(
@@ -2491,7 +2492,15 @@ public partial class MainViewModel
 
         RefreshThemeVariants();
         RefreshThemeResourceFilters();
+        var previousFilePath = SelectedThemeResource?.FilePath;
+        var previousLine = SelectedThemeResource?.Line;
+        var previousThemeScope = SelectedThemeResource?.ThemeScope;
         SelectedThemeResource =
+            FilteredThemeResources.FirstOrDefault(resource =>
+                string.Equals(resource.Key, previousKey, StringComparison.Ordinal) &&
+                string.Equals(resource.FilePath, previousFilePath, StringComparison.OrdinalIgnoreCase) &&
+                resource.Line == previousLine &&
+                string.Equals(resource.ThemeScope, previousThemeScope, StringComparison.OrdinalIgnoreCase)) ??
             FilteredThemeResources.FirstOrDefault(resource => string.Equals(resource.Key, previousKey, StringComparison.Ordinal)) ??
             FilteredThemeResources.FirstOrDefault();
         RefreshSelectedThemeResourceUsages();
@@ -3015,8 +3024,11 @@ public partial class MainViewModel
         if (TryGetSelectedControlThemeTargetType(out targetType))
         {
             template = _controlThemeCatalog.FindDefaultTemplate(targetType);
-            applyToSelectedControl = template is not null;
-            return template is not null;
+            if (template is not null)
+            {
+                applyToSelectedControl = true;
+                return true;
+            }
         }
 
         if (SelectedFluentControlThemeTemplate is not { } selectedTemplate)
@@ -3160,7 +3172,8 @@ public partial class MainViewModel
                !string.Equals(selectedResource.Key, newKey, StringComparison.Ordinal) &&
                !ThemeResources.Any(resource =>
                    !ReferenceEquals(resource, selectedResource) &&
-                   string.Equals(resource.Key, newKey, StringComparison.Ordinal));
+                   string.Equals(resource.Key, newKey, StringComparison.Ordinal) &&
+                   ThemeResourceScopesConflict(resource, selectedResource));
     }
 
     private void RenameSelectedThemeResource()
@@ -3191,7 +3204,7 @@ public partial class MainViewModel
         }
 
         RefreshWorkspaceAfterThemeFileChanges(resourceFile);
-        SelectThemeResource(newKey);
+        SelectThemeResource(newKey, selectedResource.FilePath, selectedResource.Line, selectedResource.ThemeScope);
         ControlThemeStatus = renameReferences
             ? $"Renamed {selectedResource.Key} to {newKey}."
             : $"Renamed {selectedResource.Key} to {newKey}. References were left unchanged because the key has multiple definitions.";
@@ -3216,7 +3229,7 @@ public partial class MainViewModel
 
         resourceFile.Text = duplicate.Text;
         RefreshWorkspaceAfterThemeFileChanges(resourceFile);
-        SelectThemeResource(duplicateKey);
+        SelectThemeResource(duplicateKey, selectedResource.FilePath, selectedResource.Line, selectedResource.ThemeScope);
         ControlThemeStatus = $"Duplicated {selectedResource.Key} as {duplicateKey}.";
     }
 
@@ -3500,9 +3513,24 @@ public partial class MainViewModel
 
     private void SelectThemeResource(string key)
     {
+        SelectThemeResource(key, filePath: null, line: null, themeScope: null);
+    }
+
+    private void SelectThemeResource(string key, string? filePath, int? line, string? themeScope)
+    {
         SelectedThemeResource =
+            FilteredThemeResources.FirstOrDefault(resource =>
+                string.Equals(resource.Key, key, StringComparison.Ordinal) &&
+                (filePath is null || string.Equals(resource.FilePath, filePath, StringComparison.OrdinalIgnoreCase)) &&
+                (line is null || resource.Line == line) &&
+                (themeScope is null || string.Equals(resource.ThemeScope, themeScope, StringComparison.OrdinalIgnoreCase))) ??
             FilteredThemeResources.FirstOrDefault(resource => string.Equals(resource.Key, key, StringComparison.Ordinal)) ??
             ThemeResources.FirstOrDefault(resource => string.Equals(resource.Key, key, StringComparison.Ordinal));
+    }
+
+    private static bool ThemeResourceScopesConflict(ThemeResourceViewModel left, ThemeResourceViewModel right)
+    {
+        return string.Equals(left.ThemeScope, right.ThemeScope, StringComparison.OrdinalIgnoreCase);
     }
 
     private string CreateUniqueThemeResourceKey(string sourceKey)

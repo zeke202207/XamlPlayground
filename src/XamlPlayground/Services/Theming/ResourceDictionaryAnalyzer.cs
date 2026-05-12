@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -38,7 +37,10 @@ public sealed record ThemeResourceReference(
     ThemeResourceReferenceKind Kind,
     string FilePath,
     int Line,
-    string Snippet);
+    string Snippet)
+{
+    public string ThemeScope { get; init; } = ThemeProjectStorage.BaseVariant;
+}
 
 public sealed record ThemeResourceDiagnostic(
     ThemeResourceDiagnosticSeverity Severity,
@@ -61,9 +63,6 @@ public enum ThemeResourceDiagnosticSeverity
 public static class ResourceDictionaryAnalyzer
 {
     private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
-    private static readonly Regex ResourceReferenceRegex = new(
-        "\\{\\s*(?<kind>StaticResource|DynamicResource)\\s+(?:ResourceKey\\s*=\\s*)?(?<key>[^,}\\s]+)",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static ThemeResourceAnalysis Analyze(IEnumerable<ThemeResourceDocument> documents)
     {
@@ -185,23 +184,80 @@ public static class ResourceDictionaryAnalyzer
     private static IEnumerable<ThemeResourceReference> FindResourceReferences(ThemeResourceDocument document)
     {
         var lines = document.Text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        for (var i = 0; i < lines.Length; i++)
+        if (TryParseDocument(document.Text) is { } xaml && xaml.Root is { } root)
         {
-            var line = lines[i];
-            foreach (Match match in ResourceReferenceRegex.Matches(line))
+            foreach (var scopedAttribute in EnumerateReferenceAttributes(root, ThemeProjectStorage.BaseVariant))
             {
-                var key = match.Groups["key"].Value.Trim();
-                if (string.IsNullOrWhiteSpace(key))
+                foreach (var match in ResourceReferenceParser.Find(scopedAttribute.Attribute.Value))
                 {
-                    continue;
+                    var line = GetLineNumber(scopedAttribute.Attribute) ??
+                               (scopedAttribute.Attribute.Parent is { } parent
+                                   ? GetLineNumber(parent)
+                                   : null) ??
+                               1;
+                    yield return new ThemeResourceReference(
+                        match.Key,
+                        Enum.Parse<ThemeResourceReferenceKind>(match.Kind),
+                        document.Path,
+                        line,
+                        GetSnippet(lines, line))
+                    {
+                        ThemeScope = scopedAttribute.ThemeScope
+                    };
                 }
+            }
 
+            yield break;
+        }
+
+        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        {
+            var line = lines[lineIndex];
+            foreach (var match in ResourceReferenceParser.Find(line))
+            {
                 yield return new ThemeResourceReference(
-                    key,
-                    Enum.Parse<ThemeResourceReferenceKind>(match.Groups["kind"].Value),
+                    match.Key,
+                    Enum.Parse<ThemeResourceReferenceKind>(match.Kind),
                     document.Path,
-                    i + 1,
+                    lineIndex + 1,
                     line.Trim());
+            }
+        }
+    }
+
+    private static XDocument? TryParseDocument(string text)
+    {
+        try
+        {
+            return XDocument.Parse(text, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+        }
+        catch (XmlException)
+        {
+            return null;
+        }
+    }
+
+    private static IEnumerable<(XAttribute Attribute, string ThemeScope)> EnumerateReferenceAttributes(
+        XElement element,
+        string themeScope)
+    {
+        var currentScope = themeScope;
+        if (element.Parent?.Name.LocalName == "ResourceDictionary.ThemeDictionaries" &&
+            element.Name.LocalName == "ResourceDictionary")
+        {
+            currentScope = element.Attribute(XamlNamespace + "Key")?.Value ?? themeScope;
+        }
+
+        foreach (var attribute in element.Attributes())
+        {
+            yield return (attribute, currentScope);
+        }
+
+        foreach (var child in element.Elements())
+        {
+            foreach (var attribute in EnumerateReferenceAttributes(child, currentScope))
+            {
+                yield return attribute;
             }
         }
     }
@@ -230,11 +286,14 @@ public static class ResourceDictionaryAnalyzer
         IEnumerable<ThemeResourceDefinition> resources,
         IEnumerable<ThemeResourceReference> references)
     {
-        var keys = resources
-            .Select(static resource => resource.Key)
-            .ToHashSet(StringComparer.Ordinal);
+        var resourceArray = resources.ToArray();
+        var themeScopes = resourceArray
+            .Select(static resource => resource.ThemeScope)
+            .Where(static scope => !string.Equals(scope, ThemeProjectStorage.BaseVariant, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
-        foreach (var reference in references.Where(reference => !keys.Contains(reference.Key)))
+        foreach (var reference in references.Where(reference => !HasResolvableResource(resourceArray, themeScopes, reference)))
         {
             yield return new ThemeResourceDiagnostic(
                 ThemeResourceDiagnosticSeverity.Warning,
@@ -242,6 +301,40 @@ public static class ResourceDictionaryAnalyzer
                 reference.FilePath,
                 reference.Line);
         }
+    }
+
+    private static bool HasResolvableResource(
+        IReadOnlyCollection<ThemeResourceDefinition> resources,
+        IReadOnlyCollection<string> themeScopes,
+        ThemeResourceReference reference)
+    {
+        var matches = resources
+            .Where(resource => string.Equals(resource.Key, reference.Key, StringComparison.Ordinal))
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            return false;
+        }
+
+        if (matches.Any(static resource => string.Equals(resource.ThemeScope, ThemeProjectStorage.BaseVariant, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (!string.Equals(reference.ThemeScope, ThemeProjectStorage.BaseVariant, StringComparison.OrdinalIgnoreCase))
+        {
+            return matches.Any(resource => string.Equals(resource.ThemeScope, reference.ThemeScope, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return themeScopes.Count > 0 &&
+               themeScopes.All(scope => matches.Any(resource => string.Equals(resource.ThemeScope, scope, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static string GetSnippet(IReadOnlyList<string> lines, int line)
+    {
+        return line > 0 && line <= lines.Count
+            ? lines[line - 1].Trim()
+            : string.Empty;
     }
 
     private static int? GetLineNumber(XObject value)

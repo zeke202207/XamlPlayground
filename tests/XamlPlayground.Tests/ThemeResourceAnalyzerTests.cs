@@ -77,6 +77,77 @@ public sealed class ThemeResourceAnalyzerTests
     }
 
     [Fact]
+    public void Analyze_HandlesMarkupExtensionResourceKeys()
+    {
+        var analysis = ResourceDictionaryAnalyzer.Analyze(new[]
+        {
+            new ThemeResourceDocument(
+                "Themes/Button.axaml",
+                """
+                <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                  <ControlTheme x:Key="{x:Type Button}" TargetType="Button" />
+                </ResourceDictionary>
+                """,
+                IsResourceDictionary: true),
+            new ThemeResourceDocument(
+                "Views/MainView.axaml",
+                """
+                <UserControl xmlns="https://github.com/avaloniaui"
+                             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                  <Button Theme="{StaticResource {x:Type Button}}" />
+                  <Button Theme="{StaticResource ResourceKey={x:Type Button}}" />
+                </UserControl>
+                """,
+                IsResourceDictionary: false)
+        });
+
+        Assert.Contains(analysis.Resources, resource => resource.Key == "{x:Type Button}");
+        Assert.Equal(2, analysis.References.Count(reference => reference.Key == "{x:Type Button}"));
+        Assert.DoesNotContain(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("{x:Type Button}", System.StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Analyze_WarnsWhenBaseReferenceOnlyExistsInOneThemeScope()
+    {
+        var analysis = ResourceDictionaryAnalyzer.Analyze(new[]
+        {
+            new ThemeResourceDocument(
+                "Themes/Palette.axaml",
+                """
+                <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                  <ResourceDictionary.ThemeDictionaries>
+                    <ResourceDictionary x:Key="Light">
+                      <SolidColorBrush x:Key="ScopedOnlyBrush" Color="White" />
+                      <SolidColorBrush x:Key="SharedVariantBrush" Color="White" />
+                    </ResourceDictionary>
+                    <ResourceDictionary x:Key="Dark">
+                      <SolidColorBrush x:Key="SharedVariantBrush" Color="Black" />
+                    </ResourceDictionary>
+                  </ResourceDictionary.ThemeDictionaries>
+                </ResourceDictionary>
+                """,
+                IsResourceDictionary: true),
+            new ThemeResourceDocument(
+                "Views/MainView.axaml",
+                """
+                <UserControl xmlns="https://github.com/avaloniaui">
+                  <Border Background="{DynamicResource ScopedOnlyBrush}"
+                          BorderBrush="{DynamicResource SharedVariantBrush}" />
+                </UserControl>
+                """,
+                IsResourceDictionary: false)
+        });
+
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Resource 'ScopedOnlyBrush' is referenced but not defined", System.StringComparison.Ordinal));
+        Assert.DoesNotContain(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Resource 'SharedVariantBrush' is referenced but not defined", System.StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ThemeResourceEditor_RenamesReferencesDuplicatesAndDeletesTopLevelResources()
     {
         const string xaml = """
@@ -136,6 +207,23 @@ public sealed class ThemeResourceAnalyzerTests
     }
 
     [Fact]
+    public void ThemeResourceEditor_RenamesAndRemovesMarkupExtensionResourceReferences()
+    {
+        const string xaml = """
+                            <UserControl xmlns="https://github.com/avaloniaui"
+                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <Button Theme="{StaticResource {x:Type Button}}" />
+                            </UserControl>
+                            """;
+
+        var renamed = ThemeResourceEditor.RenameResourceReferences(xaml, "{x:Type Button}", "PrimaryButtonTheme");
+        var cleaned = ThemeResourceEditor.RemoveResourceReferences(xaml, "{x:Type Button}");
+
+        Assert.Contains("Theme=\"{StaticResource PrimaryButtonTheme}\"", renamed, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Theme=", cleaned, System.StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ThemeResourceEditor_EditsResourcesInsideThemeDictionaries()
     {
         const string xaml = """
@@ -160,6 +248,27 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.True(deleted.Changed);
         Assert.DoesNotContain("x:Key=\"RenamedVariantBrush\"", deleted.Text, System.StringComparison.Ordinal);
         Assert.False(deleted.RemovedLastResource);
+    }
+
+    [Fact]
+    public void ThemeResourceEditor_RemovesPreviewReferencesWhenDeletingLastKeptResource()
+    {
+        const string xaml = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <Design.PreviewWith>
+                                <Border Background="{StaticResource AccentBrush}" />
+                              </Design.PreviewWith>
+                              <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+                            </ResourceDictionary>
+                            """;
+
+        var deleted = ThemeResourceEditor.DeleteResource(xaml, "AccentBrush");
+
+        Assert.True(deleted.Changed);
+        Assert.True(deleted.RemovedLastResource);
+        Assert.DoesNotContain("Design.PreviewWith", deleted.Text, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("AccentBrush", deleted.Text, System.StringComparison.Ordinal);
     }
 
     [Fact]
@@ -276,5 +385,36 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.True(previewEdit.Changed);
         Assert.Contains("RequestedThemeVariant=\"Light\"", previewEdit.Text, System.StringComparison.Ordinal);
         Assert.Contains("RequestedThemeVariant=\"Dark\"", previewEdit.Text, System.StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ControlThemeEditor_ReplacesChildSetterValueWhenSettingAttributeValue()
+    {
+        const string xaml = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <ControlTheme x:Key="MyButtonTheme1" TargetType="Button">
+                                <Style Selector="^:pointerover">
+                                  <Setter Property="Background">
+                                    <Setter.Value>
+                                      <SolidColorBrush Color="Red" />
+                                    </Setter.Value>
+                                  </Setter>
+                                </Style>
+                              </ControlTheme>
+                            </ResourceDictionary>
+                            """;
+
+        var edit = ControlThemeEditor.SetSelectorSetter(
+            xaml,
+            "MyButtonTheme1",
+            "^:pointerover",
+            "Background",
+            "{DynamicResource AccentBrush}");
+
+        Assert.True(edit.Changed);
+        Assert.Contains("Property=\"Background\" Value=\"{DynamicResource AccentBrush}\"", edit.Text, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Setter.Value", edit.Text, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("SolidColorBrush", edit.Text, System.StringComparison.Ordinal);
     }
 }
