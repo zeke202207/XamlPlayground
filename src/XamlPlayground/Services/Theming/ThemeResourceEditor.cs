@@ -21,9 +21,6 @@ public sealed record ThemeResourceDeleteResult(
 public static class ThemeResourceEditor
 {
     private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
-    private static readonly Regex ResourceReferenceRegex = new(
-        "\\{\\s*(?<kind>StaticResource|DynamicResource)(?<leading>\\s+)(?:(?<name>ResourceKey)\\s*=\\s*)?(?<key>[^,}\\s]+)(?<tail>[^}]*)\\}",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static ThemeResourceEditResult RenameResourceKey(
         string xaml,
@@ -54,24 +51,10 @@ public static class ThemeResourceEditor
             return xaml;
         }
 
-        return ResourceReferenceRegex.Replace(xaml, match =>
-        {
-            if (!string.Equals(match.Groups["key"].Value, oldKey, StringComparison.Ordinal))
-            {
-                return match.Value;
-            }
-
-            var prefix = match.Groups["name"].Success
-                ? $"{match.Groups["name"].Value}="
-                : string.Empty;
-            return "{" +
-                   match.Groups["kind"].Value +
-                   match.Groups["leading"].Value +
-                   prefix +
-                   newKey +
-                   match.Groups["tail"].Value +
-                   "}";
-        });
+        return RenameObjectElementResourceReferences(
+            ResourceReferenceParser.ReplaceKeys(xaml, oldKey, newKey),
+            oldKey,
+            newKey);
     }
 
     public static string RemoveResourceReferences(
@@ -161,13 +144,14 @@ public static class ThemeResourceEditor
         }
 
         element.Remove();
+        RemoveDesignPreviewReferences(root, key);
+
         var resourceCount = EnumerateTopLevelResources(root).Count();
         if (resourceCount == 0)
         {
             return new ThemeResourceDeleteResult(true, Serialize(parse.Document), RemovedLastResource: true);
         }
 
-        RemoveDesignPreviewReferences(root, key);
         return new ThemeResourceDeleteResult(true, Serialize(parse.Document), RemovedLastResource: false);
     }
 
@@ -268,26 +252,227 @@ public static class ThemeResourceEditor
 
     private static string RemoveResourceReferenceAttributes(string xaml, string key)
     {
+        xaml = RemoveResourceReferenceSetters(xaml, key);
+        xaml = RemoveObjectElementResourceReferences(xaml, key);
+
         var attributeRegex = new Regex(
-            "\\s+[A-Za-z_][A-Za-z0-9_.:-]*\\s*=\\s*\"(?<value>[^\"]*)\"",
+            "\\s+[A-Za-z_][A-Za-z0-9_.:-]*\\s*=\\s*(?:\"(?<doubleValue>[^\"]*)\"|'(?<singleValue>[^']*)')",
             RegexOptions.CultureInvariant);
 
         return attributeRegex.Replace(xaml, match =>
         {
-            var value = match.Groups["value"].Value;
-            return IsExactResourceReference(value, key)
+            var value = match.Groups["doubleValue"].Success
+                ? match.Groups["doubleValue"].Value
+                : match.Groups["singleValue"].Value;
+            return ContainsResourceReference(value, key)
                 ? string.Empty
                 : match.Value;
         });
     }
 
+    private static string RemoveResourceReferenceSetters(string xaml, string key)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+        }
+        catch (XmlException)
+        {
+            return xaml;
+        }
+
+        var setters = document
+            .Descendants()
+            .Where(element => element.Name.LocalName == "Setter" && SetterReferencesResource(element, key))
+            .ToArray();
+        if (setters.Length == 0)
+        {
+            return xaml;
+        }
+
+        foreach (var setter in setters)
+        {
+            setter.Remove();
+        }
+
+        return Serialize(document);
+    }
+
+    private static string RemoveObjectElementResourceReferences(string xaml, string key)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+        }
+        catch (XmlException)
+        {
+            return xaml;
+        }
+
+        var references = document
+            .Descendants()
+            .Where(element => IsResourceReferenceElement(element, key))
+            .ToArray();
+        if (references.Length == 0)
+        {
+            return xaml;
+        }
+
+        foreach (var reference in references)
+        {
+            var removable = TryGetSingleReferencePropertyElement(reference) ?? reference;
+            removable.Remove();
+        }
+
+        return Serialize(document);
+    }
+
+    private static XElement? TryGetSingleReferencePropertyElement(XElement reference)
+    {
+        var parent = reference.Parent;
+        if (parent is null || !parent.Name.LocalName.Contains('.', StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return parent.Nodes().All(node =>
+            ReferenceEquals(node, reference) ||
+            node is XText text && string.IsNullOrWhiteSpace(text.Value))
+                ? parent
+                : null;
+    }
+
+    private static bool SetterReferencesResource(XElement setter, string key)
+    {
+        var valueAttribute = setter
+            .Attributes()
+            .FirstOrDefault(static attribute => attribute.Name.LocalName == "Value");
+        if (valueAttribute is not null &&
+            ContainsResourceReference(valueAttribute.Value, key))
+        {
+            return true;
+        }
+
+        return setter
+            .Elements()
+            .Any(element => element.Name.LocalName == "Setter.Value" &&
+                            SetterValueElementReferencesResource(element, key));
+    }
+
+    private static bool SetterValueElementReferencesResource(XElement setterValue, string key)
+    {
+        return ContainsResourceReference(setterValue.Value, key) ||
+               setterValue
+                   .Descendants()
+                   .Any(element => IsResourceReferenceElement(element, key));
+    }
+
+    private static bool IsResourceReferenceElement(XElement element, string key)
+    {
+        if (element.Name.LocalName is not ("StaticResource" or "DynamicResource"))
+        {
+            return false;
+        }
+
+        var resourceKey = element
+            .Attributes()
+            .FirstOrDefault(static attribute => attribute.Name.LocalName == "ResourceKey")
+            ?.Value;
+        if (!string.IsNullOrWhiteSpace(resourceKey) &&
+            (string.Equals(resourceKey, key, StringComparison.Ordinal) ||
+             IsExactResourceReference(resourceKey, key)))
+        {
+            return true;
+        }
+
+        return string.Equals(element.Value.Trim(), key, StringComparison.Ordinal) ||
+               IsExactResourceReference(element.Value, key);
+    }
+
+    private static string RenameObjectElementResourceReferences(string xaml, string oldKey, string newKey)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+        }
+        catch (XmlException)
+        {
+            return xaml;
+        }
+
+        var changed = false;
+        foreach (var element in document
+                     .Descendants()
+                     .Where(static element => element.Name.LocalName is "StaticResource" or "DynamicResource"))
+        {
+            var resourceKey = element
+                .Attributes()
+                .FirstOrDefault(static attribute => attribute.Name.LocalName == "ResourceKey");
+            if (resourceKey is not null)
+            {
+                if (TryRenameResourceKeyValue(resourceKey.Value, oldKey, newKey, out var renamedValue))
+                {
+                    resourceKey.Value = renamedValue;
+                    changed = true;
+                }
+
+                continue;
+            }
+
+            if (TryRenameResourceKeyValue(element.Value, oldKey, newKey, out var renamedText))
+            {
+                element.Value = renamedText;
+                changed = true;
+            }
+        }
+
+        return changed
+            ? Serialize(document)
+            : xaml;
+    }
+
+    private static bool TryRenameResourceKeyValue(
+        string value,
+        string oldKey,
+        string newKey,
+        out string renamedValue)
+    {
+        if (string.Equals(value.Trim(), oldKey, StringComparison.Ordinal))
+        {
+            renamedValue = PreserveTrimmedReplacement(value, newKey);
+            return true;
+        }
+
+        if (IsExactResourceReference(value, oldKey))
+        {
+            renamedValue = ResourceReferenceParser.ReplaceKeys(value, oldKey, newKey);
+            return true;
+        }
+
+        renamedValue = value;
+        return false;
+    }
+
+    private static string PreserveTrimmedReplacement(string value, string replacement)
+    {
+        var leadingLength = value.Length - value.TrimStart().Length;
+        var trailingLength = value.Length - value.TrimEnd().Length;
+        return value[..leadingLength] + replacement + value[(value.Length - trailingLength)..];
+    }
+
     private static bool IsExactResourceReference(string value, string key)
     {
-        var match = ResourceReferenceRegex.Match(value.Trim());
-        return match.Success &&
-               match.Index == 0 &&
-               match.Length == value.Trim().Length &&
-               string.Equals(match.Groups["key"].Value, key, StringComparison.Ordinal);
+        return ResourceReferenceParser.TryGetExactKey(value, out var referenceKey) &&
+               string.Equals(referenceKey, key, StringComparison.Ordinal);
+    }
+
+    private static bool ContainsResourceReference(string value, string key)
+    {
+        return ResourceReferenceParser.Find(value)
+            .Any(match => string.Equals(match.Key, key, StringComparison.Ordinal));
     }
 
     private static bool IsValidKey(string key)

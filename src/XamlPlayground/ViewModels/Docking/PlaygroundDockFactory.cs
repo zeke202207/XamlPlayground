@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using Avalonia.Diagnostics;
+using Avalonia.Threading;
 using Dock.Avalonia.Controls;
 using Dock.Model.Controls;
 using Dock.Model.Core;
@@ -255,6 +256,8 @@ public sealed class PlaygroundDockFactory : Factory
         }
 
         _bottomDock.ActiveDockable = _errors;
+        _errors.NotifyLastErrorMessageChanged();
+        Dispatcher.UIThread.Post(_errors.NotifyLastErrorMessageChanged, DispatcherPriority.Loaded);
     }
 
     private static IHostWindow CreateHostWindow()

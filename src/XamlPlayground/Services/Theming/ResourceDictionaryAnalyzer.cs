@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -38,7 +37,10 @@ public sealed record ThemeResourceReference(
     ThemeResourceReferenceKind Kind,
     string FilePath,
     int Line,
-    string Snippet);
+    string Snippet)
+{
+    public string ThemeScope { get; init; } = ThemeProjectStorage.BaseVariant;
+}
 
 public sealed record ThemeResourceDiagnostic(
     ThemeResourceDiagnosticSeverity Severity,
@@ -61,15 +63,13 @@ public enum ThemeResourceDiagnosticSeverity
 public static class ResourceDictionaryAnalyzer
 {
     private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
-    private static readonly Regex ResourceReferenceRegex = new(
-        "\\{\\s*(?<kind>StaticResource|DynamicResource)\\s+(?:ResourceKey\\s*=\\s*)?(?<key>[^,}\\s]+)",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public static ThemeResourceAnalysis Analyze(IEnumerable<ThemeResourceDocument> documents)
     {
         var resources = new List<ThemeResourceDefinition>();
         var references = new List<ThemeResourceReference>();
         var diagnostics = new List<ThemeResourceDiagnostic>();
+        var declaredThemeScopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var documentArray = documents.ToArray();
 
         foreach (var document in documentArray)
@@ -77,12 +77,13 @@ public static class ResourceDictionaryAnalyzer
             references.AddRange(FindResourceReferences(document));
             if (document.IsResourceDictionary)
             {
+                declaredThemeScopes.UnionWith(FindDeclaredThemeScopes(document));
                 resources.AddRange(FindResourceDefinitions(document, diagnostics));
             }
         }
 
         diagnostics.AddRange(FindDuplicateDiagnostics(resources));
-        diagnostics.AddRange(FindMissingReferenceDiagnostics(resources, references));
+        diagnostics.AddRange(FindMissingReferenceDiagnostics(resources, references, declaredThemeScopes));
 
         return new ThemeResourceAnalysis(
             resources
@@ -146,6 +147,56 @@ public static class ResourceDictionaryAnalyzer
         }
     }
 
+    private static IEnumerable<string> FindDeclaredThemeScopes(ThemeResourceDocument document)
+    {
+        if (TryParseDocument(document.Text) is not { Root: { } root })
+        {
+            yield break;
+        }
+
+        foreach (var scope in EnumerateDeclaredThemeScopes(root, ThemeProjectStorage.BaseVariant))
+        {
+            yield return scope;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateDeclaredThemeScopes(
+        XElement element,
+        string themeScope)
+    {
+        if (element.Name.LocalName == "ResourceDictionary.ThemeDictionaries")
+        {
+            foreach (var themeDictionary in element.Elements().Where(static child => child.Name.LocalName == "ResourceDictionary"))
+            {
+                var childScope = themeDictionary.Attribute(XamlNamespace + "Key")?.Value;
+                if (string.IsNullOrWhiteSpace(childScope))
+                {
+                    childScope = themeScope;
+                }
+
+                if (!string.Equals(childScope, ThemeProjectStorage.BaseVariant, StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return childScope;
+                }
+
+                foreach (var nestedScope in EnumerateDeclaredThemeScopes(themeDictionary, childScope))
+                {
+                    yield return nestedScope;
+                }
+            }
+
+            yield break;
+        }
+
+        foreach (var child in element.Elements())
+        {
+            foreach (var nestedScope in EnumerateDeclaredThemeScopes(child, themeScope))
+            {
+                yield return nestedScope;
+            }
+        }
+    }
+
     private static IEnumerable<(XElement Element, string ThemeScope)> EnumerateResourceElements(
         XElement dictionary,
         string themeScope)
@@ -185,25 +236,150 @@ public static class ResourceDictionaryAnalyzer
     private static IEnumerable<ThemeResourceReference> FindResourceReferences(ThemeResourceDocument document)
     {
         var lines = document.Text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        for (var i = 0; i < lines.Length; i++)
+        if (TryParseDocument(document.Text) is { } xaml && xaml.Root is { } root)
         {
-            var line = lines[i];
-            foreach (Match match in ResourceReferenceRegex.Matches(line))
+            foreach (var scopedAttribute in EnumerateReferenceAttributes(root, ThemeProjectStorage.BaseVariant))
             {
-                var key = match.Groups["key"].Value.Trim();
-                if (string.IsNullOrWhiteSpace(key))
+                foreach (var match in ResourceReferenceParser.Find(scopedAttribute.Attribute.Value))
+                {
+                    var line = GetLineNumber(scopedAttribute.Attribute) ??
+                               (scopedAttribute.Attribute.Parent is { } parent
+                                   ? GetLineNumber(parent)
+                                   : null) ??
+                               1;
+                    yield return new ThemeResourceReference(
+                        match.Key,
+                        Enum.Parse<ThemeResourceReferenceKind>(match.Kind),
+                        document.Path,
+                        line,
+                        GetSnippet(lines, line))
+                    {
+                        ThemeScope = scopedAttribute.ThemeScope
+                    };
+                }
+            }
+
+            foreach (var scopedElement in EnumerateReferenceElements(root, ThemeProjectStorage.BaseVariant))
+            {
+                if (!TryGetObjectElementResourceReference(scopedElement.Element, out var key, out var kind))
                 {
                     continue;
                 }
 
+                var line = GetLineNumber(scopedElement.Element) ?? 1;
                 yield return new ThemeResourceReference(
                     key,
-                    Enum.Parse<ThemeResourceReferenceKind>(match.Groups["kind"].Value),
+                    kind,
                     document.Path,
-                    i + 1,
+                    line,
+                    GetSnippet(lines, line))
+                {
+                    ThemeScope = scopedElement.ThemeScope
+                };
+            }
+
+            yield break;
+        }
+
+        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        {
+            var line = lines[lineIndex];
+            foreach (var match in ResourceReferenceParser.Find(line))
+            {
+                yield return new ThemeResourceReference(
+                    match.Key,
+                    Enum.Parse<ThemeResourceReferenceKind>(match.Kind),
+                    document.Path,
+                    lineIndex + 1,
                     line.Trim());
             }
         }
+    }
+
+    private static bool TryGetObjectElementResourceReference(
+        XElement element,
+        out string key,
+        out ThemeResourceReferenceKind kind)
+    {
+        key = string.Empty;
+        kind = default;
+
+        switch (element.Name.LocalName)
+        {
+            case "StaticResource":
+                kind = ThemeResourceReferenceKind.StaticResource;
+                break;
+
+            case "DynamicResource":
+                kind = ThemeResourceReferenceKind.DynamicResource;
+                break;
+
+            default:
+                return false;
+        }
+
+        key = element
+            .Attributes()
+            .FirstOrDefault(static attribute => attribute.Name.LocalName == "ResourceKey")
+            ?.Value
+            .Trim() ?? element.Value.Trim();
+        return !string.IsNullOrWhiteSpace(key);
+    }
+
+    private static XDocument? TryParseDocument(string text)
+    {
+        try
+        {
+            return XDocument.Parse(text, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+        }
+        catch (XmlException)
+        {
+            return null;
+        }
+    }
+
+    private static IEnumerable<(XElement Element, string ThemeScope)> EnumerateReferenceElements(
+        XElement element,
+        string themeScope)
+    {
+        var currentScope = GetElementThemeScope(element, themeScope);
+        yield return (element, currentScope);
+
+        foreach (var child in element.Elements())
+        {
+            foreach (var scopedElement in EnumerateReferenceElements(child, currentScope))
+            {
+                yield return scopedElement;
+            }
+        }
+    }
+
+    private static IEnumerable<(XAttribute Attribute, string ThemeScope)> EnumerateReferenceAttributes(
+        XElement element,
+        string themeScope)
+    {
+        var currentScope = GetElementThemeScope(element, themeScope);
+
+        foreach (var attribute in element.Attributes())
+        {
+            yield return (attribute, currentScope);
+        }
+
+        foreach (var child in element.Elements())
+        {
+            foreach (var attribute in EnumerateReferenceAttributes(child, currentScope))
+            {
+                yield return attribute;
+            }
+        }
+    }
+
+    private static string GetElementThemeScope(XElement element, string fallbackScope)
+    {
+        return element.Parent?.Name.LocalName == "ResourceDictionary.ThemeDictionaries" &&
+               element.Name.LocalName == "ResourceDictionary"
+            ? element.Attribute(XamlNamespace + "Key")?.Value ?? fallbackScope
+            : fallbackScope;
     }
 
     private static IEnumerable<ThemeResourceDiagnostic> FindDuplicateDiagnostics(
@@ -228,13 +404,18 @@ public static class ResourceDictionaryAnalyzer
 
     private static IEnumerable<ThemeResourceDiagnostic> FindMissingReferenceDiagnostics(
         IEnumerable<ThemeResourceDefinition> resources,
-        IEnumerable<ThemeResourceReference> references)
+        IEnumerable<ThemeResourceReference> references,
+        IEnumerable<string> declaredThemeScopes)
     {
-        var keys = resources
-            .Select(static resource => resource.Key)
-            .ToHashSet(StringComparer.Ordinal);
+        var resourceArray = resources.ToArray();
+        var themeScopes = resourceArray
+            .Select(static resource => resource.ThemeScope)
+            .Concat(declaredThemeScopes)
+            .Where(static scope => !string.Equals(scope, ThemeProjectStorage.BaseVariant, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
-        foreach (var reference in references.Where(reference => !keys.Contains(reference.Key)))
+        foreach (var reference in references.Where(reference => !HasResolvableResource(resourceArray, themeScopes, reference)))
         {
             yield return new ThemeResourceDiagnostic(
                 ThemeResourceDiagnosticSeverity.Warning,
@@ -242,6 +423,40 @@ public static class ResourceDictionaryAnalyzer
                 reference.FilePath,
                 reference.Line);
         }
+    }
+
+    private static bool HasResolvableResource(
+        IReadOnlyCollection<ThemeResourceDefinition> resources,
+        IReadOnlyCollection<string> themeScopes,
+        ThemeResourceReference reference)
+    {
+        var matches = resources
+            .Where(resource => string.Equals(resource.Key, reference.Key, StringComparison.Ordinal))
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            return false;
+        }
+
+        if (matches.Any(static resource => string.Equals(resource.ThemeScope, ThemeProjectStorage.BaseVariant, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (!string.Equals(reference.ThemeScope, ThemeProjectStorage.BaseVariant, StringComparison.OrdinalIgnoreCase))
+        {
+            return matches.Any(resource => string.Equals(resource.ThemeScope, reference.ThemeScope, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return themeScopes.Count > 0 &&
+               themeScopes.All(scope => matches.Any(resource => string.Equals(resource.ThemeScope, scope, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static string GetSnippet(IReadOnlyList<string> lines, int line)
+    {
+        return line > 0 && line <= lines.Count
+            ? lines[line - 1].Trim()
+            : string.Empty;
     }
 
     private static int? GetLineNumber(XObject value)
