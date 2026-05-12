@@ -140,10 +140,19 @@ public static class RuntimeXamlPreviewLoader
         try
         {
             var document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace);
-            var preview = document.Root?
+            var root = document.Root;
+            var preview = root?
                 .Elements()
                 .FirstOrDefault(static element => element.Name.LocalName == "Design.PreviewWith");
-            return preview?.Elements().FirstOrDefault()?.ToString(SaveOptions.DisableFormatting);
+            var content = preview?.Elements().FirstOrDefault();
+            if (root is null || content is null)
+            {
+                return null;
+            }
+
+            var previewContent = new XElement(content);
+            AddInheritedNamespaceDeclarations(previewContent, root);
+            return previewContent.ToString(SaveOptions.DisableFormatting);
         }
         catch
         {
@@ -178,6 +187,23 @@ public static class RuntimeXamlPreviewLoader
             ">\n" +
             RemoveXmlnsDeclarations(previewContent) +
             "\n</UserControl>";
+    }
+
+    private static void AddInheritedNamespaceDeclarations(XElement content, XElement root)
+    {
+        var existing = content
+            .Attributes()
+            .Where(static attribute => attribute.IsNamespaceDeclaration)
+            .Select(static attribute => attribute.Name)
+            .ToHashSet();
+
+        foreach (var attribute in root.Attributes().Where(static attribute => attribute.IsNamespaceDeclaration))
+        {
+            if (existing.Add(attribute.Name))
+            {
+                content.Add(new XAttribute(attribute.Name, attribute.Value));
+            }
+        }
     }
 
     private static string CreateEmptyResourcePreview(string documentName)

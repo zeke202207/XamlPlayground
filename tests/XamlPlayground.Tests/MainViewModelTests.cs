@@ -629,6 +629,37 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ResourceDictionaryPreview_PreservesRootNamespacesUsedByMarkupExtensions()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            const string xaml = """
+                                <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                    xmlns:tests="clr-namespace:XamlPlayground.Tests;assembly=XamlPlayground.Tests">
+                                  <Design.PreviewWith>
+                                    <TextBlock Text="{x:Static tests:RuntimePreviewDesignData.Message}" />
+                                  </Design.PreviewWith>
+                                </ResourceDictionary>
+                                """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+            var preview = RuntimeXamlPreviewLoader.LoadResourceDictionaryPreview(
+                xaml,
+                typeof(RuntimePreviewDesignData).Assembly,
+                "Themes/Preview.axaml",
+                diagnostics);
+
+            var userControl = Assert.IsType<UserControl>(preview);
+            var textBlock = Assert.IsType<TextBlock>(userControl.Content);
+            Assert.Equal(RuntimePreviewDesignData.Message, textBlock.Text);
+            Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+        });
+    }
+
+    [Fact]
     public void CreateCustomControlThemeCommand_CreatesThemeFromSelectedFluentTemplateWithoutPreviewSelection()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -1382,4 +1413,9 @@ public sealed class MainViewModelTests
 
         return null;
     }
+}
+
+public static class RuntimePreviewDesignData
+{
+    public const string Message = "Preview namespace value";
 }

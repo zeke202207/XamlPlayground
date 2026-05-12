@@ -111,6 +111,31 @@ public sealed class ThemeResourceAnalyzerTests
     }
 
     [Fact]
+    public void ThemeResourceEditor_RemovesSettersThatReferenceDeletedResources()
+    {
+        const string xaml = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <Style Selector="Button">
+                                <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource OtherBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                              </Style>
+                              <Button Background="{StaticResource AccentBrush}" Content="Save" />
+                            </ResourceDictionary>
+                            """;
+
+        var cleaned = ThemeResourceEditor.RemoveResourceReferences(xaml, "AccentBrush");
+
+        Assert.DoesNotContain("Property=\"Background\"", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Property=\"BorderBrush\"", cleaned, System.StringComparison.Ordinal);
+        Assert.Contains("Property=\"Foreground\" Value=\"{DynamicResource OtherBrush}\"", cleaned, System.StringComparison.Ordinal);
+        Assert.Contains("<Button Content=\"Save\"", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("{StaticResource AccentBrush}", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("{DynamicResource AccentBrush}", cleaned, System.StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ThemeResourceEditor_EditsResourcesInsideThemeDictionaries()
     {
         const string xaml = """

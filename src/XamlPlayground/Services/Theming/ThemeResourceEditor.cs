@@ -268,6 +268,8 @@ public static class ThemeResourceEditor
 
     private static string RemoveResourceReferenceAttributes(string xaml, string key)
     {
+        xaml = RemoveResourceReferenceSetters(xaml, key);
+
         var attributeRegex = new Regex(
             "\\s+[A-Za-z_][A-Za-z0-9_.:-]*\\s*=\\s*\"(?<value>[^\"]*)\"",
             RegexOptions.CultureInvariant);
@@ -279,6 +281,52 @@ public static class ThemeResourceEditor
                 ? string.Empty
                 : match.Value;
         });
+    }
+
+    private static string RemoveResourceReferenceSetters(string xaml, string key)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+        }
+        catch (XmlException)
+        {
+            return xaml;
+        }
+
+        var setters = document
+            .Descendants()
+            .Where(element => element.Name.LocalName == "Setter" && SetterReferencesResource(element, key))
+            .ToArray();
+        if (setters.Length == 0)
+        {
+            return xaml;
+        }
+
+        foreach (var setter in setters)
+        {
+            setter.Remove();
+        }
+
+        return Serialize(document);
+    }
+
+    private static bool SetterReferencesResource(XElement setter, string key)
+    {
+        var valueAttribute = setter
+            .Attributes()
+            .FirstOrDefault(static attribute => attribute.Name.LocalName == "Value");
+        if (valueAttribute is not null &&
+            IsExactResourceReference(valueAttribute.Value, key))
+        {
+            return true;
+        }
+
+        return setter
+            .Elements()
+            .Any(element => element.Name.LocalName == "Setter.Value" &&
+                            IsExactResourceReference(element.Value, key));
     }
 
     private static bool IsExactResourceReference(string value, string key)
