@@ -231,6 +231,34 @@ public sealed class ThemeResourceAnalyzerTests
     }
 
     [Fact]
+    public void ThemeResourceEditor_RenamesObjectElementResourceReferences()
+    {
+        const string xaml = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <Style Selector="Button">
+                                <Setter Property="Background">
+                                  <Setter.Value>
+                                    <StaticResource ResourceKey="AccentBrush" />
+                                  </Setter.Value>
+                                </Setter>
+                                <Setter Property="BorderBrush">
+                                  <Setter.Value>
+                                    <DynamicResource>AccentBrush</DynamicResource>
+                                  </Setter.Value>
+                                </Setter>
+                              </Style>
+                            </ResourceDictionary>
+                            """;
+
+        var renamed = ThemeResourceEditor.RenameResourceReferences(xaml, "AccentBrush", "PrimaryBrush");
+
+        Assert.Contains("ResourceKey=\"PrimaryBrush\"", renamed, System.StringComparison.Ordinal);
+        Assert.Contains("<DynamicResource>PrimaryBrush</DynamicResource>", renamed, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("AccentBrush", renamed, System.StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ThemeResourceEditor_EditsResourcesInsideThemeDictionaries()
     {
         const string xaml = """

@@ -51,7 +51,10 @@ public static class ThemeResourceEditor
             return xaml;
         }
 
-        return ResourceReferenceParser.ReplaceKeys(xaml, oldKey, newKey);
+        return RenameObjectElementResourceReferences(
+            ResourceReferenceParser.ReplaceKeys(xaml, oldKey, newKey),
+            oldKey,
+            newKey);
     }
 
     public static string RemoveResourceReferences(
@@ -338,6 +341,78 @@ public static class ThemeResourceEditor
 
         return string.Equals(element.Value.Trim(), key, StringComparison.Ordinal) ||
                IsExactResourceReference(element.Value, key);
+    }
+
+    private static string RenameObjectElementResourceReferences(string xaml, string oldKey, string newKey)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+        }
+        catch (XmlException)
+        {
+            return xaml;
+        }
+
+        var changed = false;
+        foreach (var element in document
+                     .Descendants()
+                     .Where(static element => element.Name.LocalName is "StaticResource" or "DynamicResource"))
+        {
+            var resourceKey = element
+                .Attributes()
+                .FirstOrDefault(static attribute => attribute.Name.LocalName == "ResourceKey");
+            if (resourceKey is not null)
+            {
+                if (TryRenameResourceKeyValue(resourceKey.Value, oldKey, newKey, out var renamedValue))
+                {
+                    resourceKey.Value = renamedValue;
+                    changed = true;
+                }
+
+                continue;
+            }
+
+            if (TryRenameResourceKeyValue(element.Value, oldKey, newKey, out var renamedText))
+            {
+                element.Value = renamedText;
+                changed = true;
+            }
+        }
+
+        return changed
+            ? Serialize(document)
+            : xaml;
+    }
+
+    private static bool TryRenameResourceKeyValue(
+        string value,
+        string oldKey,
+        string newKey,
+        out string renamedValue)
+    {
+        if (string.Equals(value.Trim(), oldKey, StringComparison.Ordinal))
+        {
+            renamedValue = PreserveTrimmedReplacement(value, newKey);
+            return true;
+        }
+
+        if (IsExactResourceReference(value, oldKey))
+        {
+            renamedValue = ResourceReferenceParser.ReplaceKeys(value, oldKey, newKey);
+            return true;
+        }
+
+        renamedValue = value;
+        return false;
+    }
+
+    private static string PreserveTrimmedReplacement(string value, string replacement)
+    {
+        var leadingLength = value.Length - value.TrimStart().Length;
+        var trailingLength = value.Length - value.TrimEnd().Length;
+        return value[..leadingLength] + replacement + value[(value.Length - trailingLength)..];
     }
 
     private static bool IsExactResourceReference(string value, string key)
