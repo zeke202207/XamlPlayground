@@ -191,6 +191,11 @@ public sealed class ThemeResourceAnalyzerTests
                                 <Setter Property="Background" Value="{StaticResource AccentBrush}" />
                                 <Setter Property="Foreground" Value="{DynamicResource OtherBrush}" />
                                 <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                <Setter Property="CaretBrush">
+                                  <Setter.Value>
+                                    <StaticResource ResourceKey="AccentBrush" />
+                                  </Setter.Value>
+                                </Setter>
                               </Style>
                               <Button Background="{StaticResource AccentBrush}" Content="Save" />
                             </ResourceDictionary>
@@ -200,10 +205,12 @@ public sealed class ThemeResourceAnalyzerTests
 
         Assert.DoesNotContain("Property=\"Background\"", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Property=\"BorderBrush\"", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Property=\"CaretBrush\"", cleaned, System.StringComparison.Ordinal);
         Assert.Contains("Property=\"Foreground\" Value=\"{DynamicResource OtherBrush}\"", cleaned, System.StringComparison.Ordinal);
         Assert.Contains("<Button Content=\"Save\"", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("{StaticResource AccentBrush}", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("{DynamicResource AccentBrush}", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("ResourceKey=\"AccentBrush\"", cleaned, System.StringComparison.Ordinal);
     }
 
     [Fact]

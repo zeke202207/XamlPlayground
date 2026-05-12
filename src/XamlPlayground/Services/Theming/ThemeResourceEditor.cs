@@ -307,7 +307,37 @@ public static class ThemeResourceEditor
         return setter
             .Elements()
             .Any(element => element.Name.LocalName == "Setter.Value" &&
-                            IsExactResourceReference(element.Value, key));
+                            SetterValueElementReferencesResource(element, key));
+    }
+
+    private static bool SetterValueElementReferencesResource(XElement setterValue, string key)
+    {
+        return IsExactResourceReference(setterValue.Value, key) ||
+               setterValue
+                   .Descendants()
+                   .Any(element => IsResourceReferenceElement(element, key));
+    }
+
+    private static bool IsResourceReferenceElement(XElement element, string key)
+    {
+        if (element.Name.LocalName is not ("StaticResource" or "DynamicResource"))
+        {
+            return false;
+        }
+
+        var resourceKey = element
+            .Attributes()
+            .FirstOrDefault(static attribute => attribute.Name.LocalName == "ResourceKey")
+            ?.Value;
+        if (!string.IsNullOrWhiteSpace(resourceKey) &&
+            (string.Equals(resourceKey, key, StringComparison.Ordinal) ||
+             IsExactResourceReference(resourceKey, key)))
+        {
+            return true;
+        }
+
+        return string.Equals(element.Value.Trim(), key, StringComparison.Ordinal) ||
+               IsExactResourceReference(element.Value, key);
     }
 
     private static bool IsExactResourceReference(string value, string key)
