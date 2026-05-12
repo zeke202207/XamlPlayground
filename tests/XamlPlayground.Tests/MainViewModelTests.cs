@@ -673,7 +673,11 @@ public sealed class MainViewModelTests
                                          <Button Theme="{StaticResource MyButtonTheme}" />
                                        </Design.PreviewWith>
                                        <ControlTheme x:Key="MyButtonTheme" TargetType="Button">
-                                         <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+                                         <Setter Property="Background">
+                                           <Setter.Value>
+                                             <StaticResource ResourceKey="AccentBrush" />
+                                           </Setter.Value>
+                                         </Setter>
                                        </ControlTheme>
                                      </ResourceDictionary>
                                      """;

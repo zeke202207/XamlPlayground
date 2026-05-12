@@ -207,6 +207,25 @@ public static class ResourceDictionaryAnalyzer
                 }
             }
 
+            foreach (var scopedElement in EnumerateReferenceElements(root, ThemeProjectStorage.BaseVariant))
+            {
+                if (!TryGetObjectElementResourceReference(scopedElement.Element, out var key, out var kind))
+                {
+                    continue;
+                }
+
+                var line = GetLineNumber(scopedElement.Element) ?? 1;
+                yield return new ThemeResourceReference(
+                    key,
+                    kind,
+                    document.Path,
+                    line,
+                    GetSnippet(lines, line))
+                {
+                    ThemeScope = scopedElement.ThemeScope
+                };
+            }
+
             yield break;
         }
 
@@ -225,6 +244,36 @@ public static class ResourceDictionaryAnalyzer
         }
     }
 
+    private static bool TryGetObjectElementResourceReference(
+        XElement element,
+        out string key,
+        out ThemeResourceReferenceKind kind)
+    {
+        key = string.Empty;
+        kind = default;
+
+        switch (element.Name.LocalName)
+        {
+            case "StaticResource":
+                kind = ThemeResourceReferenceKind.StaticResource;
+                break;
+
+            case "DynamicResource":
+                kind = ThemeResourceReferenceKind.DynamicResource;
+                break;
+
+            default:
+                return false;
+        }
+
+        key = element
+            .Attributes()
+            .FirstOrDefault(static attribute => attribute.Name.LocalName == "ResourceKey")
+            ?.Value
+            .Trim() ?? element.Value.Trim();
+        return !string.IsNullOrWhiteSpace(key);
+    }
+
     private static XDocument? TryParseDocument(string text)
     {
         try
@@ -237,16 +286,27 @@ public static class ResourceDictionaryAnalyzer
         }
     }
 
+    private static IEnumerable<(XElement Element, string ThemeScope)> EnumerateReferenceElements(
+        XElement element,
+        string themeScope)
+    {
+        var currentScope = GetElementThemeScope(element, themeScope);
+        yield return (element, currentScope);
+
+        foreach (var child in element.Elements())
+        {
+            foreach (var scopedElement in EnumerateReferenceElements(child, currentScope))
+            {
+                yield return scopedElement;
+            }
+        }
+    }
+
     private static IEnumerable<(XAttribute Attribute, string ThemeScope)> EnumerateReferenceAttributes(
         XElement element,
         string themeScope)
     {
-        var currentScope = themeScope;
-        if (element.Parent?.Name.LocalName == "ResourceDictionary.ThemeDictionaries" &&
-            element.Name.LocalName == "ResourceDictionary")
-        {
-            currentScope = element.Attribute(XamlNamespace + "Key")?.Value ?? themeScope;
-        }
+        var currentScope = GetElementThemeScope(element, themeScope);
 
         foreach (var attribute in element.Attributes())
         {
@@ -260,6 +320,14 @@ public static class ResourceDictionaryAnalyzer
                 yield return attribute;
             }
         }
+    }
+
+    private static string GetElementThemeScope(XElement element, string fallbackScope)
+    {
+        return element.Parent?.Name.LocalName == "ResourceDictionary.ThemeDictionaries" &&
+               element.Name.LocalName == "ResourceDictionary"
+            ? element.Attribute(XamlNamespace + "Key")?.Value ?? fallbackScope
+            : fallbackScope;
     }
 
     private static IEnumerable<ThemeResourceDiagnostic> FindDuplicateDiagnostics(

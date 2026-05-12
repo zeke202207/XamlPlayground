@@ -109,6 +109,60 @@ public sealed class ThemeResourceAnalyzerTests
     }
 
     [Fact]
+    public void Analyze_RecordsObjectElementResourceReferences()
+    {
+        var analysis = ResourceDictionaryAnalyzer.Analyze(new[]
+        {
+            new ThemeResourceDocument(
+                "Themes/Palette.axaml",
+                """
+                <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                  <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+                  <SolidColorBrush x:Key="BorderBrush" Color="Blue" />
+                </ResourceDictionary>
+                """,
+                IsResourceDictionary: true),
+            new ThemeResourceDocument(
+                "Themes/Button.axaml",
+                """
+                <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                  <Style Selector="Button">
+                    <Setter Property="Background">
+                      <Setter.Value>
+                        <StaticResource ResourceKey="AccentBrush" />
+                      </Setter.Value>
+                    </Setter>
+                    <Setter Property="BorderBrush">
+                      <Setter.Value>
+                        <DynamicResource>BorderBrush</DynamicResource>
+                      </Setter.Value>
+                    </Setter>
+                    <Setter Property="Foreground">
+                      <Setter.Value>
+                        <StaticResource ResourceKey="MissingBrush" />
+                      </Setter.Value>
+                    </Setter>
+                  </Style>
+                </ResourceDictionary>
+                """,
+                IsResourceDictionary: true)
+        });
+
+        Assert.Contains(analysis.References, reference =>
+            reference.Key == "AccentBrush" &&
+            reference.Kind == ThemeResourceReferenceKind.StaticResource);
+        Assert.Contains(analysis.References, reference =>
+            reference.Key == "BorderBrush" &&
+            reference.Kind == ThemeResourceReferenceKind.DynamicResource);
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Resource 'MissingBrush' is referenced but not defined", System.StringComparison.Ordinal));
+        Assert.DoesNotContain(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Resource 'AccentBrush' is referenced but not defined", System.StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Analyze_WarnsWhenBaseReferenceOnlyExistsInOneThemeScope()
     {
         var analysis = ResourceDictionaryAnalyzer.Analyze(new[]
