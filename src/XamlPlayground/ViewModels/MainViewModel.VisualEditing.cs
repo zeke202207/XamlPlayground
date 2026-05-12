@@ -1313,28 +1313,14 @@ public partial class MainViewModel
             return false;
         }
 
-        var trimmed = value.Trim();
-        foreach (var prefix in new[] { "{StaticResource", "{DynamicResource" })
+        if (!ResourceReferenceParser.TryGetExactKey(value, out var referenceKey) ||
+            string.IsNullOrWhiteSpace(referenceKey))
         {
-            if (!trimmed.StartsWith(prefix, StringComparison.Ordinal) ||
-                !trimmed.EndsWith("}", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var content = trimmed[prefix.Length..^1].Trim();
-            const string resourceKeyPrefix = "ResourceKey=";
-            if (content.StartsWith(resourceKeyPrefix, StringComparison.Ordinal))
-            {
-                content = content[resourceKeyPrefix.Length..].Trim();
-            }
-
-            var separator = content.IndexOfAny(new[] { ',', ' ' });
-            key = separator < 0 ? content : content[..separator];
-            return !string.IsNullOrWhiteSpace(key);
+            return false;
         }
 
-        return false;
+        key = referenceKey;
+        return true;
     }
 
     private void ApplyVisualEditorProperty()

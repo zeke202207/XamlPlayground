@@ -1086,6 +1086,7 @@ public sealed class MainViewModelTests
                                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                                 xmlns:sys="clr-namespace:System;assembly=System.Runtime">
               <SolidColorBrush x:Key="PickerBrush" Color="Red" />
+              <ControlTheme x:Key="{x:Type Button}" TargetType="Button" />
               <DataTemplate x:Key="PersonTemplate" DataType="sys:String">
                 <TextBlock Text="{Binding}" />
               </DataTemplate>
@@ -1120,6 +1121,20 @@ public sealed class MainViewModelTests
         viewModel.ApplyVisualEditorPropertyCommand.Execute(null);
 
         Assert.Contains("Background=\"{DynamicResource PickerBrush}\"", mainFile.Text, StringComparison.Ordinal);
+        Assert.True(viewModel.OpenVisualEditorPropertyResourceCommand.CanExecute(null));
+        viewModel.OpenVisualEditorPropertyResourceCommand.Execute(null);
+        Assert.Equal("Themes/Palette.axaml", viewModel.ActiveXamlFile!.Path);
+
+        viewModel.ActiveXamlFile = mainFile;
+        Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, buttonStart, 0, buttonStart));
+        viewModel.VisualEditorPropertyValue = "{StaticResource ResourceKey='PickerBrush'}";
+        Assert.True(viewModel.OpenVisualEditorPropertyResourceCommand.CanExecute(null));
+        viewModel.OpenVisualEditorPropertyResourceCommand.Execute(null);
+        Assert.Equal("Themes/Palette.axaml", viewModel.ActiveXamlFile!.Path);
+
+        viewModel.ActiveXamlFile = mainFile;
+        Assert.True(viewModel.SelectVisualEditorSourceRange(mainFile.Path, buttonStart, 0, buttonStart));
+        viewModel.VisualEditorPropertyValue = "{StaticResource {x:Type Button}}";
         Assert.True(viewModel.OpenVisualEditorPropertyResourceCommand.CanExecute(null));
         viewModel.OpenVisualEditorPropertyResourceCommand.Execute(null);
         Assert.Equal("Themes/Palette.axaml", viewModel.ActiveXamlFile!.Path);
