@@ -319,10 +319,9 @@ public sealed class AnimationTimelineEditor
     private static void SetStyleAnimation(XElement style, AnimationTimelineDefinition timeline)
     {
         var ns = style.GetDefaultNamespace();
-        style
+        var animations = style
             .Elements()
-            .Where(static element => element.Name.LocalName == "Style.Animations")
-            .Remove();
+            .FirstOrDefault(static element => element.Name.LocalName == "Style.Animations");
 
         var animation = new XElement(ns + "Animation");
         SetOptionalAttribute(animation, "Duration", string.IsNullOrWhiteSpace(timeline.Duration) ? "0:0:0.3" : timeline.Duration);
@@ -367,7 +366,22 @@ public sealed class AnimationTimelineEditor
             animation.Add(keyFrame);
         }
 
-        style.Add(new XElement(ns + "Style.Animations", animation));
+        if (animations is null)
+        {
+            style.Add(new XElement(ns + "Style.Animations", animation));
+            return;
+        }
+
+        var existingAnimation = animations
+            .Elements()
+            .FirstOrDefault(static element => element.Name.LocalName == "Animation");
+        if (existingAnimation is null)
+        {
+            animations.Add(animation);
+            return;
+        }
+
+        existingAnimation.ReplaceWith(animation);
     }
 
     private static void SetDirectSetter(XElement style, string propertyName, string value)

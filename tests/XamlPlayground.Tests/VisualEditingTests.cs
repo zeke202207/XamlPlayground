@@ -231,6 +231,43 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void AnimationTimelineEditor_PreservesSiblingAnimationsWhenApplyingTimeline()
+    {
+        var editor = new AnimationTimelineEditor();
+        var xaml = """
+                   <Grid xmlns="https://github.com/avaloniaui">
+                     <Grid.Styles>
+                       <Style Selector="Button.primary">
+                         <Style.Animations>
+                           <Animation Duration="0:0:0.1" FillMode="Both">
+                             <KeyFrame Cue="0%">
+                               <Setter Property="Opacity" Value="0.1" />
+                             </KeyFrame>
+                           </Animation>
+                           <Animation Duration="0:0:1" Easing="SineEaseOut">
+                             <KeyFrame Cue="100%">
+                               <Setter Property="RenderTransform.ScaleX" Value="1.2" />
+                             </KeyFrame>
+                           </Animation>
+                         </Style.Animations>
+                       </Style>
+                     </Grid.Styles>
+                   </Grid>
+                   """;
+        var target = Assert.Single(editor.GetDocumentStyleTargets(xaml));
+        var timeline = CreateOpacityTimeline(target.Selector, "0", "1");
+
+        var edit = editor.SetDocumentStyleAnimation(xaml, target.Index, target.Selector, timeline);
+
+        Assert.True(edit.Changed, edit.Error);
+        Assert.Equal(2, edit.Text.Split("<Animation Duration=", StringSplitOptions.None).Length - 1);
+        Assert.Contains("<Animation Duration=\"0:0:0.25\" PlaybackDirection=\"Normal\" FillMode=\"Both\" Easing=\"CubicEaseOut\">", edit.Text, StringComparison.Ordinal);
+        Assert.Contains("<Animation Duration=\"0:0:1\" Easing=\"SineEaseOut\">", edit.Text, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"RenderTransform.ScaleX\" Value=\"1.2\" />", edit.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Value=\"0.1\"", edit.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnimationTimelineEditor_AppliesDocumentStyleFrameSetter()
     {
         var editor = new AnimationTimelineEditor();
