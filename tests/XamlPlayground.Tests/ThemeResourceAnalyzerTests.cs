@@ -476,7 +476,7 @@ public sealed class ThemeResourceAnalyzerTests
         var partEdit = ControlThemeEditor.SetSelectorSetter(
             stateEdit.Text,
             "MyButtonTheme1",
-            "^ /template/ Border#PART_Chrome:pointerover",
+            "^:pointerover /template/ Border#PART_Chrome",
             "Background",
             "{DynamicResource AccentBrush}");
         var previewEdit = ControlThemeEditor.SetDesignPreview(
@@ -487,7 +487,7 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.Contains("Selector=\"^:pointerover\"", stateEdit.Text, System.StringComparison.Ordinal);
         Assert.Contains("Property=\"Opacity\" Value=\"0.8\"", stateEdit.Text, System.StringComparison.Ordinal);
         Assert.True(partEdit.Changed);
-        Assert.Contains("Selector=\"^ /template/ Border#PART_Chrome:pointerover\"", partEdit.Text, System.StringComparison.Ordinal);
+        Assert.Contains("Selector=\"^:pointerover /template/ Border#PART_Chrome\"", partEdit.Text, System.StringComparison.Ordinal);
         Assert.Contains("Property=\"Background\" Value=\"{DynamicResource AccentBrush}\"", partEdit.Text, System.StringComparison.Ordinal);
         Assert.True(previewEdit.Changed);
         Assert.Contains("RequestedThemeVariant=\"Light\"", previewEdit.Text, System.StringComparison.Ordinal);

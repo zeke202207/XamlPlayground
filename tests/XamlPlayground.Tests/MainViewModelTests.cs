@@ -1207,7 +1207,7 @@ public sealed class MainViewModelTests
             viewModel.ApplyThemeTemplatePartSetterCommand.Execute(null);
 
             Assert.Contains(
-                "Selector=\"^ /template/ ContentPresenter#PART_ContentPresenter:pointerover\"",
+                "Selector=\"^:pointerover /template/ ContentPresenter#PART_ContentPresenter\"",
                 themeFile.Text,
                 StringComparison.Ordinal);
             Assert.Contains("Property=\"Opacity\" Value=\"0.7\"", themeFile.Text, StringComparison.Ordinal);

@@ -2907,7 +2907,7 @@ public partial class MainViewModel
         var selector = $"^ /template/ {part.Type}#{part.Name}";
         return state is null || string.Equals(state.State, "normal", StringComparison.Ordinal)
             ? selector
-            : $"{selector}:{state.State.TrimStart(':')}";
+            : $"^:{state.State.TrimStart(':')} /template/ {part.Type}#{part.Name}";
     }
 
     private bool CanCreateThemeVariantPreview()
