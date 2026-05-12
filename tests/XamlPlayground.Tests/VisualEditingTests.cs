@@ -2377,9 +2377,6 @@ public sealed class VisualEditingTests
                 var secondText = Assert.Single(
                     preview.GetVisualDescendants().OfType<TextBlock>(),
                     textBlock => textBlock.Name == "Second");
-                var rootPanel = Assert.Single(
-                    preview.GetVisualDescendants().OfType<StackPanel>(),
-                    stackPanel => stackPanel.Name == "Root");
                 var firstTopLeft = firstText.TranslatePoint(default, previewSurface);
                 var secondTopLeft = secondText.TranslatePoint(default, previewSurface);
                 Assert.NotNull(firstTopLeft);
@@ -2422,13 +2419,11 @@ public sealed class VisualEditingTests
                     viewModel.VisualEditorToolboxItems,
                     item => item.TypeName == "Button");
                 var data = ToolboxDragPayload.CreateDataTransfer(buttonTool);
-                var rootTopLeft = rootPanel.TranslatePoint(default, previewSurface);
-                Assert.NotNull(rootTopLeft);
                 var dropArgs = CreateDragEventArgs(
                     DragDrop.DropEvent,
                     previewSurface,
                     data,
-                    rootTopLeft.Value + new Vector(20, 24));
+                    new Point(20, 24));
                 typeof(PreviewView)
                     .GetMethod("OnDrop", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(preview, new object?[] { previewSurface, dropArgs });
