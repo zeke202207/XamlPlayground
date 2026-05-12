@@ -81,6 +81,114 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void AnimationTimelineEditor_PreservesElementLexicalFormattingWhenAddingAnimation()
+    {
+        var editor = new AnimationTimelineEditor();
+        var xaml = string.Join(
+            "\r\n",
+            "<Grid xmlns=\"https://github.com/avaloniaui\"",
+            "      xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">",
+            "\t<Button",
+            "\t\tx:Name='SaveButton'",
+            "\t\tContent = 'Save' />",
+            "\t<TextBlock Text='Keep' />",
+            "</Grid>") + "\r\n";
+        var timeline = CreateOpacityTimeline("^", "0", "1");
+
+        var edit = editor.SetElementAnimation(xaml, XamlElementSelector.ByName("SaveButton"), timeline);
+
+        Assert.True(edit.Changed, edit.Error);
+        Assert.Contains("\t\tx:Name='SaveButton'\r\n\t\tContent = 'Save'>", edit.Text, StringComparison.Ordinal);
+        Assert.Contains("\r\n\t<TextBlock Text='Keep' />\r\n", edit.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"SaveButton\"", edit.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Content=\"Save\"", edit.Text, StringComparison.Ordinal);
+        Assert.Contains("\r\n\t\t<Button.Styles>\r\n", edit.Text, StringComparison.Ordinal);
+        Assert.Contains("\r\n\t\t\t<Style Selector=\"Button\">\r\n", edit.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnimationTimelineEditor_PreservesCarriageReturnOnlyLineEndings()
+    {
+        var editor = new AnimationTimelineEditor();
+        var xaml = string.Join(
+            "\r",
+            "<Grid xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">",
+            "  <Button x:Name=\"SaveButton\" />",
+            "</Grid>") + "\r";
+        var timeline = CreateOpacityTimeline("^", "0", "1");
+
+        var edit = editor.SetElementAnimation(xaml, XamlElementSelector.ByName("SaveButton"), timeline);
+
+        Assert.True(edit.Changed, edit.Error);
+        Assert.DoesNotContain("\n", edit.Text, StringComparison.Ordinal);
+        Assert.Contains("\r  <Button x:Name=\"SaveButton\">\r", edit.Text, StringComparison.Ordinal);
+        Assert.Contains("\r    <Button.Styles>\r", edit.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnimationTimelineEditor_RejectsMalformedXamlBeforeEditing()
+    {
+        var editor = new AnimationTimelineEditor();
+        var xaml = """
+                   <Grid xmlns="https://github.com/avaloniaui">
+                     <Button x:Name="SaveButton">
+                   </Grid>
+                   """;
+        var timeline = CreateOpacityTimeline("^", "0", "1");
+
+        var edit = editor.SetElementAnimation(xaml, XamlElementSelector.ByName("SaveButton"), timeline);
+
+        Assert.False(edit.Changed);
+        Assert.Equal(xaml, edit.Text);
+        Assert.NotNull(edit.Error);
+    }
+
+    [Fact]
+    public void AnimationTimelineEditor_ReplacesOnlyEditedAnimationBlock()
+    {
+        var editor = new AnimationTimelineEditor();
+        var xaml = string.Join(
+            "\r\n",
+            "<Grid xmlns=\"https://github.com/avaloniaui\">",
+            "\t<Grid.Styles>",
+            "\t\t<Style Selector=\"Button.primary\">",
+            "\t\t\t<Setter Property=\"MinWidth\" Value=\"80\" />",
+            "\t\t\t<Style.Animations>",
+            "\t\t\t\t<Animation Duration=\"0:0:0.1\" FillMode=\"Both\">",
+            "\t\t\t\t\t<KeyFrame Cue=\"0%\">",
+            "\t\t\t\t\t\t<Setter Property=\"Opacity\" Value=\"0.1\" />",
+            "\t\t\t\t\t</KeyFrame>",
+            "\t\t\t\t</Animation>",
+            "\t\t\t\t<Animation Duration=\"0:0:1\" Easing=\"SineEaseOut\">",
+            "\t\t\t\t\t<KeyFrame Cue=\"100%\">",
+            "\t\t\t\t\t\t<Setter Property=\"RenderTransform.ScaleX\" Value=\"1.2\" />",
+            "\t\t\t\t\t</KeyFrame>",
+            "\t\t\t\t</Animation>",
+            "\t\t\t</Style.Animations>",
+            "\t\t</Style>",
+            "\t</Grid.Styles>",
+            "\t<Button Classes=\"primary\" />",
+            "</Grid>") + "\r\n";
+        var target = Assert.Single(editor.GetDocumentStyleTargets(xaml));
+        var timeline = CreateOpacityTimeline(target.Selector, "0", "1");
+        var siblingAnimation = string.Join(
+            "\r\n",
+            "\t\t\t\t<Animation Duration=\"0:0:1\" Easing=\"SineEaseOut\">",
+            "\t\t\t\t\t<KeyFrame Cue=\"100%\">",
+            "\t\t\t\t\t\t<Setter Property=\"RenderTransform.ScaleX\" Value=\"1.2\" />",
+            "\t\t\t\t\t</KeyFrame>",
+            "\t\t\t\t</Animation>");
+
+        var edit = editor.SetDocumentStyleAnimation(xaml, target.Index, target.Selector, timeline);
+
+        Assert.True(edit.Changed, edit.Error);
+        Assert.Contains("\t\t\t<Setter Property=\"MinWidth\" Value=\"80\" />\r\n", edit.Text, StringComparison.Ordinal);
+        Assert.Contains(siblingAnimation, edit.Text, StringComparison.Ordinal);
+        Assert.Contains("\t<Button Classes=\"primary\" />\r\n", edit.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Value=\"0.1\"", edit.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnimationTimelineEditor_NormalizesElementNestingSelectorToControlType()
     {
         TestApplication.EnsureAvaloniaInitialized();
