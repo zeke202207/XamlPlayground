@@ -117,8 +117,11 @@
               AutoExpandSelectedItem="True"
               SelectionMode="Single"
               AutoGenerateColumns="False"
-              IsReadOnly="True"
+              IsReadOnly="False"
               CanUserSortColumns="True"
+              CanUserReorderRows="True"
+              RowDragHandle="RowHeaderAndRow"
+              RowDragHandleVisible="True"
               GridLinesVisibility="Horizontal"
               HeadersVisibility="Column"
               Margin="4">
