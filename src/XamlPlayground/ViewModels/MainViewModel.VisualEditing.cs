@@ -2303,6 +2303,352 @@ public partial class MainViewModel
         return insertion.Success;
     }
 
+    public bool CanInsertToolboxItemIntoStructure(
+        ToolboxItemDescriptor item,
+        XamlElementSnapshot target,
+        VisualEditorStructureDropPosition position)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (ActiveXamlFile is null)
+        {
+            return false;
+        }
+
+        return ResolveStructureInsertionTarget(
+            _visualMutationEngine.Analyze(ActiveXamlFile.Text),
+            target,
+            position,
+            out _,
+            out _,
+            setStatus: false);
+    }
+
+    public bool InsertToolboxItemIntoStructure(
+        ToolboxItemDescriptor item,
+        XamlElementSnapshot target,
+        VisualEditorStructureDropPosition position)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (ActiveXamlFile is not { } xamlFile)
+        {
+            ClearVisualEditor("No XAML document selected.");
+            return false;
+        }
+
+        var document = _visualMutationEngine.Analyze(xamlFile.Text);
+        if (!ResolveStructureInsertionTarget(
+                document,
+                target,
+                position,
+                out var parent,
+                out var insertionIndex,
+                setStatus: true))
+        {
+            return false;
+        }
+
+        var selectedPath = parent.Path.Concat(new[] { insertionIndex }).ToArray();
+        _visualEditorSelectedSelector = XamlElementSelector.ByPath(selectedPath);
+        var insertion = _visualToolboxInsertion.Insert(
+            xamlFile.Text,
+            XamlElementSelector.ByPath(parent.Path.ToArray()),
+            item,
+            insertionIndex);
+
+        ApplyVisualEditorMutation(insertion.Mutation);
+
+        if (insertion.Success)
+        {
+            VisualEditorStatus = position switch
+            {
+                VisualEditorStructureDropPosition.Before => $"Inserted {item.TypeName} before {target.TypeName}.",
+                VisualEditorStructureDropPosition.After => $"Inserted {item.TypeName} after {target.TypeName}.",
+                _ => $"Inserted {item.TypeName} into {parent.TypeName}."
+            };
+        }
+
+        return insertion.Success;
+    }
+
+    public bool CanMoveVisualEditorElementInStructure(
+        XamlElementSnapshot source,
+        XamlElementSnapshot target,
+        VisualEditorStructureDropPosition position)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (ActiveXamlFile is not { } xamlFile)
+        {
+            return false;
+        }
+
+        var document = _visualMutationEngine.Analyze(xamlFile.Text);
+        var currentSource = FindElement(document, XamlElementSelector.ByPath(source.Path.ToArray()));
+        var currentTarget = FindElement(document, XamlElementSelector.ByPath(target.Path.ToArray()));
+        if (currentSource is null || currentTarget is null)
+        {
+            return false;
+        }
+
+        return ResolveStructureMoveTarget(
+            document,
+            currentSource,
+            currentTarget,
+            position,
+            out _,
+            out _,
+            out _,
+            setStatus: false);
+    }
+
+    public bool MoveVisualEditorElementInStructure(
+        XamlElementSnapshot source,
+        XamlElementSnapshot target,
+        VisualEditorStructureDropPosition position)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (ActiveXamlFile is not { } xamlFile)
+        {
+            ClearVisualEditor("No XAML document selected.");
+            return false;
+        }
+
+        var document = _visualMutationEngine.Analyze(xamlFile.Text);
+        var currentSource = FindElement(document, XamlElementSelector.ByPath(source.Path.ToArray()));
+        var currentTarget = FindElement(document, XamlElementSelector.ByPath(target.Path.ToArray()));
+        if (currentSource is null || currentTarget is null)
+        {
+            VisualEditorStatus = "The structure drop source or target is no longer available.";
+            return false;
+        }
+
+        if (!ResolveStructureMoveTarget(
+                document,
+                currentSource,
+                currentTarget,
+                position,
+                out var targetParent,
+                out var targetIndex,
+                out var selectedPathAfterMove,
+                setStatus: true))
+        {
+            return false;
+        }
+
+        var sourceSelector = XamlElementSelector.ByPath(currentSource.Path.ToArray());
+        var sourceParentPath = currentSource.Path.Take(currentSource.Path.Count - 1).ToArray();
+        var targetParentSelector = XamlElementSelector.ByPath(targetParent.Path.ToArray());
+        var result = sourceParentPath.SequenceEqual(targetParent.Path)
+            ? _visualMutationEngine.ReorderElement(xamlFile.Text, sourceSelector, targetIndex)
+            : _visualMutationEngine.MoveElement(xamlFile.Text, sourceSelector, targetParentSelector, targetIndex);
+
+        if (result.Success)
+        {
+            _visualEditorSelectedSelector = XamlElementSelector.ByPath(selectedPathAfterMove.ToArray());
+        }
+
+        ApplyVisualEditorMutation(result);
+
+        if (result.Success)
+        {
+            VisualEditorStatus = position switch
+            {
+                VisualEditorStructureDropPosition.Before => $"Moved {currentSource.TypeName} before {currentTarget.TypeName}.",
+                VisualEditorStructureDropPosition.After => $"Moved {currentSource.TypeName} after {currentTarget.TypeName}.",
+                _ => $"Moved {currentSource.TypeName} into {currentTarget.TypeName}."
+            };
+        }
+
+        return result.Success;
+    }
+
+    private bool ResolveStructureInsertionTarget(
+        XamlDocumentSnapshot document,
+        XamlElementSnapshot target,
+        VisualEditorStructureDropPosition position,
+        [NotNullWhen(true)] out XamlElementSnapshot? parent,
+        out int insertionIndex,
+        bool setStatus)
+    {
+        parent = null;
+        insertionIndex = 0;
+
+        var currentTarget = FindElement(document, XamlElementSelector.ByPath(target.Path.ToArray()));
+        if (currentTarget is null)
+        {
+            if (setStatus)
+            {
+                VisualEditorStatus = "The structure drop target is no longer available.";
+            }
+
+            return false;
+        }
+
+        if (currentTarget.Path.Count == 0)
+        {
+            parent = currentTarget;
+            insertionIndex = position switch
+            {
+                VisualEditorStructureDropPosition.Before => 0,
+                _ => currentTarget.ChildElementCount
+            };
+            return true;
+        }
+
+        if (position == VisualEditorStructureDropPosition.Inside)
+        {
+            if (!IsContainerElement(currentTarget))
+            {
+                if (setStatus)
+                {
+                    VisualEditorStatus = "Drop target must be a layout container.";
+                }
+
+                return false;
+            }
+
+            parent = currentTarget;
+            insertionIndex = currentTarget.ChildElementCount;
+            return true;
+        }
+
+        var parentPath = currentTarget.Path.Take(currentTarget.Path.Count - 1).ToArray();
+        parent = FindElement(document, XamlElementSelector.ByPath(parentPath));
+        if (parent is null)
+        {
+            if (setStatus)
+            {
+                VisualEditorStatus = "The structure drop parent is no longer available.";
+            }
+
+            return false;
+        }
+
+        insertionIndex = currentTarget.Path[^1] + (position == VisualEditorStructureDropPosition.After ? 1 : 0);
+        insertionIndex = Math.Clamp(insertionIndex, 0, parent.ChildElementCount);
+        return true;
+    }
+
+    private bool ResolveStructureMoveTarget(
+        XamlDocumentSnapshot document,
+        XamlElementSnapshot source,
+        XamlElementSnapshot target,
+        VisualEditorStructureDropPosition position,
+        [NotNullWhen(true)] out XamlElementSnapshot? targetParent,
+        out int targetIndex,
+        out IReadOnlyList<int> selectedPathAfterMove,
+        bool setStatus)
+    {
+        targetParent = null;
+        targetIndex = 0;
+        selectedPathAfterMove = Array.Empty<int>();
+
+        if (source.Path.Count == 0)
+        {
+            if (setStatus)
+            {
+                VisualEditorStatus = "The root element cannot be moved.";
+            }
+
+            return false;
+        }
+
+        if (source.Path.SequenceEqual(target.Path) ||
+            IsDescendantOf(target, source))
+        {
+            if (setStatus)
+            {
+                VisualEditorStatus = "Cannot move an element into itself.";
+            }
+
+            return false;
+        }
+
+        if (document.Root is null)
+        {
+            if (setStatus)
+            {
+                VisualEditorStatus = "No XAML document selected.";
+            }
+
+            return false;
+        }
+
+        if (position == VisualEditorStructureDropPosition.Inside)
+        {
+            if (!IsContainerElement(target))
+            {
+                if (setStatus)
+                {
+                    VisualEditorStatus = "Drop target must be a layout container.";
+                }
+
+                return false;
+            }
+
+            if (HasSameParent(source, target))
+            {
+                return false;
+            }
+
+            targetParent = target;
+            targetIndex = target.ChildElementCount;
+            selectedPathAfterMove = AdjustPathAfterRemoval(target.Path, source.Path)
+                .Concat(new[] { targetIndex })
+                .ToArray();
+            return true;
+        }
+
+        if (target.Path.Count == 0)
+        {
+            if (setStatus)
+            {
+                VisualEditorStatus = "The root element cannot be used as a sibling drop target.";
+            }
+
+            return false;
+        }
+
+        var targetParentPath = target.Path.Take(target.Path.Count - 1).ToArray();
+        var sourceParentPath = source.Path.Take(source.Path.Count - 1).ToArray();
+        targetParent = FindElement(document, XamlElementSelector.ByPath(targetParentPath));
+        if (targetParent is null)
+        {
+            if (setStatus)
+            {
+                VisualEditorStatus = "The structure drop parent is no longer available.";
+            }
+
+            return false;
+        }
+
+        targetIndex = target.Path[^1] + (position == VisualEditorStructureDropPosition.After ? 1 : 0);
+        if (sourceParentPath.SequenceEqual(targetParentPath) &&
+            source.Path[^1] < targetIndex)
+        {
+            targetIndex--;
+        }
+
+        if (sourceParentPath.SequenceEqual(targetParentPath) &&
+            source.Path[^1] == targetIndex)
+        {
+            return false;
+        }
+
+        selectedPathAfterMove = sourceParentPath.SequenceEqual(targetParentPath)
+            ? targetParentPath.Concat(new[] { targetIndex }).ToArray()
+            : AdjustPathAfterRemoval(targetParentPath, source.Path).Concat(new[] { targetIndex }).ToArray();
+        targetIndex = Math.Clamp(targetIndex, 0, targetParent.ChildElementCount);
+        return true;
+    }
+
     private XamlElementSnapshot? ResolvePreviewTargetElement(
         string xaml,
         Control targetControl,

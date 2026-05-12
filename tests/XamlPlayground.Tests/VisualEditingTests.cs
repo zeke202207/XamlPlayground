@@ -1,6 +1,8 @@
 using System.Reflection;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.DataGridDragDrop;
+using Avalonia.Controls.DataGridHierarchical;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
@@ -1402,6 +1404,81 @@ public sealed class VisualEditingTests
             Assert.True(targetEnd > targetStart);
             Assert.True(inserted > targetStart && inserted < targetEnd);
             Assert.True(peer > targetEnd);
+        });
+    }
+
+    [Fact]
+    public void MainViewModel_StructureTreeDropOperationsMutateXaml()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <StackPanel x:Name="TargetPanel" />
+                                               <Button x:Name="MoveMe" Content="Move" />
+                                               <Button x:Name="Peer" Content="Peer" />
+                                             </StackPanel>
+                                             """;
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+
+            var targetPanel = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "TargetPanel");
+            Assert.NotNull(targetPanel);
+            var textBlockTool = Assert.Single(
+                viewModel.VisualEditorToolboxItems,
+                item => item.TypeName == "TextBlock");
+
+            Assert.True(viewModel.InsertToolboxItemIntoStructure(
+                textBlockTool,
+                targetPanel!.Element,
+                VisualEditorStructureDropPosition.Inside));
+
+            var updated = viewModel.ActiveXamlFile.Text;
+            var targetPanelStart = updated.IndexOf("x:Name=\"TargetPanel\"", StringComparison.Ordinal);
+            var targetPanelEnd = updated.IndexOf("</StackPanel>", targetPanelStart, StringComparison.Ordinal);
+            var insertedTextBlock = updated.IndexOf("<TextBlock", targetPanelStart, StringComparison.Ordinal);
+            Assert.True(targetPanelStart >= 0);
+            Assert.True(targetPanelEnd > targetPanelStart);
+            Assert.True(insertedTextBlock > targetPanelStart && insertedTextBlock < targetPanelEnd);
+
+            var moveNode = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "MoveMe");
+            targetPanel = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "TargetPanel");
+            Assert.NotNull(moveNode);
+            Assert.NotNull(targetPanel);
+
+            Assert.True(viewModel.MoveVisualEditorElementInStructure(
+                moveNode!.Element,
+                targetPanel!.Element,
+                VisualEditorStructureDropPosition.Inside));
+
+            updated = viewModel.ActiveXamlFile.Text;
+            targetPanelStart = updated.IndexOf("x:Name=\"TargetPanel\"", StringComparison.Ordinal);
+            targetPanelEnd = updated.IndexOf("</StackPanel>", targetPanelStart, StringComparison.Ordinal);
+            var movedButton = updated.IndexOf("x:Name=\"MoveMe\"", StringComparison.Ordinal);
+            var peerButton = updated.IndexOf("x:Name=\"Peer\"", StringComparison.Ordinal);
+            Assert.True(movedButton > targetPanelStart && movedButton < targetPanelEnd);
+            Assert.True(peerButton > targetPanelEnd);
+            Assert.Equal(new[] { 0, 1 }, viewModel.SelectedVisualEditorNode?.Element.Path);
+
+            var peerNode = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "Peer");
+            targetPanel = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "TargetPanel");
+            Assert.NotNull(peerNode);
+            Assert.NotNull(targetPanel);
+
+            Assert.True(viewModel.MoveVisualEditorElementInStructure(
+                peerNode!.Element,
+                targetPanel!.Element,
+                VisualEditorStructureDropPosition.Before));
+
+            updated = viewModel.ActiveXamlFile.Text;
+            Assert.True(
+                updated.IndexOf("x:Name=\"Peer\"", StringComparison.Ordinal) <
+                updated.IndexOf("x:Name=\"TargetPanel\"", StringComparison.Ordinal));
+            Assert.Equal(new[] { 0 }, viewModel.SelectedVisualEditorNode?.Element.Path);
         });
     }
 
@@ -3788,6 +3865,177 @@ public sealed class VisualEditingTests
             {
                 window.Close();
                 dockable.Dispose();
+            }
+        });
+    }
+
+    [Fact]
+    public void HeadlessStructureTree_ToolboxDropUsesHoveredRowTarget()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            EnsureVisualEditorTestResources();
+
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <Border x:Name="Target"
+                                                       Width="120"
+                                                       Height="80"
+                                                       Background="LightBlue" />
+                                               <Button x:Name="Peer" Content="Peer" />
+                                             </StackPanel>
+                                             """;
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+
+            var structureView = new VisualStructureDockView
+            {
+                Width = 360,
+                Height = 260,
+                DataContext = new VisualStructureDockViewModel(viewModel)
+            };
+            var window = new Window
+            {
+                Width = 380,
+                Height = 300,
+                Background = Brushes.White,
+                Content = structureView
+            };
+
+            try
+            {
+                window.Show();
+                PumpLayout(window);
+
+                var targetRow = Assert.Single(
+                    structureView.GetVisualDescendants().OfType<DataGridRow>(),
+                    row => row.DataContext is HierarchicalNode { Item: VisualEditorNodeViewModel node } &&
+                           node.Element.Name == "Target");
+                var textBlockTool = Assert.Single(
+                    viewModel.VisualEditorToolboxItems,
+                    item => item.TypeName == "TextBlock");
+                var data = ToolboxDragPayload.CreateDataTransfer(textBlockTool);
+                var dropArgs = CreateDragEventArgs(
+                    DragDrop.DropEvent,
+                    targetRow,
+                    data,
+                    new Point(targetRow.Bounds.Width / 2, targetRow.Bounds.Height / 2));
+
+                typeof(VisualStructureDockView)
+                    .GetMethod("OnDrop", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(structureView, new object?[] { targetRow, dropArgs });
+
+                Assert.True(dropArgs.Handled);
+                Assert.Equal(DragDropEffects.Copy, dropArgs.DragEffects);
+
+                var updated = viewModel.ActiveXamlFile.Text;
+                var targetStart = updated.IndexOf("x:Name=\"Target\"", StringComparison.Ordinal);
+                var targetEnd = updated.IndexOf("</Border>", targetStart, StringComparison.Ordinal);
+                var inserted = updated.IndexOf("<TextBlock", targetStart, StringComparison.Ordinal);
+                Assert.True(targetStart >= 0);
+                Assert.True(targetEnd > targetStart);
+                Assert.True(inserted > targetStart && inserted < targetEnd);
+                Assert.Equal("TextBlock", viewModel.SelectedVisualEditorNode?.Element.TypeName);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void HeadlessStructureTree_RowDropHandlerMovesXamlElement()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            EnsureVisualEditorTestResources();
+
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <Button x:Name="MoveMe" Content="Move" />
+                                               <StackPanel x:Name="TargetPanel" />
+                                               <Button x:Name="Peer" Content="Peer" />
+                                             </StackPanel>
+                                             """;
+            viewModel.RefreshVisualEditorCommand.Execute(null);
+
+            var structureView = new VisualStructureDockView
+            {
+                Width = 360,
+                Height = 260,
+                DataContext = new VisualStructureDockViewModel(viewModel)
+            };
+            var window = new Window
+            {
+                Width = 380,
+                Height = 300,
+                Background = Brushes.White,
+                Content = structureView
+            };
+
+            try
+            {
+                window.Show();
+                PumpLayout(window);
+
+                var structureGrid = Assert.Single(
+                    structureView.GetVisualDescendants().OfType<DataGrid>(),
+                    grid => grid.Name == "StructureGrid");
+                var sourceRow = Assert.Single(
+                    structureView.GetVisualDescendants().OfType<DataGridRow>(),
+                    row => row.DataContext is HierarchicalNode { Item: VisualEditorNodeViewModel node } &&
+                           node.Element.Name == "MoveMe");
+                var targetRow = Assert.Single(
+                    structureView.GetVisualDescendants().OfType<DataGridRow>(),
+                    row => row.DataContext is HierarchicalNode { Item: VisualEditorNodeViewModel node } &&
+                           node.Element.Name == "TargetPanel");
+                var dragArgs = CreateDragEventArgs(
+                    DragDrop.DropEvent,
+                    targetRow,
+                    new DataTransfer(),
+                    new Point(targetRow.Bounds.Width / 2, targetRow.Bounds.Height / 2));
+                var dropArgs = new DataGridRowDropEventArgs(
+                    structureGrid,
+                    targetList: null,
+                    items: new object[] { sourceRow.DataContext! },
+                    sourceIndices: new[] { sourceRow.Index },
+                    targetItem: targetRow.DataContext,
+                    targetIndex: targetRow.Index,
+                    insertIndex: 0,
+                    targetRow,
+                    DataGridRowDropPosition.Inside,
+                    isSameGrid: true,
+                    requestedEffect: DragDropEffects.Move,
+                    dragArgs);
+
+                Assert.True(structureGrid.RowDropHandler.Validate(dropArgs));
+                Assert.True(structureGrid.RowDropHandler.Execute(dropArgs));
+
+                var updated = viewModel.ActiveXamlFile.Text;
+                var targetStart = updated.IndexOf("x:Name=\"TargetPanel\"", StringComparison.Ordinal);
+                var targetEnd = updated.IndexOf("</StackPanel>", targetStart, StringComparison.Ordinal);
+                var moved = updated.IndexOf("x:Name=\"MoveMe\"", StringComparison.Ordinal);
+                var peer = updated.IndexOf("x:Name=\"Peer\"", StringComparison.Ordinal);
+                Assert.True(targetStart >= 0);
+                Assert.True(targetEnd > targetStart);
+                Assert.True(moved > targetStart && moved < targetEnd);
+                Assert.True(peer > targetEnd);
+                Assert.Equal("MoveMe", viewModel.SelectedVisualEditorNode?.Element.Name);
+                Assert.Equal(new[] { 0, 0 }, viewModel.SelectedVisualEditorNode?.Element.Path);
+            }
+            finally
+            {
+                window.Close();
             }
         });
     }

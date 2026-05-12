@@ -9,6 +9,13 @@ using XamlPlayground.Services.VisualEditing;
 
 namespace XamlPlayground.ViewModels.VisualEditing;
 
+public enum VisualEditorStructureDropPosition
+{
+    Before,
+    Inside,
+    After
+}
+
 public sealed class VisualEditorNodeViewModel : ViewModelBase
 {
     public VisualEditorNodeViewModel(XamlElementSnapshot element)
