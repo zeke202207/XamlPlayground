@@ -665,6 +665,11 @@ public partial class MainViewModel : ViewModelBase
 
     private void OnProjectFileChanged(InMemoryProjectFile file)
     {
+        if (_isApplyingDesignInspectionEdit)
+        {
+            return;
+        }
+
         var resourceChanged = file.Kind == ProjectFileKind.Resource;
         if (resourceChanged)
         {
@@ -673,6 +678,7 @@ public partial class MainViewModel : ViewModelBase
         else if (file.IsXaml)
         {
             RefreshThemeResourceAnalysis();
+            RefreshDesignInspection();
         }
 
         if (ReferenceEquals(file, ActiveXamlFile))
