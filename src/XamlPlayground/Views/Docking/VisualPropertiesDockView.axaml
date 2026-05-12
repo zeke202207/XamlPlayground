@@ -9,7 +9,7 @@
              x:CompileBindings="True" x:DataType="vm:VisualPropertiesDockViewModel">
   <Grid Background="{DynamicResource DockSurfacePanelBrush}"
         Margin="8"
-        RowDefinitions="Auto,Auto,*"
+        RowDefinitions="Auto,Auto,Auto,*"
         RowSpacing="8">
     <Grid RowDefinitions="Auto,Auto"
           RowSpacing="4">
@@ -26,7 +26,24 @@
              PlaceholderText="Filter properties"
              Text="{Binding Shell.VisualEditorPropertyFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
-    <DataGrid Grid.Row="2"
+    <Grid Grid.Row="2"
+          ColumnDefinitions="*,Auto,Auto,Auto"
+          ColumnSpacing="6">
+      <ComboBox ItemsSource="{Binding Shell.VisualEditorPropertyOptions}"
+                SelectedItem="{Binding Shell.SelectedVisualEditorPropertyOption, Mode=TwoWay}"
+                PlaceholderText="Suggested values and resources" />
+      <Button Grid.Column="1"
+              Content="Apply"
+              Command="{Binding Shell.ApplyVisualEditorPropertyCommand}" />
+      <Button Grid.Column="2"
+              Content="Open"
+              Command="{Binding Shell.OpenVisualEditorPropertyResourceCommand}" />
+      <Button Grid.Column="3"
+              Content="Reset"
+              Command="{Binding Shell.ResetVisualEditorPropertyCommand}" />
+    </Grid>
+
+    <DataGrid Grid.Row="3"
               x:Name="PropertiesGrid"
               ItemsSource="{Binding Shell.VisualEditorPropertiesView}"
               SelectedItem="{Binding Shell.SelectedVisualEditorProperty, Mode=TwoWay}"

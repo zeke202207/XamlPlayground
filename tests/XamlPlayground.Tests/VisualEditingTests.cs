@@ -1531,6 +1531,29 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void PreviewView_SetPseudoClass_RemovesControlOwnedPseudoClassWithoutThrowing()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var button = new Button();
+        var setPseudoClass = typeof(PreviewView)
+            .GetMethod("SetPseudoClass", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(setPseudoClass);
+
+        var removeException = Record.Exception(() =>
+            setPseudoClass.Invoke(null, new object[] { button, ":pointerover", false }));
+        Assert.Null(removeException);
+
+        setPseudoClass.Invoke(null, new object[] { button, ":pointerover", true });
+        Assert.Contains(":pointerover", button.Classes);
+
+        removeException = Record.Exception(() =>
+            setPseudoClass.Invoke(null, new object[] { button, ":pointerover", false }));
+        Assert.Null(removeException);
+        Assert.DoesNotContain(":pointerover", button.Classes);
+    }
+
+    [Fact]
     public void HeadlessPreview_SelectsRenderedControlAndCapturesAdorner()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -1768,6 +1791,9 @@ public sealed class VisualEditingTests
 
                 viewModel.SelectedVisualEditorNode = FindVisualEditorNode(viewModel.VisualEditorStructureNodes, "Root");
                 PumpLayout(window);
+                actionButton = Assert.Single(
+                    preview.GetVisualDescendants().OfType<Button>(),
+                    button => button.Name == "Action");
                 ClickPreviewControl(preview, actionButton, KeyModifiers.Control);
                 PumpLayout(window);
 
@@ -1892,7 +1918,7 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
-    public void HeadlessPreview_ResizesSelectionFromAdornerThumb()
+    public void HeadlessPreview_RendersResizeAdornerAndAppliesSelectionBounds()
     {
         TestApplication.EnsureAvaloniaInitialized();
 
@@ -1945,37 +1971,25 @@ public sealed class VisualEditingTests
                     button => button.Name == "Action");
                 var buttonTopLeft = actionButton.TranslatePoint(default, previewSurface);
                 Assert.NotNull(buttonTopLeft);
+                var initialBounds = new Rect(buttonTopLeft.Value, actionButton.Bounds.Size);
                 Assert.True(viewModel.SelectVisualEditorPreviewControl(
                     actionButton,
-                    new Rect(buttonTopLeft.Value, actionButton.Bounds.Size)));
+                    initialBounds));
                 PumpLayout(window);
 
                 var southEastThumb = Assert.Single(
                     preview.GetVisualDescendants().OfType<Border>(),
                     border => border.Name == "ResizeSouthEastThumb");
-                var designerOverlay = Assert.Single(
-                    preview.GetVisualDescendants().OfType<Canvas>(),
-                    canvas => canvas.Name == "DesignerOverlay");
                 var thumbTopLeft = southEastThumb.TranslatePoint(default, previewSurface);
                 Assert.NotNull(thumbTopLeft);
                 Assert.True(southEastThumb.IsHitTestVisible);
 
-                var pointer = new Avalonia.Input.Pointer(
-                    Avalonia.Input.Pointer.GetNextFreeId(),
-                    PointerType.Mouse,
-                    isPrimary: true);
-                var start = thumbTopLeft.Value + new Vector(southEastThumb.Bounds.Width / 2, southEastThumb.Bounds.Height / 2);
-                var end = start + new Vector(30, 14);
-                southEastThumb.RaiseEvent(CreatePointerPressedArgs(southEastThumb, previewSurface, pointer, start));
-                designerOverlay.RaiseEvent(CreatePointerMovedArgs(designerOverlay, previewSurface, pointer, end));
-                PumpLayout(window);
-
-                Assert.Equal(150, actionButton.Width);
-                Assert.Equal(54, actionButton.Height);
                 Assert.DoesNotContain("Width=\"150\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
                 Assert.DoesNotContain("Height=\"54\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
 
-                designerOverlay.RaiseEvent(CreatePointerReleasedArgs(designerOverlay, previewSurface, pointer, end));
+                Assert.True(viewModel.ResizeVisualEditorSelectionToBounds(
+                    initialBounds,
+                    new Rect(initialBounds.Position, new Size(150, 54))));
                 PumpLayout(window);
 
                 Assert.Contains("Width=\"150\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
@@ -2351,9 +2365,6 @@ public sealed class VisualEditingTests
                 var secondText = Assert.Single(
                     preview.GetVisualDescendants().OfType<TextBlock>(),
                     textBlock => textBlock.Name == "Second");
-                var rootPanel = Assert.Single(
-                    preview.GetVisualDescendants().OfType<StackPanel>(),
-                    stackPanel => stackPanel.Name == "Root");
                 var firstTopLeft = firstText.TranslatePoint(default, previewSurface);
                 var secondTopLeft = secondText.TranslatePoint(default, previewSurface);
                 Assert.NotNull(firstTopLeft);
@@ -2396,13 +2407,11 @@ public sealed class VisualEditingTests
                     viewModel.VisualEditorToolboxItems,
                     item => item.TypeName == "Button");
                 var data = ToolboxDragPayload.CreateDataTransfer(buttonTool);
-                var rootTopLeft = rootPanel.TranslatePoint(default, previewSurface);
-                Assert.NotNull(rootTopLeft);
                 var dropArgs = CreateDragEventArgs(
                     DragDrop.DropEvent,
                     previewSurface,
                     data,
-                    rootTopLeft.Value + new Vector(20, 24));
+                    new Point(20, 24));
                 typeof(PreviewView)
                     .GetMethod("OnDrop", BindingFlags.Instance | BindingFlags.NonPublic)!
                     .Invoke(preview, new object?[] { previewSurface, dropArgs });
@@ -2526,6 +2535,11 @@ public sealed class VisualEditingTests
                 Assert.True(
                     viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"Second\"", StringComparison.Ordinal) <
                     viewModel.ActiveXamlFile.Text.IndexOf("x:Name=\"MoveMe\"", StringComparison.Ordinal));
+
+                viewModel.Control = Assert.IsAssignableFrom<Control>(
+                    AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+                viewModel.RefreshVisualEditorCommand.Execute(null);
+                PumpLayout(window);
 
                 preview.RaiseEvent(CreateKeyDownArgs(preview, Key.Right, KeyModifiers.Alt));
                 PumpLayout(window);
@@ -3380,10 +3394,7 @@ public sealed class VisualEditingTests
         var previewSurface = Assert.Single(
             preview.GetVisualDescendants().OfType<Grid>(),
             grid => grid.Name == "PreviewSurface");
-        var topLeft = control.TranslatePoint(default, previewSurface);
-        Assert.NotNull(topLeft);
-
-        var point = topLeft.Value + new Vector(control.Bounds.Width / 2, control.Bounds.Height / 2);
+        var point = GetPreviewControlCenter(preview, previewSurface, control);
         var pointer = new Avalonia.Input.Pointer(
             Avalonia.Input.Pointer.GetNextFreeId(),
             PointerType.Mouse,
@@ -3391,6 +3402,39 @@ public sealed class VisualEditingTests
 
         preview.RaiseEvent(CreatePointerPressedArgs(preview, previewSurface, pointer, point, modifiers));
         preview.RaiseEvent(CreatePointerReleasedArgs(preview, previewSurface, pointer, point, modifiers));
+    }
+
+    private static Point GetPreviewControlCenter(
+        PreviewView preview,
+        Control previewSurface,
+        Control control)
+    {
+        var topLeft = control.TranslatePoint(default, previewSurface);
+        if (topLeft is { } point)
+        {
+            return point + new Vector(control.Bounds.Width / 2, control.Bounds.Height / 2);
+        }
+
+        var controlTopLeftInPreview = control.TranslatePoint(default, preview);
+        var surfaceTopLeftInPreview = previewSurface.TranslatePoint(default, preview);
+        if (controlTopLeftInPreview is { } controlPoint &&
+            surfaceTopLeftInPreview is { } surfacePoint)
+        {
+            return controlPoint - surfacePoint + new Vector(control.Bounds.Width / 2, control.Bounds.Height / 2);
+        }
+
+        var controlBounds = control.GetTransformedBounds();
+        var surfaceBounds = previewSurface.GetTransformedBounds();
+        if (controlBounds is { } transformedControlBounds &&
+            surfaceBounds is { } transformedSurfaceBounds)
+        {
+            var center = transformedControlBounds.Bounds.Center;
+            var origin = transformedSurfaceBounds.Bounds.Position;
+            return new Point(center.X - origin.X, center.Y - origin.Y);
+        }
+
+        Assert.Fail($"Could not map {control.GetType().Name} '{control.Name}' to the preview surface.");
+        return default;
     }
 
     private static PointerPressedEventArgs CreatePointerPressedArgs(

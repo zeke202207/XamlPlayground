@@ -164,3 +164,299 @@ public sealed class VisualEditorAvailablePropertyViewModel : ViewModelBase
 
     public string Kind => Property.ValueKind.ToString();
 }
+
+public sealed class ControlThemeDefinitionViewModel : ViewModelBase
+{
+    public ControlThemeDefinitionViewModel(string key, string targetType, string filePath)
+    {
+        Key = key;
+        TargetType = targetType;
+        FilePath = filePath;
+    }
+
+    public string Key { get; }
+
+    public string TargetType { get; }
+
+    public string FilePath { get; }
+
+    public string Title => $"{Key} ({TargetType})";
+}
+
+public sealed class FluentControlThemeTemplateViewModel : ViewModelBase
+{
+    public FluentControlThemeTemplateViewModel(string key, string targetType, string sourcePath)
+    {
+        Key = key;
+        TargetType = targetType;
+        SourcePath = sourcePath;
+    }
+
+    public string Key { get; }
+
+    public string TargetType { get; }
+
+    public string SourcePath { get; }
+
+    public string Title => $"{TargetType} - {Key}";
+}
+
+public sealed class ThemeResourceViewModel : ViewModelBase
+{
+    public ThemeResourceViewModel(
+        string key,
+        string resourceType,
+        string? targetType,
+        string filePath,
+        int? line,
+        string themeScope)
+    {
+        Key = key;
+        ResourceType = resourceType;
+        TargetType = targetType ?? string.Empty;
+        FilePath = filePath;
+        Line = line;
+        ThemeScope = themeScope;
+    }
+
+    public string Key { get; }
+
+    public string ResourceType { get; }
+
+    public string TargetType { get; }
+
+    public string FilePath { get; }
+
+    public int? Line { get; }
+
+    public string ThemeScope { get; }
+
+    public string Location => Line is { } line
+        ? $"{FilePath}:{line}"
+        : FilePath;
+
+    public string Title => string.IsNullOrWhiteSpace(TargetType)
+        ? $"{Key} - {ResourceType}"
+        : $"{Key} - {ResourceType} ({TargetType})";
+}
+
+public sealed class ThemeResourceUsageViewModel : ViewModelBase
+{
+    public ThemeResourceUsageViewModel(
+        string key,
+        string kind,
+        string filePath,
+        int line,
+        string snippet)
+    {
+        Key = key;
+        Kind = kind;
+        FilePath = filePath;
+        Line = line;
+        Snippet = snippet;
+    }
+
+    public string Key { get; }
+
+    public string Kind { get; }
+
+    public string FilePath { get; }
+
+    public int Line { get; }
+
+    public string Snippet { get; }
+
+    public string Location => $"{FilePath}:{Line}";
+
+    public string Title => $"{Kind} {Key}";
+}
+
+public sealed class ThemeResourceDiagnosticViewModel : ViewModelBase
+{
+    public ThemeResourceDiagnosticViewModel(
+        string severity,
+        string message,
+        string filePath,
+        int? line)
+    {
+        Severity = severity;
+        Message = message;
+        FilePath = filePath;
+        Line = line;
+    }
+
+    public string Severity { get; }
+
+    public string Message { get; }
+
+    public string FilePath { get; }
+
+    public int? Line { get; }
+
+    public string Location => Line is { } line
+        ? $"{FilePath}:{line}"
+        : FilePath;
+
+    public string Title => $"{Severity}: {Message}";
+}
+
+public sealed class ThemeResourceDeleteChangeViewModel : ViewModelBase
+{
+    public ThemeResourceDeleteChangeViewModel(
+        string filePath,
+        string changeKind,
+        int removedLineCount,
+        int addedLineCount,
+        string diff)
+    {
+        FilePath = filePath;
+        ChangeKind = changeKind;
+        RemovedLineCount = removedLineCount;
+        AddedLineCount = addedLineCount;
+        Diff = diff;
+    }
+
+    public string FilePath { get; }
+
+    public string ChangeKind { get; }
+
+    public int RemovedLineCount { get; }
+
+    public int AddedLineCount { get; }
+
+    public string Diff { get; }
+
+    public string Title => $"{ChangeKind}: {FilePath}";
+
+    public string Summary => $"{RemovedLineCount} removed, {AddedLineCount} added";
+}
+
+public sealed class ThemePreviewStateViewModel : ViewModelBase
+{
+    public ThemePreviewStateViewModel(string state, bool hasSelectors)
+    {
+        State = state;
+        HasSelectors = hasSelectors;
+    }
+
+    public string State { get; }
+
+    public bool HasSelectors { get; }
+
+    public string PseudoClass => string.Equals(State, "normal", StringComparison.Ordinal)
+        ? string.Empty
+        : $":{State}";
+
+    public string Title => string.Equals(State, "normal", StringComparison.Ordinal)
+        ? "Normal"
+        : PseudoClass;
+}
+
+public sealed class ThemeStateSelectorViewModel : ViewModelBase
+{
+    public ThemeStateSelectorViewModel(string state, string selector, int? line)
+    {
+        State = state;
+        Selector = selector;
+        Line = line;
+    }
+
+    public string State { get; }
+
+    public string Selector { get; }
+
+    public int? Line { get; }
+
+    public string Title => Line is { } line
+        ? $"{Selector} : line {line}"
+        : Selector;
+}
+
+public sealed class ThemeTemplatePartViewModel : ViewModelBase
+{
+    public ThemeTemplatePartViewModel(string name, string type, int? line)
+    {
+        Name = name;
+        Type = type;
+        Line = line;
+    }
+
+    public string Name { get; }
+
+    public string Type { get; }
+
+    public int? Line { get; }
+
+    public string Title => Line is { } line
+        ? $"{Name} - {Type} : line {line}"
+        : $"{Name} - {Type}";
+}
+
+public sealed class ThemeTemplatePartSelectorViewModel : ViewModelBase
+{
+    public ThemeTemplatePartSelectorViewModel(
+        string partName,
+        string partType,
+        string state,
+        string selector,
+        int? line)
+    {
+        PartName = partName;
+        PartType = partType;
+        State = state;
+        Selector = selector;
+        Line = line;
+    }
+
+    public string PartName { get; }
+
+    public string PartType { get; }
+
+    public string State { get; }
+
+    public string Selector { get; }
+
+    public int? Line { get; }
+
+    public string Title => Line is { } line
+        ? $"{Selector} : line {line}"
+        : Selector;
+}
+
+public sealed class ThemeTemplateBindingViewModel : ViewModelBase
+{
+    public ThemeTemplateBindingViewModel(string property, int line, string snippet)
+    {
+        Property = property;
+        Line = line;
+        Snippet = snippet;
+    }
+
+    public string Property { get; }
+
+    public int Line { get; }
+
+    public string Snippet { get; }
+
+    public string Title => Line > 0
+        ? $"{Property} : line {Line}"
+        : Property;
+}
+
+public sealed class ThemeVariantViewModel : ViewModelBase
+{
+    public ThemeVariantViewModel(string name, int fileCount, string files)
+    {
+        Name = name;
+        FileCount = fileCount;
+        Files = files;
+    }
+
+    public string Name { get; }
+
+    public int FileCount { get; }
+
+    public string Files { get; }
+
+    public string Title => $"{Name} ({FileCount})";
+}

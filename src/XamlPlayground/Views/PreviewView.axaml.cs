@@ -34,6 +34,9 @@ public partial class PreviewView : UserControl
     private string? _lastToolboxDropDocumentText;
     private LiveResizeState? _liveResizeState;
     private MainViewModel? _sourceSelectionViewModel;
+    private bool _previewStateApplyQueued;
+    private string? _lastForcedThemePreviewState;
+    private string? _lastForcedThemePreviewTargetType;
     private readonly IVisualTreeSnapshotService _sourceSelectionSnapshotService = new AvaloniaVisualTreeSnapshotService();
     private readonly IXamlMutationEngine _sourceSelectionMutationEngine = new XamlMutationEngine();
     private readonly XamlVisualTreeMapper _sourceSelectionMapper = new();
@@ -93,6 +96,77 @@ public partial class PreviewView : UserControl
         {
             QueueSynchronizePreviewSelectionFromSource();
         }
+
+        if (e.PropertyName is nameof(MainViewModel.SelectedThemePreviewState) or
+            nameof(MainViewModel.SelectedControlTheme) or
+            nameof(MainViewModel.Control))
+        {
+            QueueApplyForcedThemePreviewState();
+        }
+    }
+
+    private void QueueApplyForcedThemePreviewState()
+    {
+        if (_previewStateApplyQueued)
+        {
+            return;
+        }
+
+        _previewStateApplyQueued = true;
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                _previewStateApplyQueued = false;
+                ApplyForcedThemePreviewState();
+            },
+            DispatcherPriority.Loaded);
+    }
+
+    private void ApplyForcedThemePreviewState()
+    {
+        if (_sourceSelectionViewModel is not { Control: { } previewRoot } viewModel)
+        {
+            return;
+        }
+
+        var nextState = NormalizeThemePreviewState(viewModel.SelectedThemePreviewState?.State);
+        var previousState = NormalizeThemePreviewState(_lastForcedThemePreviewState);
+        var targetType = viewModel.SelectedControlTheme?.TargetType;
+        var targetTypeChanged = !string.Equals(targetType, _lastForcedThemePreviewTargetType, StringComparison.Ordinal);
+        var targetControls = EnumerateThemePreviewControls(previewRoot, targetType).ToArray();
+
+        if (previousState is not null &&
+            (!string.Equals(previousState, nextState, StringComparison.Ordinal) || targetTypeChanged))
+        {
+            var clearTargetType = targetTypeChanged ? _lastForcedThemePreviewTargetType : targetType;
+            var clearControls = targetTypeChanged
+                ? EnumerateThemePreviewControls(previewRoot, clearTargetType)
+                : targetControls;
+
+            foreach (var control in clearControls)
+            {
+                SetPseudoClass(control, $":{previousState}", false);
+            }
+        }
+
+        if (nextState is not null)
+        {
+            foreach (var control in targetControls)
+            {
+                SetPseudoClass(control, $":{nextState}", true);
+            }
+        }
+
+        _lastForcedThemePreviewState = nextState;
+        _lastForcedThemePreviewTargetType = targetType;
+    }
+
+    private static string? NormalizeThemePreviewState(string? state)
+    {
+        return string.IsNullOrWhiteSpace(state) ||
+               string.Equals(state, "normal", StringComparison.Ordinal)
+            ? null
+            : state;
     }
 
     private void QueueSynchronizePreviewSelectionFromSource()
@@ -165,7 +239,9 @@ public partial class PreviewView : UserControl
         var properties = e.GetCurrentPoint(this).Properties;
         if (DataContext is not MainViewModel viewModel ||
             viewModel.Control is not { } previewRoot ||
-            (!properties.IsLeftButtonPressed && properties.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed))
+            (!properties.IsLeftButtonPressed &&
+             !properties.IsRightButtonPressed &&
+             properties.PointerUpdateKind is not PointerUpdateKind.LeftButtonPressed and not PointerUpdateKind.RightButtonPressed))
         {
             return;
         }
@@ -175,7 +251,65 @@ public partial class PreviewView : UserControl
             return;
         }
 
+        if (properties.IsRightButtonPressed || properties.PointerUpdateKind == PointerUpdateKind.RightButtonPressed)
+        {
+            HandleDesignerContextPointerPressed(viewModel, previewRoot, e);
+            return;
+        }
+
         HandleDesignerPointerPressed(viewModel, previewRoot, e);
+    }
+
+    private void HandleDesignerContextPointerPressed(
+        MainViewModel viewModel,
+        Control previewRoot,
+        PointerPressedEventArgs e)
+    {
+        var point = e.GetPosition(PreviewSurface);
+        TrySelectPreviewControlAt(
+            viewModel,
+            point,
+            previewRoot,
+            e.KeyModifiers,
+            e.ClickCount,
+            out _);
+
+        ShowDesignerContextMenu(viewModel);
+        DesignerOverlay.Focus();
+        e.Handled = true;
+    }
+
+    private void ShowDesignerContextMenu(MainViewModel viewModel)
+    {
+        var flyout = new MenuFlyout();
+        flyout.Items.Add(new MenuItem
+        {
+            Header = "Create Custom Template",
+            Command = viewModel.CreateCustomControlThemeCommand
+        });
+
+        var themeMenu = new MenuItem
+        {
+            Header = "Theme"
+        };
+        themeMenu.Items.Add(new MenuItem
+        {
+            Header = "Default",
+            Command = viewModel.RemoveControlThemeCommand
+        });
+
+        foreach (var theme in viewModel.GetControlThemesForSelectedVisualElement())
+        {
+            themeMenu.Items.Add(new MenuItem
+            {
+                Header = theme.Key,
+                Command = viewModel.ApplyControlThemeCommand,
+                CommandParameter = theme
+            });
+        }
+
+        flyout.Items.Add(themeMenu);
+        flyout.ShowAt(DesignerOverlay, showAtPointer: true);
     }
 
     private void HandleDesignerPointerPressed(
@@ -969,13 +1103,39 @@ public partial class PreviewView : UserControl
 
     private Rect? GetSelectionBounds(Control control)
     {
-        var topLeft = control.TranslatePoint(default, PreviewSurface);
-        if (topLeft is null || control.Bounds.Width <= 0 || control.Bounds.Height <= 0)
+        if (control.Bounds.Width <= 0 || control.Bounds.Height <= 0)
         {
             return null;
         }
 
-        return new Rect(topLeft.Value, control.Bounds.Size);
+        if (control.TranslatePoint(default, PreviewSurface) is { } topLeft)
+        {
+            return new Rect(topLeft, control.Bounds.Size);
+        }
+
+        var controlTopLeftInPreview = control.TranslatePoint(default, this);
+        var surfaceTopLeftInPreview = PreviewSurface.TranslatePoint(default, this);
+        if (controlTopLeftInPreview is { } controlPoint &&
+            surfaceTopLeftInPreview is { } surfacePoint)
+        {
+            return new Rect(
+                new Point(controlPoint.X - surfacePoint.X, controlPoint.Y - surfacePoint.Y),
+                control.Bounds.Size);
+        }
+
+        var controlBounds = control.GetTransformedBounds();
+        var surfaceBounds = PreviewSurface.GetTransformedBounds();
+        if (controlBounds is { } transformedControlBounds &&
+            surfaceBounds is { } transformedSurfaceBounds)
+        {
+            var controlPosition = transformedControlBounds.Bounds.Position;
+            var surfacePosition = transformedSurfaceBounds.Bounds.Position;
+            return new Rect(
+                new Point(controlPosition.X - surfacePosition.X, controlPosition.Y - surfacePosition.Y),
+                transformedControlBounds.Bounds.Size);
+        }
+
+        return null;
     }
 
     private Control? FindSelectablePreviewControlAt(Point point, Control previewRoot)
@@ -2224,6 +2384,37 @@ public partial class PreviewView : UserControl
             {
                 yield break;
             }
+        }
+    }
+
+    private static IEnumerable<Control> EnumerateThemePreviewControls(Control previewRoot, string? targetType)
+    {
+        var controls = new[] { previewRoot }.Concat(previewRoot.GetVisualDescendants().OfType<Control>());
+        foreach (var control in controls)
+        {
+            if (control is PreviewView or ScrollViewer or ExclusiveContentControl)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(targetType) ||
+                string.Equals(control.GetType().Name, targetType, StringComparison.Ordinal))
+            {
+                yield return control;
+            }
+        }
+    }
+
+    private static void SetPseudoClass(Control control, string pseudoClass, bool active)
+    {
+        var pseudoClasses = (IPseudoClasses)control.Classes;
+        if (active)
+        {
+            pseudoClasses.Add(pseudoClass);
+        }
+        else
+        {
+            pseudoClasses.Remove(pseudoClass);
         }
     }
 

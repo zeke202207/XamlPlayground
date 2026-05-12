@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using AvaloniaEdit.Document;
 
 namespace XamlPlayground.Workspace;
@@ -78,6 +79,74 @@ public sealed class InMemorySolutionFactory
             _fileChanged));
     }
 
+    public InMemoryProjectFile AddControlThemeResource(
+        InMemoryProject project,
+        string themeKey,
+        string xaml)
+    {
+        var path = $"Themes/{themeKey}.axaml";
+        if (project.FindFile(path) is not null)
+        {
+            var index = 2;
+            while (project.FindFile($"Themes/{themeKey}{index}.axaml") is not null)
+            {
+                index++;
+            }
+
+            path = $"Themes/{themeKey}{index}.axaml";
+        }
+
+        return project.AddFile(new InMemoryProjectFile(
+            path,
+            xaml,
+            ProjectFileKind.Resource,
+            _fileChanged));
+    }
+
+    public InMemoryProjectFile AddOrUpdateResource(
+        InMemoryProject project,
+        string path,
+        string xaml)
+    {
+        var normalizedPath = NormalizeResourcePath(path);
+        if (project.FindFile(normalizedPath) is { } existing)
+        {
+            if (existing.Kind != ProjectFileKind.Resource)
+            {
+                normalizedPath = CreateUniqueResourcePath(project, $"Themes/{CreateSafeThemeFileName(normalizedPath)}");
+                return project.AddFile(new InMemoryProjectFile(
+                    normalizedPath,
+                    xaml,
+                    ProjectFileKind.Resource,
+                    _fileChanged));
+            }
+
+            existing.Text = xaml;
+            return existing;
+        }
+
+        return project.AddFile(new InMemoryProjectFile(
+            normalizedPath,
+            xaml,
+            ProjectFileKind.Resource,
+            _fileChanged));
+    }
+
+    public InMemoryProjectFile AddImportedThemeResource(
+        InMemoryProject project,
+        string fileName,
+        string xaml)
+    {
+        var safeFileName = CreateSafeThemeFileName(fileName);
+        var path = CreateUniqueResourcePath(project, $"Themes/{safeFileName}");
+
+        return project.AddFile(new InMemoryProjectFile(
+            path,
+            xaml,
+            ProjectFileKind.Resource,
+            _fileChanged));
+    }
+
     private static string GetUniqueName(InMemoryProject project, string prefix, string extension, string folder)
     {
         var index = 1;
@@ -87,6 +156,70 @@ public sealed class InMemorySolutionFactory
         }
 
         return $"{prefix}{index}";
+    }
+
+    private static string CreateUniqueResourcePath(InMemoryProject project, string preferredPath)
+    {
+        var normalizedPath = NormalizeResourcePath(preferredPath);
+        if (project.FindFile(normalizedPath) is null)
+        {
+            return normalizedPath;
+        }
+
+        var folder = Path.GetDirectoryName(normalizedPath)?.Replace('\\', '/');
+        var extension = Path.GetExtension(normalizedPath);
+        var name = Path.GetFileNameWithoutExtension(normalizedPath);
+        var index = 2;
+        string candidate;
+        do
+        {
+            var fileName = $"{name}{index}{extension}";
+            candidate = string.IsNullOrWhiteSpace(folder)
+                ? fileName
+                : $"{folder}/{fileName}";
+            index++;
+        }
+        while (project.FindFile(candidate) is not null);
+
+        return candidate;
+    }
+
+    private static string NormalizeResourcePath(string path)
+    {
+        var normalizedPath = path.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalizedPath) ||
+            normalizedPath.Contains("../", StringComparison.Ordinal) ||
+            normalizedPath.Equals("..", StringComparison.Ordinal) ||
+            Path.IsPathRooted(normalizedPath))
+        {
+            normalizedPath = "Themes/Theme.axaml";
+        }
+
+        return normalizedPath;
+    }
+
+    private static string CreateSafeThemeFileName(string fileName)
+    {
+        var name = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = "ImportedTheme";
+        }
+
+        if (!extension.Equals(".axaml", StringComparison.OrdinalIgnoreCase) &&
+            !extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            extension = ".axaml";
+        }
+
+        foreach (var invalidCharacter in Path.GetInvalidFileNameChars())
+        {
+            name = name.Replace(invalidCharacter, '_');
+        }
+
+        return $"{name}{extension}";
     }
 
     private static string CreateIdentifier(string value)

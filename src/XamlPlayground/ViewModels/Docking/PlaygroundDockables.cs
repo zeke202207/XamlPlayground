@@ -165,6 +165,109 @@ public sealed class VisualToolboxDockViewModel : Tool
     public MainViewModel Shell { get; }
 }
 
+public sealed class ControlThemesDockViewModel : Tool
+{
+    public ControlThemesDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "ControlThemes";
+        Title = "Themes";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+
+        var factory = new ControlThemesDockFactory(this);
+        var layout = factory.CreateLayout();
+        factory.InitLayout(layout);
+
+        DockFactory = factory;
+        DockLayout = layout;
+    }
+
+    public MainViewModel Shell { get; }
+
+    public IFactory DockFactory { get; }
+
+    public IRootDock DockLayout { get; }
+}
+
+public abstract class ControlThemePanelDockViewModel : Tool
+{
+    protected ControlThemePanelDockViewModel(MainViewModel shell, string id, string title)
+    {
+        Shell = shell;
+        Id = id;
+        Title = title;
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class ControlThemeCustomDockViewModel : ControlThemePanelDockViewModel
+{
+    public ControlThemeCustomDockViewModel(MainViewModel shell)
+        : base(shell, "ControlThemeCustom", "Custom")
+    {
+    }
+}
+
+public sealed class ControlThemeResourcesDockViewModel : ControlThemePanelDockViewModel
+{
+    public ControlThemeResourcesDockViewModel(MainViewModel shell)
+        : base(shell, "ControlThemeResources", "Resources")
+    {
+    }
+}
+
+public sealed class ControlThemeUsagesDockViewModel : ControlThemePanelDockViewModel
+{
+    public ControlThemeUsagesDockViewModel(MainViewModel shell)
+        : base(shell, "ControlThemeUsages", "Usages")
+    {
+    }
+}
+
+public sealed class ControlThemeDiagnosticsDockViewModel : ControlThemePanelDockViewModel
+{
+    public ControlThemeDiagnosticsDockViewModel(MainViewModel shell)
+        : base(shell, "ControlThemeDiagnostics", "Diagnostics")
+    {
+    }
+}
+
+public sealed class ControlThemeStatesDockViewModel : ControlThemePanelDockViewModel
+{
+    public ControlThemeStatesDockViewModel(MainViewModel shell)
+        : base(shell, "ControlThemeStates", "States")
+    {
+    }
+}
+
+public sealed class ControlThemeVariantsDockViewModel : ControlThemePanelDockViewModel
+{
+    public ControlThemeVariantsDockViewModel(MainViewModel shell)
+        : base(shell, "ControlThemeVariants", "Variants")
+    {
+    }
+}
+
+public sealed class ControlThemePartsDockViewModel : ControlThemePanelDockViewModel
+{
+    public ControlThemePartsDockViewModel(MainViewModel shell)
+        : base(shell, "ControlThemeParts", "Parts")
+    {
+    }
+}
+
+public sealed class ControlThemeFluentDockViewModel : ControlThemePanelDockViewModel
+{
+    public ControlThemeFluentDockViewModel(MainViewModel shell)
+        : base(shell, "ControlThemeFluent", "Fluent")
+    {
+    }
+}
+
 public sealed class DiagnosticTreeDockViewModel : Tool, IDisposable
 {
     public DiagnosticTreeDockViewModel(
@@ -294,6 +397,11 @@ public sealed class ErrorsDockViewModel : Tool, IDisposable
 
     public string? LastErrorMessage => Shell.LastErrorMessage;
 
+    public void NotifyLastErrorMessageChanged()
+    {
+        OnPropertyChanged(nameof(LastErrorMessage));
+    }
+
     public void Dispose()
     {
         Shell.PropertyChanged -= ShellOnPropertyChanged;
@@ -303,7 +411,7 @@ public sealed class ErrorsDockViewModel : Tool, IDisposable
     {
         if (e.PropertyName == nameof(MainViewModel.LastErrorMessage))
         {
-            OnPropertyChanged(nameof(LastErrorMessage));
+            NotifyLastErrorMessageChanged();
         }
     }
 }

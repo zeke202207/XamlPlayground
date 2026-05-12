@@ -1,0 +1,450 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:dock="using:Dock.Avalonia.Controls"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             mc:Ignorable="d" d:DesignWidth="280" d:DesignHeight="600"
+             x:Class="XamlPlayground.Views.Docking.ControlThemesDockView"
+             x:CompileBindings="True" x:DataType="vm:ControlThemesDockViewModel">
+  <UserControl.Resources>
+    <StreamGeometry x:Key="ThemeCreateIcon">M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeOpenIcon">M10,4L12,6H20C21.1,6 22,6.9 22,8V18C22,19.1 21.1,20 20,20H4C2.9,20 2,19.1 2,18V6C2,4.9 2.9,4 4,4H10M4,8V18H20V8H4Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeApplyIcon">M9,16.2L4.8,12L3.4,13.4L9,19L21,7L19.6,5.6L9,16.2Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeDefaultIcon">M12,5C15.31,5 18,7.69 18,11C18,14.31 15.31,17 12,17C10.08,17 8.36,16.1 7.26,14.7L9.1,13.92C9.84,14.59 10.86,15 12,15C14.21,15 16,13.21 16,11C16,8.79 14.21,7 12,7H8.83L11.42,9.59L10,11L5,6L10,1L11.42,2.41L8.83,5H12Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeSaveProjectIcon">M17,3H5C3.9,3 3,3.9 3,5V19C3,20.1 3.9,21 5,21H19C20.1,21 21,20.1 21,19V7L17,3M12,19C10.34,19 9,17.66 9,16C9,14.34 10.34,13 12,13C13.66,13 15,14.34 15,16C15,17.66 13.66,19 12,19M6,5H15V10H6V5Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeLoadProjectIcon">M19,20H5C3.9,20 3,19.1 3,18V6C3,4.9 3.9,4 5,4H10L12,6H19C20.1,6 21,6.9 21,8V18C21,19.1 20.1,20 19,20M12,8V12H9L12,15L15,12H13V8H12Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeImportIcon">M5,20H19V18H5V20M19,9H15V3H9V9H5L12,16L19,9Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeExportIcon">M5,20H19V18H5V20M19,10L12,3L5,10H9V16H15V10H19Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeRenameIcon">M3,17.25V21H6.75L17.81,9.94L14.06,6.19L3,17.25M20.71,7.04C21.1,6.65 21.1,6.02 20.71,5.63L18.37,3.29C17.98,2.9 17.35,2.9 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeDuplicateIcon">M16,1H4C2.9,1 2,1.9 2,3V17H4V3H16V1M19,5H8C6.9,5 6,5.9 6,7V21C6,22.1 6.9,23 8,23H19C20.1,23 21,22.1 21,21V7C21,5.9 20.1,5 19,5M19,21H8V7H19V21Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeDeleteIcon">M6,19C6,20.1 6.9,21 8,21H16C17.1,21 18,20.1 18,19V7H6V19M8,9H16V19H8V9M15.5,4L14.5,3H9.5L8.5,4H5V6H19V4H15.5Z</StreamGeometry>
+    <StreamGeometry x:Key="ThemeReturnIcon">M20,11V13H7.83L13.42,18.59L12,20L4,12L12,4L13.42,5.41L7.83,11H20Z</StreamGeometry>
+  </UserControl.Resources>
+  <UserControl.Styles>
+    <Style Selector="Button.theme-tool">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="MinWidth" Value="30" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
+    <StackPanel DockPanel.Dock="Top"
+                Spacing="6"
+                Margin="6">
+      <TextBlock Text="{Binding Shell.ControlThemeSelectedTargetType}"
+                 FontWeight="SemiBold"
+                 TextTrimming="CharacterEllipsis" />
+      <TextBlock Text="{Binding Shell.ControlThemeSourceStatus}"
+                 TextWrapping="Wrap"
+                 Opacity="0.65" />
+      <StackPanel Orientation="Horizontal"
+                  Spacing="4">
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Create custom template"
+                Command="{Binding Shell.CreateCustomControlThemeCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeCreateIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Open selected theme"
+                Command="{Binding Shell.OpenSelectedControlThemeCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeOpenIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Apply selected theme"
+                Command="{Binding Shell.ApplyControlThemeCommand}"
+                CommandParameter="{Binding Shell.SelectedControlTheme}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeApplyIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Restore default theme"
+                Command="{Binding Shell.RemoveControlThemeCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeDefaultIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Import theme files"
+                Command="{Binding Shell.ImportControlThemeFilesCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeImportIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Export selected theme"
+                Command="{Binding Shell.ExportSelectedControlThemeCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeExportIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Save theme project"
+                Command="{Binding Shell.SaveControlThemeProjectCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeSaveProjectIcon}" />
+        </Button>
+        <Button Classes="theme-tool"
+                ToolTip.Tip="Load theme project"
+                Command="{Binding Shell.LoadControlThemeProjectCommand}">
+          <PathIcon Width="14"
+                    Height="14"
+                    Data="{StaticResource ThemeLoadProjectIcon}" />
+        </Button>
+      </StackPanel>
+      <TextBox PlaceholderText="Search themes"
+               Text="{Binding Shell.ControlThemeSearchText, Mode=TwoWay}"
+               MinHeight="30" />
+      <Border IsVisible="{Binding Shell.IsThemeEditScopeActive}"
+              BorderThickness="1"
+              BorderBrush="{DynamicResource EditorBorderBrush}"
+              Padding="6"
+              CornerRadius="4">
+        <DockPanel LastChildFill="True">
+          <Button DockPanel.Dock="Left"
+                  Classes="theme-tool"
+                  ToolTip.Tip="Return to themed control"
+                  Command="{Binding Shell.ReturnFromThemeEditScopeCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource ThemeReturnIcon}" />
+          </Button>
+          <TextBlock Margin="6,0,0,0"
+                     VerticalAlignment="Center"
+                     Text="{Binding Shell.ThemeEditScopeBreadcrumb}"
+                     TextTrimming="CharacterEllipsis" />
+        </DockPanel>
+      </Border>
+    </StackPanel>
+
+    <Border DockPanel.Dock="Bottom"
+            BorderThickness="0,1,0,0"
+            BorderBrush="{DynamicResource EditorBorderBrush}"
+            Padding="6">
+      <TextBlock Text="{Binding Shell.ControlThemeStatus}"
+                 TextWrapping="Wrap"
+                 Opacity="0.75" />
+    </Border>
+
+    <dock:DockControl Margin="6"
+                      Layout="{Binding DockLayout}"
+                      Factory="{Binding DockFactory}"
+                      InitializeFactory="False"
+                      InitializeLayout="False"
+                      EnableManagedWindowLayer="True">
+      <dock:DockControl.DataTemplates>
+      <DataTemplate DataType="vm:ControlThemeCustomDockViewModel"
+                    x:DataType="vm:ControlThemeCustomDockViewModel">
+        <ListBox ItemsSource="{Binding Shell.FilteredControlThemes}"
+                 SelectedItem="{Binding Shell.SelectedControlTheme, Mode=TwoWay}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:ControlThemeDefinitionViewModel"
+                          x:DataType="visualVm:ControlThemeDefinitionViewModel">
+              <StackPanel Spacing="2"
+                          Margin="0,3">
+                <TextBlock Text="{Binding Key}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding FilePath}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DataTemplate>
+
+      <DataTemplate DataType="vm:ControlThemeResourcesDockViewModel"
+                    x:DataType="vm:ControlThemeResourcesDockViewModel">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top"
+                      Orientation="Horizontal"
+                      Spacing="4"
+                      Margin="0,0,0,6">
+            <TextBox Text="{Binding Shell.ThemeResourceKeyEditText, Mode=TwoWay}"
+                     PlaceholderText="Resource key"
+                     MinWidth="120" />
+            <Button Classes="theme-tool"
+                    ToolTip.Tip="Open resource"
+                    Command="{Binding Shell.OpenSelectedThemeResourceCommand}">
+              <PathIcon Width="14"
+                        Height="14"
+                        Data="{StaticResource ThemeOpenIcon}" />
+            </Button>
+            <Button Classes="theme-tool"
+                    ToolTip.Tip="Apply resource"
+                    Command="{Binding Shell.ApplySelectedThemeResourceCommand}">
+              <PathIcon Width="14"
+                        Height="14"
+                        Data="{StaticResource ThemeApplyIcon}" />
+            </Button>
+            <Button Classes="theme-tool"
+                    ToolTip.Tip="Rename resource"
+                    Command="{Binding Shell.RenameSelectedThemeResourceCommand}">
+              <PathIcon Width="14"
+                        Height="14"
+                        Data="{StaticResource ThemeRenameIcon}" />
+            </Button>
+            <Button Classes="theme-tool"
+                    ToolTip.Tip="Duplicate resource"
+                    Command="{Binding Shell.DuplicateSelectedThemeResourceCommand}">
+              <PathIcon Width="14"
+                        Height="14"
+                        Data="{StaticResource ThemeDuplicateIcon}" />
+            </Button>
+            <Button Classes="theme-tool"
+                    ToolTip.Tip="Delete unused resource"
+                    Command="{Binding Shell.DeleteSelectedThemeResourceCommand}">
+              <PathIcon Width="14"
+                        Height="14"
+                        Data="{StaticResource ThemeDeleteIcon}" />
+            </Button>
+          </StackPanel>
+          <ListBox ItemsSource="{Binding Shell.FilteredThemeResources}"
+                   SelectedItem="{Binding Shell.SelectedThemeResource, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="visualVm:ThemeResourceViewModel"
+                            x:DataType="visualVm:ThemeResourceViewModel">
+                <StackPanel Spacing="2"
+                            Margin="0,3">
+                  <TextBlock Text="{Binding Title}"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Location}"
+                             FontSize="11"
+                             Opacity="0.65"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </DataTemplate>
+
+      <DataTemplate DataType="vm:ControlThemeUsagesDockViewModel"
+                    x:DataType="vm:ControlThemeUsagesDockViewModel">
+        <ListBox ItemsSource="{Binding Shell.SelectedThemeResourceUsages}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:ThemeResourceUsageViewModel"
+                          x:DataType="visualVm:ThemeResourceUsageViewModel">
+              <StackPanel Spacing="2"
+                          Margin="0,3">
+                <TextBlock Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Location}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Snippet}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DataTemplate>
+
+      <DataTemplate DataType="vm:ControlThemeDiagnosticsDockViewModel"
+                    x:DataType="vm:ControlThemeDiagnosticsDockViewModel">
+        <ListBox ItemsSource="{Binding Shell.FilteredThemeResourceDiagnostics}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:ThemeResourceDiagnosticViewModel"
+                          x:DataType="visualVm:ThemeResourceDiagnosticViewModel">
+              <StackPanel Spacing="2"
+                          Margin="0,3">
+                <TextBlock Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Location}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DataTemplate>
+
+      <DataTemplate DataType="vm:ControlThemeStatesDockViewModel"
+                    x:DataType="vm:ControlThemeStatesDockViewModel">
+        <Grid RowDefinitions="Auto,Auto,*"
+              RowSpacing="6">
+          <ListBox ItemsSource="{Binding Shell.ThemePreviewStates}"
+                   SelectedItem="{Binding Shell.SelectedThemePreviewState, Mode=TwoWay}"
+                   ScrollViewer.HorizontalScrollBarVisibility="Auto">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="visualVm:ThemePreviewStateViewModel"
+                            x:DataType="visualVm:ThemePreviewStateViewModel">
+                <TextBlock Text="{Binding Title}"
+                           Margin="4,2" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <Grid Grid.Row="1"
+                ColumnDefinitions="*,*,Auto"
+                ColumnSpacing="6">
+            <TextBox Text="{Binding Shell.ThemeStateSetterPropertyName, Mode=TwoWay}"
+                     PlaceholderText="Setter property" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Shell.ThemeStateSetterValue, Mode=TwoWay}"
+                     PlaceholderText="Value" />
+            <Button Grid.Column="2"
+                    Content="Set"
+                    Command="{Binding Shell.ApplyThemeStateSetterCommand}" />
+          </Grid>
+          <ListBox Grid.Row="2"
+                   ItemsSource="{Binding Shell.ThemeStateSelectors}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="visualVm:ThemeStateSelectorViewModel"
+                            x:DataType="visualVm:ThemeStateSelectorViewModel">
+                <TextBlock Text="{Binding Title}"
+                           Margin="0,3"
+                           TextTrimming="CharacterEllipsis" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+      </DataTemplate>
+
+      <DataTemplate DataType="vm:ControlThemeVariantsDockViewModel"
+                    x:DataType="vm:ControlThemeVariantsDockViewModel">
+        <DockPanel>
+          <Button DockPanel.Dock="Top"
+                  Margin="0,0,0,6"
+                  Content="Create Light/Dark Preview"
+                  Command="{Binding Shell.CreateThemeVariantPreviewCommand}" />
+          <ListBox ItemsSource="{Binding Shell.ThemeVariants}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="visualVm:ThemeVariantViewModel"
+                            x:DataType="visualVm:ThemeVariantViewModel">
+                <StackPanel Spacing="2"
+                            Margin="0,3">
+                  <TextBlock Text="{Binding Title}"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Files}"
+                             FontSize="11"
+                             Opacity="0.65"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </DataTemplate>
+
+      <DataTemplate DataType="vm:ControlThemePartsDockViewModel"
+                    x:DataType="vm:ControlThemePartsDockViewModel">
+        <Grid RowDefinitions="*,Auto,*,*"
+              RowSpacing="6">
+          <ListBox ItemsSource="{Binding Shell.ThemeTemplateParts}"
+                   SelectedItem="{Binding Shell.SelectedThemeTemplatePart, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="visualVm:ThemeTemplatePartViewModel"
+                            x:DataType="visualVm:ThemeTemplatePartViewModel">
+                <TextBlock Text="{Binding Title}"
+                           Margin="0,3"
+                           TextTrimming="CharacterEllipsis" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <Grid Grid.Row="1"
+                RowDefinitions="Auto,Auto"
+                RowSpacing="6">
+            <ListBox ItemsSource="{Binding Shell.ThemePreviewStates}"
+                     SelectedItem="{Binding Shell.SelectedThemePreviewState, Mode=TwoWay}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto">
+              <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ListBox.ItemsPanel>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="visualVm:ThemePreviewStateViewModel"
+                              x:DataType="visualVm:ThemePreviewStateViewModel">
+                  <TextBlock Text="{Binding Title}"
+                             Margin="4,2" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <Grid Grid.Row="1"
+                  ColumnDefinitions="*,*,Auto"
+                  ColumnSpacing="6">
+              <TextBox Text="{Binding Shell.ThemeTemplatePartSetterPropertyName, Mode=TwoWay}"
+                       PlaceholderText="Part property" />
+              <TextBox Grid.Column="1"
+                       Text="{Binding Shell.ThemeTemplatePartSetterValue, Mode=TwoWay}"
+                       PlaceholderText="Value" />
+              <Button Grid.Column="2"
+                      Content="Set"
+                      Command="{Binding Shell.ApplyThemeTemplatePartSetterCommand}" />
+            </Grid>
+          </Grid>
+          <ListBox Grid.Row="2"
+                   ItemsSource="{Binding Shell.ThemeTemplatePartSelectors}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="visualVm:ThemeTemplatePartSelectorViewModel"
+                            x:DataType="visualVm:ThemeTemplatePartSelectorViewModel">
+                <TextBlock Text="{Binding Title}"
+                           Margin="0,3"
+                           TextTrimming="CharacterEllipsis" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <ListBox Grid.Row="3"
+                   ItemsSource="{Binding Shell.ThemeTemplateBindings}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="visualVm:ThemeTemplateBindingViewModel"
+                            x:DataType="visualVm:ThemeTemplateBindingViewModel">
+                <StackPanel Spacing="2"
+                            Margin="0,3">
+                  <TextBlock Text="{Binding Title}"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Snippet}"
+                             FontSize="11"
+                             Opacity="0.65"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+      </DataTemplate>
+
+      <DataTemplate DataType="vm:ControlThemeFluentDockViewModel"
+                    x:DataType="vm:ControlThemeFluentDockViewModel">
+        <ListBox ItemsSource="{Binding Shell.FilteredFluentControlThemeTemplates}"
+                 SelectedItem="{Binding Shell.SelectedFluentControlThemeTemplate, Mode=TwoWay}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:FluentControlThemeTemplateViewModel"
+                          x:DataType="visualVm:FluentControlThemeTemplateViewModel">
+              <StackPanel Spacing="2"
+                          Margin="0,3">
+                <TextBlock Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding SourcePath}"
+                           FontSize="11"
+                           Opacity="0.65"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DataTemplate>
+      </dock:DockControl.DataTemplates>
+    </dock:DockControl>
+  </DockPanel>
+</UserControl>

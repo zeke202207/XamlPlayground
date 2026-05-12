@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:XamlPlayground.ViewModels"
              xmlns:workspace="clr-namespace:XamlPlayground.Workspace"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
              xmlns:dock="using:Dock.Avalonia.Controls"
              xmlns:views="clr-namespace:XamlPlayground.Views"
              mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="450"
@@ -88,6 +89,67 @@
                     Command="{Binding CreateProjectCommand}" />
           </StackPanel>
         </StackPanel>
+      </Border>
+    </Border>
+
+    <Border Grid.RowSpan="2"
+            IsVisible="{Binding IsThemeResourceDeleteDialogOpen}"
+            Background="#66000000"
+            ZIndex="1001">
+      <Border Width="760"
+              MaxWidth="980"
+              MaxHeight="680"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Background="{DynamicResource DockSurfacePanelBrush}"
+              BorderBrush="{DynamicResource EditorBorderBrush}"
+              BorderThickness="1"
+              Padding="18">
+        <Grid RowDefinitions="Auto,Auto,*,Auto"
+              RowSpacing="12">
+          <TextBlock Text="{Binding ThemeResourceDeleteDialogTitle}"
+                     FontSize="20"
+                     FontWeight="SemiBold" />
+          <TextBlock Grid.Row="1"
+                     Text="{Binding ThemeResourceDeleteDialogMessage}"
+                     TextWrapping="Wrap"
+                     Opacity="0.75" />
+          <ListBox Grid.Row="2"
+                   ItemsSource="{Binding ThemeResourceDeleteChanges}"
+                   SelectedItem="{Binding SelectedThemeResourceDeleteChange, Mode=TwoWay}"
+                   MinHeight="260">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="visualVm:ThemeResourceDeleteChangeViewModel"
+                            x:DataType="visualVm:ThemeResourceDeleteChangeViewModel">
+                <StackPanel Spacing="6"
+                            Margin="0,5">
+                  <TextBlock Text="{Binding Title}"
+                             FontWeight="SemiBold"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Summary}"
+                             Opacity="0.65" />
+                  <TextBox Text="{Binding Diff}"
+                           AcceptsReturn="True"
+                           IsReadOnly="True"
+                           FontFamily="monospace"
+                           MinHeight="120"
+                           MaxHeight="260"
+                           ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                           ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <StackPanel Grid.Row="3"
+                      Orientation="Horizontal"
+                      HorizontalAlignment="Right"
+                      Spacing="8">
+            <Button Content="Cancel"
+                    Command="{Binding CancelThemeResourceDeleteCommand}" />
+            <Button Content="Delete"
+                    Command="{Binding ConfirmThemeResourceDeleteCommand}" />
+          </StackPanel>
+        </Grid>
       </Border>
     </Border>
   </Grid>

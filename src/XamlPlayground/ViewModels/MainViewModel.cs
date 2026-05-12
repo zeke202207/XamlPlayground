@@ -149,6 +149,7 @@ public partial class MainViewModel : ViewModelBase
         {
             (AddUserControlCommand as RelayCommand)?.NotifyCanExecuteChanged();
             (AddResourceDictionaryCommand as RelayCommand)?.NotifyCanExecuteChanged();
+            NotifyControlThemeCommandsChanged();
         }
     }
 
@@ -366,6 +367,7 @@ public partial class MainViewModel : ViewModelBase
         }
 
         RefreshVisualEditingModel(updateSourceSelection: false);
+        RefreshControlThemes();
     }
 
     private ObservableCollection<SolutionExplorerNodeViewModel> BuildSolutionExplorer(InMemorySolution solution)
@@ -540,6 +542,7 @@ public partial class MainViewModel : ViewModelBase
         SolutionExplorerNodes = Solution is { } solution
             ? BuildSolutionExplorer(solution)
             : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        RefreshControlThemes();
         OpenWorkspaceFile(file);
     }
 
@@ -554,6 +557,7 @@ public partial class MainViewModel : ViewModelBase
         SolutionExplorerNodes = Solution is { } solution
             ? BuildSolutionExplorer(solution)
             : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        RefreshControlThemes();
         OpenWorkspaceFile(file);
     }
 
@@ -622,6 +626,26 @@ public partial class MainViewModel : ViewModelBase
         };
     }
 
+    private static List<FilePickerFileType> GetThemeResourceFileTypes()
+    {
+        return new List<FilePickerFileType>
+        {
+            StorageService.Axaml,
+            StorageService.Xaml,
+            StorageService.All
+        };
+    }
+
+    private static List<FilePickerFileType> GetThemeProjectFileTypes()
+    {
+        return new List<FilePickerFileType>
+        {
+            StorageService.ThemeProject,
+            StorageService.Json,
+            StorageService.All
+        };
+    }
+
     private static List<FilePickerFileType> GetCodeFileTypes()
     {
         return new List<FilePickerFileType>
@@ -641,12 +665,33 @@ public partial class MainViewModel : ViewModelBase
 
     private void OnProjectFileChanged(InMemoryProjectFile file)
     {
+        var resourceChanged = file.Kind == ProjectFileKind.Resource;
+        if (resourceChanged)
+        {
+            RefreshControlThemes();
+        }
+        else if (file.IsXaml)
+        {
+            RefreshThemeResourceAnalysis();
+        }
+
         if (ReferenceEquals(file, ActiveXamlFile))
         {
             RefreshVisualEditingModel(updateSourceSelection: false);
         }
 
-        if (!EnableAutoRun || !ReferenceEquals(file, ActiveXamlFile) && !ReferenceEquals(file, ActiveCodeFile))
+        if (!EnableAutoRun)
+        {
+            return;
+        }
+
+        if (resourceChanged && !ReferenceEquals(file, ActiveXamlFile) && CanPreviewXamlFile(ActiveXamlFile))
+        {
+            RunActiveDocument();
+            return;
+        }
+
+        if (!ReferenceEquals(file, ActiveXamlFile) && !ReferenceEquals(file, ActiveCodeFile))
         {
             return;
         }
@@ -742,14 +787,28 @@ public partial class MainViewModel : ViewModelBase
                 }
             }
 
+            RuntimeXamlPreviewLoader.ApplyProjectResources(
+                project?.GetXamlFiles()
+                    .Where(static file => file.Kind == ProjectFileKind.Resource)
+                    .Select(static file => (file.Path, file.Text)) ??
+                Array.Empty<(string Path, string Text)>(),
+                scriptAssembly,
+                xamlDiagnostics);
+
             if (scriptAssembly is { })
             {
-                var control = RuntimeXamlPreviewLoader.LoadControl(
-                    xamlText,
-                    scriptAssembly,
-                    Path.GetFileNameWithoutExtension(xamlFile.Name),
-                    xamlFile.Path,
-                    xamlDiagnostics);
+                var control = xamlFile.Kind == ProjectFileKind.Resource
+                    ? RuntimeXamlPreviewLoader.LoadResourceDictionaryPreview(
+                        xamlText,
+                        scriptAssembly,
+                        xamlFile.Path,
+                        xamlDiagnostics)
+                    : RuntimeXamlPreviewLoader.LoadControl(
+                        xamlText,
+                        scriptAssembly,
+                        Path.GetFileNameWithoutExtension(xamlFile.Name),
+                        xamlFile.Path,
+                        xamlDiagnostics);
                 if (control is { })
                 {
                     ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
@@ -757,12 +816,18 @@ public partial class MainViewModel : ViewModelBase
             }
             else
             {
-                var control = RuntimeXamlPreviewLoader.LoadControl(
-                    xamlText,
-                    null,
-                    null,
-                    xamlFile.Path,
-                    xamlDiagnostics);
+                var control = xamlFile.Kind == ProjectFileKind.Resource
+                    ? RuntimeXamlPreviewLoader.LoadResourceDictionaryPreview(
+                        xamlText,
+                        null,
+                        xamlFile.Path,
+                        xamlDiagnostics)
+                    : RuntimeXamlPreviewLoader.LoadControl(
+                        xamlText,
+                        null,
+                        null,
+                        xamlFile.Path,
+                        xamlDiagnostics);
                 if (control is { })
                 {
                     ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
@@ -790,7 +855,7 @@ public partial class MainViewModel : ViewModelBase
 
     private static bool CanPreviewXamlFile(InMemoryProjectFile? file)
     {
-        return file?.Kind == ProjectFileKind.Xaml &&
+        return file?.Kind is ProjectFileKind.Xaml or ProjectFileKind.Resource &&
                !file.Path.Equals("App.axaml", StringComparison.OrdinalIgnoreCase);
     }
 
