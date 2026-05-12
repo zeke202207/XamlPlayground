@@ -261,7 +261,7 @@ public static class ThemeResourceEditor
         return attributeRegex.Replace(xaml, match =>
         {
             var value = match.Groups["value"].Value;
-            return IsExactResourceReference(value, key)
+            return ContainsResourceReference(value, key)
                 ? string.Empty
                 : match.Value;
         });
@@ -302,7 +302,7 @@ public static class ThemeResourceEditor
             .Attributes()
             .FirstOrDefault(static attribute => attribute.Name.LocalName == "Value");
         if (valueAttribute is not null &&
-            IsExactResourceReference(valueAttribute.Value, key))
+            ContainsResourceReference(valueAttribute.Value, key))
         {
             return true;
         }
@@ -315,7 +315,7 @@ public static class ThemeResourceEditor
 
     private static bool SetterValueElementReferencesResource(XElement setterValue, string key)
     {
-        return IsExactResourceReference(setterValue.Value, key) ||
+        return ContainsResourceReference(setterValue.Value, key) ||
                setterValue
                    .Descendants()
                    .Any(element => IsResourceReferenceElement(element, key));
@@ -419,6 +419,12 @@ public static class ThemeResourceEditor
     {
         return ResourceReferenceParser.TryGetExactKey(value, out var referenceKey) &&
                string.Equals(referenceKey, key, StringComparison.Ordinal);
+    }
+
+    private static bool ContainsResourceReference(string value, string key)
+    {
+        return ResourceReferenceParser.Find(value)
+            .Any(match => string.Equals(match.Key, key, StringComparison.Ordinal));
     }
 
     private static bool IsValidKey(string key)

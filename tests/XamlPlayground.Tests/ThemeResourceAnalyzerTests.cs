@@ -277,8 +277,12 @@ public sealed class ThemeResourceAnalyzerTests
         const string xaml = """
                             <UserControl xmlns="https://github.com/avaloniaui"
                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <Style Selector="Button">
+                                <Setter Property="Tag" Value="{Binding Name, Converter={StaticResource AccentBrush}}" />
+                              </Style>
                               <Button Theme="{StaticResource {x:Type Button}}" />
                               <Button Background="{StaticResource ResourceKey='AccentBrush'}" />
+                              <TextBlock Text="{Binding Name, Converter={StaticResource AccentBrush}}" />
                             </UserControl>
                             """;
 
@@ -288,7 +292,10 @@ public sealed class ThemeResourceAnalyzerTests
 
         Assert.Contains("Theme=\"{StaticResource PrimaryButtonTheme}\"", renamed, System.StringComparison.Ordinal);
         Assert.Contains("Background=\"{StaticResource ResourceKey='PrimaryBrush'}\"", renamed, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Property=\"Tag\"", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Background=", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("{StaticResource AccentBrush}", cleaned, System.StringComparison.Ordinal);
     }
 
     [Fact]
