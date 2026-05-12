@@ -77,6 +77,39 @@ public sealed class ThemeResourceAnalyzerTests
     }
 
     [Fact]
+    public void Analyze_ReportsBaseReferencesMissingFromEmptyThemeScopes()
+    {
+        var analysis = ResourceDictionaryAnalyzer.Analyze(new[]
+        {
+            new ThemeResourceDocument(
+                "Themes/Palette.axaml",
+                """
+                <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                  <ResourceDictionary.ThemeDictionaries>
+                    <ResourceDictionary x:Key="Light" />
+                    <ResourceDictionary x:Key="Dark">
+                      <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+                    </ResourceDictionary>
+                  </ResourceDictionary.ThemeDictionaries>
+                </ResourceDictionary>
+                """,
+                IsResourceDictionary: true),
+            new ThemeResourceDocument(
+                "Views/MainView.axaml",
+                """
+                <UserControl xmlns="https://github.com/avaloniaui">
+                  <Border Background="{DynamicResource AccentBrush}" />
+                </UserControl>
+                """,
+                IsResourceDictionary: false)
+        });
+
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("Resource 'AccentBrush' is referenced but not defined", System.StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Analyze_HandlesMarkupExtensionResourceKeys()
     {
         var analysis = ResourceDictionaryAnalyzer.Analyze(new[]

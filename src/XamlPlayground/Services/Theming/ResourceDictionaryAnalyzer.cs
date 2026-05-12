@@ -69,6 +69,7 @@ public static class ResourceDictionaryAnalyzer
         var resources = new List<ThemeResourceDefinition>();
         var references = new List<ThemeResourceReference>();
         var diagnostics = new List<ThemeResourceDiagnostic>();
+        var declaredThemeScopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var documentArray = documents.ToArray();
 
         foreach (var document in documentArray)
@@ -76,12 +77,13 @@ public static class ResourceDictionaryAnalyzer
             references.AddRange(FindResourceReferences(document));
             if (document.IsResourceDictionary)
             {
+                declaredThemeScopes.UnionWith(FindDeclaredThemeScopes(document));
                 resources.AddRange(FindResourceDefinitions(document, diagnostics));
             }
         }
 
         diagnostics.AddRange(FindDuplicateDiagnostics(resources));
-        diagnostics.AddRange(FindMissingReferenceDiagnostics(resources, references));
+        diagnostics.AddRange(FindMissingReferenceDiagnostics(resources, references, declaredThemeScopes));
 
         return new ThemeResourceAnalysis(
             resources
@@ -142,6 +144,56 @@ public static class ResourceDictionaryAnalyzer
             {
                 ThemeScope = resource.ThemeScope
             };
+        }
+    }
+
+    private static IEnumerable<string> FindDeclaredThemeScopes(ThemeResourceDocument document)
+    {
+        if (TryParseDocument(document.Text) is not { Root: { } root })
+        {
+            yield break;
+        }
+
+        foreach (var scope in EnumerateDeclaredThemeScopes(root, ThemeProjectStorage.BaseVariant))
+        {
+            yield return scope;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateDeclaredThemeScopes(
+        XElement element,
+        string themeScope)
+    {
+        if (element.Name.LocalName == "ResourceDictionary.ThemeDictionaries")
+        {
+            foreach (var themeDictionary in element.Elements().Where(static child => child.Name.LocalName == "ResourceDictionary"))
+            {
+                var childScope = themeDictionary.Attribute(XamlNamespace + "Key")?.Value;
+                if (string.IsNullOrWhiteSpace(childScope))
+                {
+                    childScope = themeScope;
+                }
+
+                if (!string.Equals(childScope, ThemeProjectStorage.BaseVariant, StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return childScope;
+                }
+
+                foreach (var nestedScope in EnumerateDeclaredThemeScopes(themeDictionary, childScope))
+                {
+                    yield return nestedScope;
+                }
+            }
+
+            yield break;
+        }
+
+        foreach (var child in element.Elements())
+        {
+            foreach (var nestedScope in EnumerateDeclaredThemeScopes(child, themeScope))
+            {
+                yield return nestedScope;
+            }
         }
     }
 
@@ -352,11 +404,13 @@ public static class ResourceDictionaryAnalyzer
 
     private static IEnumerable<ThemeResourceDiagnostic> FindMissingReferenceDiagnostics(
         IEnumerable<ThemeResourceDefinition> resources,
-        IEnumerable<ThemeResourceReference> references)
+        IEnumerable<ThemeResourceReference> references,
+        IEnumerable<string> declaredThemeScopes)
     {
         var resourceArray = resources.ToArray();
         var themeScopes = resourceArray
             .Select(static resource => resource.ThemeScope)
+            .Concat(declaredThemeScopes)
             .Where(static scope => !string.Equals(scope, ThemeProjectStorage.BaseVariant, StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
