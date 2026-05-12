@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -48,6 +49,14 @@ public class TextEditorBehavior : Behavior<TextEditor>
     {
         get => GetValue(ExtensionProperty);
         set => SetValue(ExtensionProperty, value);
+    }
+
+    public static void PrepareForDocumentReplacement(TextEditor textEditor)
+    {
+        foreach (var behavior in Interaction.GetBehaviors(textEditor).OfType<TextEditorBehavior>())
+        {
+            behavior.PrepareForDocumentReplacementCore(textEditor);
+        }
     }
 
     protected override void OnAttached()
@@ -332,9 +341,23 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private void TextEditorOnDocumentChanged(object? sender, DocumentChangedEventArgs e)
     {
         _foldingTimer?.Stop();
+        _foldingRefreshVersion++;
         UninstallFoldingManager();
         SubscribeToDocument(e.NewDocument);
         QueueFoldingRefresh();
+    }
+
+    private void PrepareForDocumentReplacementCore(TextEditor textEditor)
+    {
+        if (!ReferenceEquals(_textEditor, textEditor))
+        {
+            return;
+        }
+
+        _foldingTimer?.Stop();
+        _foldingRefreshVersion++;
+        UninstallFoldingManager();
+        SubscribeToDocument(null);
     }
 
     private void DocumentOnChanged(object? sender, DocumentChangeEventArgs e)
@@ -867,8 +890,18 @@ public class TextEditorBehavior : Behavior<TextEditor>
             return;
         }
 
-        FoldingManager.Uninstall(foldingManager);
-        _foldingManager = null;
+        try
+        {
+            FoldingManager.Uninstall(foldingManager);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+        finally
+        {
+            _foldingManager = null;
+        }
     }
 
     private static bool IsXmlExtension(string? extension)
