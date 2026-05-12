@@ -33,6 +33,13 @@ internal static class ResourceReferenceParser
                 yield break;
             }
 
+            var escapedLiteralEnd = GetEscapedMarkupLiteralEnd(text, start);
+            if (escapedLiteralEnd >= 0)
+            {
+                index = Math.Max(escapedLiteralEnd, start + 2);
+                continue;
+            }
+
             if (TryReadAt(text, start, out var match))
             {
                 yield return match;
@@ -242,6 +249,52 @@ internal static class ResourceReferenceParser
         }
 
         return -1;
+    }
+
+    private static int GetEscapedMarkupLiteralEnd(string text, int start)
+    {
+        if (!StartsWithAt(text, start, "{}"))
+        {
+            return -1;
+        }
+
+        var valueStart = start;
+        while (valueStart > 0 && char.IsWhiteSpace(text[valueStart - 1]))
+        {
+            valueStart--;
+        }
+
+        if (valueStart == 0)
+        {
+            return text.Length;
+        }
+
+        var quoteIndex = valueStart - 1;
+        if (text[quoteIndex] is not ('"' or '\'') ||
+            !IsAttributeValueQuote(text, quoteIndex))
+        {
+            return start + 2;
+        }
+
+        var quote = text[quoteIndex];
+        var end = start + 2;
+        while (end < text.Length && text[end] != quote)
+        {
+            end++;
+        }
+
+        return end < text.Length ? end + 1 : text.Length;
+    }
+
+    private static bool IsAttributeValueQuote(string text, int quoteIndex)
+    {
+        var index = quoteIndex - 1;
+        while (index >= 0 && char.IsWhiteSpace(text[index]))
+        {
+            index--;
+        }
+
+        return index >= 0 && text[index] == '=';
     }
 
     private static void SkipWhitespace(string text, ref int index, int limit)

@@ -98,6 +98,7 @@ public sealed class ThemeResourceAnalyzerTests
                   <Button Theme="{StaticResource {x:Type Button}}" />
                   <Button Theme="{StaticResource ResourceKey={x:Type Button}}" />
                   <Button Theme="{StaticResource ResourceKey='AccentBrush'}" />
+                  <TextBlock Text="{}{StaticResource EscapedBrush}" />
                 </UserControl>
                 """,
                 IsResourceDictionary: false)
@@ -105,11 +106,14 @@ public sealed class ThemeResourceAnalyzerTests
 
         Assert.Contains(analysis.Resources, resource => resource.Key == "{x:Type Button}");
         Assert.Equal(2, analysis.References.Count(reference => reference.Key == "{x:Type Button}"));
-        Assert.Contains(analysis.References, reference => reference.Key == "AccentBrush");
+        Assert.Single(analysis.References, reference => reference.Key == "AccentBrush");
+        Assert.DoesNotContain(analysis.References, reference => reference.Key == "EscapedBrush");
         Assert.DoesNotContain(analysis.Diagnostics, diagnostic =>
             diagnostic.Message.Contains("{x:Type Button}", System.StringComparison.Ordinal));
         Assert.Contains(analysis.Diagnostics, diagnostic =>
             diagnostic.Message.Contains("Resource 'AccentBrush' is referenced but not defined", System.StringComparison.Ordinal));
+        Assert.DoesNotContain(analysis.Diagnostics, diagnostic =>
+            diagnostic.Message.Contains("EscapedBrush", System.StringComparison.Ordinal));
     }
 
     [Fact]
@@ -299,6 +303,7 @@ public sealed class ThemeResourceAnalyzerTests
                                   <StaticResource ResourceKey="OtherBrush" />
                                 </ContentControl.Tag>
                               </ContentControl>
+                              <Border Classes="{}{StaticResource EscapedBrush}" />
                               <TextBlock Text="{Binding Name, Converter={StaticResource AccentBrush}}" />
                             </UserControl>
                             """;
@@ -306,9 +311,13 @@ public sealed class ThemeResourceAnalyzerTests
         var renamed = ThemeResourceEditor.RenameResourceReferences(xaml, "{x:Type Button}", "PrimaryButtonTheme");
         renamed = ThemeResourceEditor.RenameResourceReferences(renamed, "AccentBrush", "PrimaryBrush");
         var cleaned = ThemeResourceEditor.RemoveResourceReferences(xaml, "AccentBrush");
+        var escapedRenamed = ThemeResourceEditor.RenameResourceReferences(xaml, "EscapedBrush", "PrimaryBrush");
+        var escapedCleaned = ThemeResourceEditor.RemoveResourceReferences(xaml, "EscapedBrush");
 
         Assert.Contains("Theme=\"{StaticResource PrimaryButtonTheme}\"", renamed, System.StringComparison.Ordinal);
         Assert.Contains("Background=\"{StaticResource ResourceKey='PrimaryBrush'}\"", renamed, System.StringComparison.Ordinal);
+        Assert.Contains("Classes=\"{}{StaticResource EscapedBrush}\"", escapedRenamed, System.StringComparison.Ordinal);
+        Assert.Contains("Classes=\"{}{StaticResource EscapedBrush}\"", escapedCleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Property=\"Tag\"", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Background=", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("ToolTip=", cleaned, System.StringComparison.Ordinal);
