@@ -282,6 +282,8 @@ public sealed class ThemeResourceAnalyzerTests
                               </Style>
                               <Button Theme="{StaticResource {x:Type Button}}" />
                               <Button Background="{StaticResource ResourceKey='AccentBrush'}" />
+                              <Border ToolTip='{StaticResource AccentBrush}' />
+                              <ContentControl Tag='{Binding Name, Converter={StaticResource AccentBrush}}' />
                               <TextBlock Text="{Binding Name, Converter={StaticResource AccentBrush}}" />
                             </UserControl>
                             """;
@@ -294,6 +296,8 @@ public sealed class ThemeResourceAnalyzerTests
         Assert.Contains("Background=\"{StaticResource ResourceKey='PrimaryBrush'}\"", renamed, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Property=\"Tag\"", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Background=", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("ToolTip=", cleaned, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Tag=", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Text=", cleaned, System.StringComparison.Ordinal);
         Assert.DoesNotContain("{StaticResource AccentBrush}", cleaned, System.StringComparison.Ordinal);
     }

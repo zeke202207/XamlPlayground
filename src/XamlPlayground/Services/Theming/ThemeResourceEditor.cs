@@ -255,12 +255,14 @@ public static class ThemeResourceEditor
         xaml = RemoveResourceReferenceSetters(xaml, key);
 
         var attributeRegex = new Regex(
-            "\\s+[A-Za-z_][A-Za-z0-9_.:-]*\\s*=\\s*\"(?<value>[^\"]*)\"",
+            "\\s+[A-Za-z_][A-Za-z0-9_.:-]*\\s*=\\s*(?:\"(?<doubleValue>[^\"]*)\"|'(?<singleValue>[^']*)')",
             RegexOptions.CultureInvariant);
 
         return attributeRegex.Replace(xaml, match =>
         {
-            var value = match.Groups["value"].Value;
+            var value = match.Groups["doubleValue"].Success
+                ? match.Groups["doubleValue"].Value
+                : match.Groups["singleValue"].Value;
             return ContainsResourceReference(value, key)
                 ? string.Empty
                 : match.Value;
