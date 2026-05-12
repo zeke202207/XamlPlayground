@@ -1966,6 +1966,9 @@ public sealed class VisualEditingTests
                 var previewSurface = Assert.Single(
                     preview.GetVisualDescendants().OfType<Grid>(),
                     grid => grid.Name == "PreviewSurface");
+                var designerOverlay = Assert.Single(
+                    preview.GetVisualDescendants().OfType<Canvas>(),
+                    canvas => canvas.Name == "DesignerOverlay");
                 var actionButton = Assert.Single(
                     preview.GetVisualDescendants().OfType<Button>(),
                     button => button.Name == "Action");
@@ -1990,7 +1993,7 @@ public sealed class VisualEditingTests
                 var start = thumbTopLeft.Value + new Vector(southEastThumb.Bounds.Width / 2, southEastThumb.Bounds.Height / 2);
                 var end = start + new Vector(30, 14);
                 southEastThumb.RaiseEvent(CreatePointerPressedArgs(southEastThumb, previewSurface, pointer, start));
-                preview.RaiseEvent(CreatePointerMovedArgs(preview, previewSurface, pointer, end));
+                designerOverlay.RaiseEvent(CreatePointerMovedArgs(designerOverlay, previewSurface, pointer, end));
                 PumpLayout(window);
 
                 Assert.Equal(150, viewModel.VisualEditorPreviewSelectionWidth, precision: 1);
@@ -1998,7 +2001,7 @@ public sealed class VisualEditingTests
                 Assert.DoesNotContain("Width=\"150\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
                 Assert.DoesNotContain("Height=\"54\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
 
-                preview.RaiseEvent(CreatePointerReleasedArgs(preview, previewSurface, pointer, end));
+                designerOverlay.RaiseEvent(CreatePointerReleasedArgs(designerOverlay, previewSurface, pointer, end));
                 PumpLayout(window);
 
                 Assert.Contains("Width=\"150\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
