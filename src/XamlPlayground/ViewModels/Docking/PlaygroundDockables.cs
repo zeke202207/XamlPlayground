@@ -165,6 +165,34 @@ public sealed class VisualToolboxDockViewModel : Tool
     public MainViewModel Shell { get; }
 }
 
+public sealed class VisualAnimationsDockViewModel : Tool
+{
+    public VisualAnimationsDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "VisualAnimations";
+        Title = "Animations";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
+public sealed class AnimationTimelineSheetDockViewModel : Tool
+{
+    public AnimationTimelineSheetDockViewModel(MainViewModel shell)
+    {
+        Shell = shell;
+        Id = "AnimationTimelineSheet";
+        Title = "Timeline";
+        CanClose = false;
+        KeepPinnedDockableVisible = true;
+    }
+
+    public MainViewModel Shell { get; }
+}
+
 public sealed class ControlThemesDockViewModel : Tool
 {
     public ControlThemesDockViewModel(MainViewModel shell)
@@ -256,6 +284,14 @@ public sealed class ControlThemePartsDockViewModel : ControlThemePanelDockViewMo
 {
     public ControlThemePartsDockViewModel(MainViewModel shell)
         : base(shell, "ControlThemeParts", "Parts")
+    {
+    }
+}
+
+public sealed class ControlThemeAnimationsDockViewModel : ControlThemePanelDockViewModel
+{
+    public ControlThemeAnimationsDockViewModel(MainViewModel shell)
+        : base(shell, "ControlThemeAnimations", "Animations")
     {
     }
 }

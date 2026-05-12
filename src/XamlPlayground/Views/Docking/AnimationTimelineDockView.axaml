@@ -1,0 +1,486 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             mc:Ignorable="d" d:DesignWidth="360" d:DesignHeight="620"
+             x:Class="XamlPlayground.Views.Docking.AnimationTimelineDockView"
+             x:CompileBindings="False">
+  <UserControl.KeyBindings>
+    <KeyBinding Gesture="Ctrl+K" Command="{Binding Shell.CaptureAnimationKeyFrameCommand}" />
+    <KeyBinding Gesture="Insert" Command="{Binding Shell.AddAnimationKeyFrameCommand}" />
+    <KeyBinding Gesture="Enter" Command="{Binding Shell.UpdateAnimationKeyFrameCommand}" />
+    <KeyBinding Gesture="Delete" Command="{Binding Shell.RemoveAnimationKeyFrameCommand}" />
+    <KeyBinding Gesture="Ctrl+D" Command="{Binding Shell.DuplicateAnimationKeyFrameCommand}" />
+    <KeyBinding Gesture="Alt+Left" Command="{Binding Shell.SelectPreviousAnimationKeyFrameCommand}" />
+    <KeyBinding Gesture="Alt+Right" Command="{Binding Shell.SelectNextAnimationKeyFrameCommand}" />
+    <KeyBinding Gesture="Ctrl+Left" Command="{Binding Shell.NudgeAnimationKeyFrameLeftCommand}" />
+    <KeyBinding Gesture="Ctrl+Right" Command="{Binding Shell.NudgeAnimationKeyFrameRightCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+Left" Command="{Binding Shell.NudgeAnimationKeyFrameLeftLargeCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+Right" Command="{Binding Shell.NudgeAnimationKeyFrameRightLargeCommand}" />
+    <KeyBinding Gesture="Home" Command="{Binding Shell.SeekAnimationStartCommand}" />
+    <KeyBinding Gesture="End" Command="{Binding Shell.SeekAnimationEndCommand}" />
+    <KeyBinding Gesture="Ctrl+Space" Command="{Binding Shell.PlayAnimationTimelineCommand}" />
+  </UserControl.KeyBindings>
+
+  <UserControl.Styles>
+    <Style Selector="TextBox">
+      <Setter Property="Height" Value="30" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="MinHeight" Value="30" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Padding" Value="8,0" />
+    </Style>
+    <Style Selector="Button.timeline-tool">
+      <Setter Property="MinWidth" Value="48" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.timeline-tool.compact">
+      <Setter Property="MinWidth" Value="36" />
+      <Setter Property="Padding" Value="6,0" />
+    </Style>
+    <Style Selector="TextBox.timeline-short">
+      <Setter Property="MinWidth" Value="56" />
+      <Setter Property="MaxWidth" Value="76" />
+    </Style>
+    <Style Selector="TextBlock.caption">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="Opacity" Value="0.68" />
+    </Style>
+    <Style Selector="Border.timeline-header">
+      <Setter Property="Background" Value="{DynamicResource DockSurfaceHeaderBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="10,8" />
+    </Style>
+    <Style Selector="Border.timeline-panel">
+      <Setter Property="Background" Value="{DynamicResource DockSurfacePanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="8" />
+    </Style>
+    <Style Selector="Border.timeline-strip">
+      <Setter Property="Background" Value="{DynamicResource DockSurfaceHeaderBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="6" />
+    </Style>
+    <Style Selector="Border.timeline-track">
+      <Setter Property="Background" Value="{DynamicResource DockSurfaceEditorBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="7,6" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+    <Style Selector="Border.timeline-lane">
+      <Setter Property="Background" Value="{DynamicResource DockSurfaceHeaderBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="3" />
+    </Style>
+    <Style Selector="Border.timeline-marker">
+      <Setter Property="Background" Value="{DynamicResource DockTabSelectedForegroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DockDocumentTabPointerOverForegroundBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="2" />
+    </Style>
+    <Style Selector="Border.timeline-inspector">
+      <Setter Property="Background" Value="{DynamicResource DockSurfacePanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1,1,1,0" />
+      <Setter Property="Padding" Value="6" />
+    </Style>
+    <Style Selector="Border.timeline-transport">
+      <Setter Property="Background" Value="{DynamicResource DockSurfacePanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource EditorBorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="8,7" />
+    </Style>
+  </UserControl.Styles>
+
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}"
+             LastChildFill="True">
+    <Border DockPanel.Dock="Bottom"
+            BorderThickness="0,1,0,0"
+            BorderBrush="{DynamicResource EditorBorderBrush}"
+            Padding="8,6">
+      <TextBlock Text="{Binding Shell.AnimationPlaybackStatus}"
+                 TextWrapping="Wrap"
+                 FontSize="12"
+                 Opacity="0.78" />
+    </Border>
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
+      <Border Classes="timeline-header">
+        <Grid ColumnDefinitions="*,Auto"
+              ColumnSpacing="8">
+          <StackPanel Spacing="2">
+            <TextBlock Text="ANIMATOR"
+                       Foreground="{DynamicResource DockTabSelectedForegroundBrush}"
+                       FontSize="10"
+                       FontWeight="SemiBold" />
+            <TextBlock Text="{Binding Shell.SelectedAnimationTargetOption.Title}"
+                       Foreground="{DynamicResource DockTabForegroundBrush}"
+                       FontSize="15"
+                       FontWeight="SemiBold"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding Shell.SelectedAnimationTargetOption.DisplayText}"
+                       Foreground="{DynamicResource DockTabForegroundBrush}"
+                       Opacity="0.72"
+                       FontSize="11"
+                       TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+          <StackPanel Grid.Column="1"
+                      Orientation="Horizontal"
+                      Spacing="4"
+                      VerticalAlignment="Center">
+            <Button Classes="timeline-tool"
+                    Content="Apply"
+                    Command="{Binding Shell.ApplyAnimationTimelineCommand}" />
+            <Button Classes="timeline-tool"
+                    Content="Preview"
+                    Command="{Binding Shell.PreviewAnimationTimelineCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="1"
+              Classes="timeline-panel">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto"
+              RowSpacing="6">
+          <Grid ColumnDefinitions="1.35*,2*"
+                ColumnSpacing="6">
+            <ComboBox ItemsSource="{Binding Shell.AnimationTargetOptions}"
+                      SelectedItem="{Binding Shell.SelectedAnimationTargetOption, Mode=TwoWay}"
+                      PlaceholderText="Animation target">
+              <ComboBox.ItemTemplate>
+                <DataTemplate DataType="visualVm:AnimationTargetOptionViewModel"
+                              x:DataType="visualVm:AnimationTargetOptionViewModel">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Title}"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Scope}"
+                               FontSize="11"
+                               Opacity="0.65"
+                               TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <TextBox Grid.Column="1"
+                     Text="{Binding Shell.AnimationTargetSelector, Mode=TwoWay}"
+                     PlaceholderText="Selector" />
+          </Grid>
+
+          <Grid Grid.Row="1"
+                ColumnDefinitions="*,*,*"
+                ColumnSpacing="6">
+            <TextBox Text="{Binding Shell.AnimationDurationText, Mode=TwoWay}"
+                     PlaceholderText="Duration" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Shell.AnimationDelayText, Mode=TwoWay}"
+                     PlaceholderText="Delay" />
+            <TextBox Grid.Column="2"
+                     Text="{Binding Shell.AnimationEasingText, Mode=TwoWay}"
+                     PlaceholderText="Easing" />
+          </Grid>
+
+          <Grid Grid.Row="2"
+                ColumnDefinitions="*,*,*"
+                ColumnSpacing="6">
+            <TextBox Text="{Binding Shell.AnimationFillModeText, Mode=TwoWay}"
+                     PlaceholderText="Fill" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Shell.AnimationPlaybackDirectionText, Mode=TwoWay}"
+                     PlaceholderText="Direction" />
+            <TextBox Grid.Column="2"
+                     Text="{Binding Shell.AnimationIterationCountText, Mode=TwoWay}"
+                     PlaceholderText="Repeat" />
+          </Grid>
+
+          <Grid Grid.Row="3"
+                ColumnDefinitions="1.2*,1.5*,Auto"
+                ColumnSpacing="6">
+            <ComboBox ItemsSource="{Binding Shell.AnimationPresets}"
+                      SelectedItem="{Binding Shell.SelectedAnimationPreset, Mode=TwoWay}"
+                      PlaceholderText="Preset">
+              <ComboBox.ItemTemplate>
+                <DataTemplate DataType="visualVm:AnimationPresetViewModel"
+                              x:DataType="visualVm:AnimationPresetViewModel">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Title}"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Summary}"
+                               FontSize="11"
+                               Opacity="0.65"
+                               TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <TextBox Grid.Column="1"
+                     Text="{Binding Shell.AnimationPropertyName, Mode=TwoWay}"
+                     PlaceholderText="Property" />
+            <Button Grid.Column="2"
+                    Classes="timeline-tool"
+                    Content="Track"
+                    Command="{Binding Shell.AddAnimationTrackCommand}" />
+          </Grid>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="2"
+            RowDefinitions="Auto,*,Auto,128">
+        <Border Classes="timeline-strip"
+                Margin="8,8,8,6">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Disabled">
+            <StackPanel Orientation="Horizontal"
+                        Spacing="4">
+              <CheckBox Content="Record"
+                        IsChecked="{Binding Shell.AnimationRecordModeEnabled, Mode=TwoWay}"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Capture visual designer moves and property edits as keyframes at the playhead" />
+              <Button Classes="timeline-tool"
+                      Content="Capture"
+                      ToolTip.Tip="Capture the selected property value at the playhead"
+                      Command="{Binding Shell.CaptureAnimationKeyFrameCommand}" />
+              <Button Classes="timeline-tool compact"
+                      Content="Prev"
+                      ToolTip.Tip="Select previous keyframe"
+                      Command="{Binding Shell.SelectPreviousAnimationKeyFrameCommand}" />
+              <Button Classes="timeline-tool compact"
+                      Content="Next"
+                      ToolTip.Tip="Select next keyframe"
+                      Command="{Binding Shell.SelectNextAnimationKeyFrameCommand}" />
+              <Button Classes="timeline-tool compact"
+                      Content="Clone"
+                      ToolTip.Tip="Duplicate selected keyframe"
+                      Command="{Binding Shell.DuplicateAnimationKeyFrameCommand}" />
+              <Button Classes="timeline-tool compact"
+                      Content="-10"
+                      ToolTip.Tip="Move selected keyframe left by 10%"
+                      Command="{Binding Shell.NudgeAnimationKeyFrameLeftLargeCommand}" />
+              <Button Classes="timeline-tool compact"
+                      Content="-1"
+                      ToolTip.Tip="Move selected keyframe left by 1%"
+                      Command="{Binding Shell.NudgeAnimationKeyFrameLeftCommand}" />
+              <Button Classes="timeline-tool compact"
+                      Content="+1"
+                      ToolTip.Tip="Move selected keyframe right by 1%"
+                      Command="{Binding Shell.NudgeAnimationKeyFrameRightCommand}" />
+              <Button Classes="timeline-tool compact"
+                      Content="+10"
+                      ToolTip.Tip="Move selected keyframe right by 10%"
+                      Command="{Binding Shell.NudgeAnimationKeyFrameRightLargeCommand}" />
+            </StackPanel>
+          </ScrollViewer>
+        </Border>
+
+        <ListBox Grid.Row="1"
+                 Margin="8,0,8,8"
+                 Background="{DynamicResource DockSurfacePanelBrush}"
+                 BorderBrush="{DynamicResource EditorBorderBrush}"
+                 BorderThickness="1"
+                 ItemsSource="{Binding Shell.AnimationTimelineTracks}"
+                 SelectedItem="{Binding Shell.SelectedAnimationTimelineTrack, Mode=TwoWay}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="visualVm:AnimationTimelineTrackViewModel"
+                          x:DataType="visualVm:AnimationTimelineTrackViewModel">
+              <Border Classes="timeline-track">
+                <Grid RowDefinitions="Auto,Auto"
+                      RowSpacing="5">
+                  <Grid ColumnDefinitions="*,Auto"
+                        ColumnSpacing="8">
+                    <TextBlock Text="{Binding PropertyName}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding KeyFrameCount}"
+                               Classes="caption" />
+                  </Grid>
+                  <ScrollViewer Grid.Row="1"
+                                HorizontalScrollBarVisibility="Auto"
+                                VerticalScrollBarVisibility="Disabled">
+                    <Grid RowDefinitions="Auto,Auto"
+                          Width="430">
+                      <Grid Height="16"
+                            ColumnDefinitions="*,*,*,*,*">
+                        <TextBlock Text="0"
+                                   Classes="caption" />
+                        <TextBlock Grid.Column="1"
+                                   Text="25"
+                                   Classes="caption" />
+                        <TextBlock Grid.Column="2"
+                                   Text="50"
+                                   Classes="caption" />
+                        <TextBlock Grid.Column="3"
+                                   Text="75"
+                                   Classes="caption" />
+                        <TextBlock Grid.Column="4"
+                                   Text="100"
+                                   HorizontalAlignment="Right"
+                                   Classes="caption" />
+                      </Grid>
+                      <Border Grid.Row="1"
+                              Classes="timeline-lane"
+                              Width="430"
+                              Height="30">
+                        <ItemsControl ItemsSource="{Binding KeyFrames}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                              <Canvas Width="430"
+                                      Height="28"
+                                      Background="Transparent" />
+                            </ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.Styles>
+                            <Style Selector="ContentPresenter">
+                              <Setter Property="Canvas.Left" Value="{Binding TimelineLeft}" />
+                              <Setter Property="Canvas.Top" Value="5" />
+                            </Style>
+                          </ItemsControl.Styles>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="visualVm:AnimationTimelineKeyFrameViewModel"
+                                          x:DataType="visualVm:AnimationTimelineKeyFrameViewModel">
+                              <Border Classes="timeline-marker"
+                                      Width="10"
+                                      Height="18"
+                                      Cursor="Hand"
+                                      PointerPressed="OnKeyFramePointerPressed"
+                                      PointerMoved="OnKeyFramePointerMoved"
+                                      PointerReleased="OnKeyFramePointerReleased"
+                                      ToolTip.Tip="{Binding Title}" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </Border>
+                    </Grid>
+                  </ScrollViewer>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <Border Grid.Row="2"
+                Classes="timeline-inspector"
+                Margin="8,0,8,0">
+          <Grid ColumnDefinitions="Auto,*,*,Auto,Auto,Auto"
+                ColumnSpacing="5">
+            <TextBox Classes="timeline-short"
+                     Text="{Binding Shell.AnimationCuePercent, Mode=TwoWay}"
+                     PlaceholderText="Cue" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding Shell.AnimationKeyFrameValue, Mode=TwoWay}"
+                     PlaceholderText="Value" />
+            <TextBox Grid.Column="2"
+                     Text="{Binding Shell.AnimationKeySplineText, Mode=TwoWay}"
+                     PlaceholderText="KeySpline" />
+            <Button Grid.Column="3"
+                    Classes="timeline-tool compact"
+                    Content="Key"
+                    Command="{Binding Shell.AddAnimationKeyFrameCommand}" />
+            <Button Grid.Column="4"
+                    Classes="timeline-tool compact"
+                    Content="Set"
+                    Command="{Binding Shell.UpdateAnimationKeyFrameCommand}" />
+            <Button Grid.Column="5"
+                    Classes="timeline-tool"
+                    Content="Delete"
+                    Command="{Binding Shell.RemoveAnimationKeyFrameCommand}" />
+          </Grid>
+        </Border>
+
+        <DataGrid Grid.Row="3"
+                  Margin="8,0,8,8"
+                  ItemsSource="{Binding Shell.SelectedAnimationTimelineTrack.KeyFrames}"
+                  SelectedItem="{Binding Shell.SelectedAnimationTimelineKeyFrame, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  CanUserResizeColumns="True"
+                  GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column"
+                  BorderBrush="{DynamicResource EditorBorderBrush}"
+                  BorderThickness="1">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="Cue"
+                                Binding="{Binding CuePercent, Mode=TwoWay}"
+                                Width="70"
+                                x:DataType="visualVm:AnimationTimelineKeyFrameViewModel" />
+            <DataGridTextColumn Header="Value"
+                                Binding="{Binding Value, Mode=TwoWay}"
+                                Width="2*"
+                                x:DataType="visualVm:AnimationTimelineKeyFrameViewModel" />
+            <DataGridTextColumn Header="KeySpline"
+                                Binding="{Binding KeySpline, Mode=TwoWay}"
+                                Width="2*"
+                                x:DataType="visualVm:AnimationTimelineKeyFrameViewModel" />
+          </DataGrid.Columns>
+        </DataGrid>
+      </Grid>
+
+      <Border Grid.Row="3"
+              Classes="timeline-transport">
+        <Grid RowDefinitions="Auto,Auto"
+              RowSpacing="6">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Disabled">
+            <StackPanel Orientation="Horizontal"
+                        Spacing="6">
+              <TextBlock Text="Playhead"
+                         VerticalAlignment="Center"
+                         FontWeight="SemiBold" />
+              <Button Classes="timeline-tool"
+                      Content="Start"
+                      ToolTip.Tip="Move playhead to the beginning"
+                      Command="{Binding Shell.SeekAnimationStartCommand}" />
+              <Button Classes="timeline-tool"
+                      Content="{Binding Shell.AnimationPlaybackButtonText}"
+                      ToolTip.Tip="Play or pause live timeline preview"
+                      Command="{Binding Shell.PlayAnimationTimelineCommand}" />
+              <Button Classes="timeline-tool"
+                      Content="Stop"
+                      ToolTip.Tip="Stop live timeline preview"
+                      Command="{Binding Shell.StopAnimationTimelineCommand}" />
+              <Button Classes="timeline-tool"
+                      Content="End"
+                      ToolTip.Tip="Move playhead to the end"
+                      Command="{Binding Shell.SeekAnimationEndCommand}" />
+              <TextBlock Text="{Binding Shell.AnimationCurrentTimeText}"
+                         MinWidth="38"
+                         VerticalAlignment="Center"
+                         TextAlignment="Right"
+                         FontWeight="SemiBold" />
+            </StackPanel>
+          </ScrollViewer>
+          <Grid Grid.Row="1"
+                ColumnDefinitions="*,Auto"
+                ColumnSpacing="8">
+            <Slider Minimum="0"
+                    Maximum="100"
+                    TickFrequency="10"
+                    IsSnapToTickEnabled="False"
+                    Value="{Binding Shell.AnimationCurrentTimePercent, Mode=TwoWay}" />
+            <Button Grid.Column="1"
+                    Classes="timeline-tool"
+                    Content="Frame"
+                    ToolTip.Tip="Apply current playhead values as editable setters"
+                    Command="{Binding Shell.ApplyAnimationFrameToTargetCommand}" />
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+  </DockPanel>
+</UserControl>

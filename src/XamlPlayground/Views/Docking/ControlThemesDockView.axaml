@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:dock="using:Dock.Avalonia.Controls"
+             xmlns:dockViews="clr-namespace:XamlPlayground.Views.Docking"
              xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
              xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
              mc:Ignorable="d" d:DesignWidth="280" d:DesignHeight="600"
@@ -443,6 +444,11 @@
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>
+      </DataTemplate>
+
+      <DataTemplate DataType="vm:ControlThemeAnimationsDockViewModel"
+                    x:DataType="vm:ControlThemeAnimationsDockViewModel">
+        <dockViews:AnimationTimelineDockView />
       </DataTemplate>
       </dock:DockControl.DataTemplates>
     </dock:DockControl>
