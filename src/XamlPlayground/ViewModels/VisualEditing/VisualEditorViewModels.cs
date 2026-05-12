@@ -1,5 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Linq;
+using XamlPlayground.Services.Animation;
 using XamlPlayground.Services.VisualEditing;
 
 namespace XamlPlayground.ViewModels.VisualEditing;
@@ -455,4 +460,256 @@ public sealed class ThemeVariantViewModel : ViewModelBase
     public string Files { get; }
 
     public string Title => $"{Name} ({FileCount})";
+}
+
+public sealed class AnimationTargetOptionViewModel : ViewModelBase
+{
+    public AnimationTargetOptionViewModel(
+        string id,
+        string title,
+        string scope,
+        string selector,
+        int? styleIndex = null)
+    {
+        Id = id;
+        Title = title;
+        Scope = scope;
+        Selector = selector;
+        StyleIndex = styleIndex;
+    }
+
+    public string Id { get; }
+
+    public string Title { get; }
+
+    public string Scope { get; }
+
+    public string Selector { get; }
+
+    public int? StyleIndex { get; }
+
+    public string DisplayText => $"{Title} - {Selector}";
+}
+
+public sealed class AnimationPresetViewModel : ViewModelBase
+{
+    public AnimationPresetViewModel(
+        string title,
+        string propertyName,
+        string fromValue,
+        string toValue,
+        string duration,
+        string easing)
+    {
+        Title = title;
+        PropertyName = propertyName;
+        FromValue = fromValue;
+        ToValue = toValue;
+        Duration = duration;
+        Easing = easing;
+    }
+
+    public string Title { get; }
+
+    public string PropertyName { get; }
+
+    public string FromValue { get; }
+
+    public string ToValue { get; }
+
+    public string Duration { get; }
+
+    public string Easing { get; }
+
+    public string Summary => $"{PropertyName}: {FromValue} -> {ToValue}";
+}
+
+public sealed class AnimationTimelineKeyFrameViewModel : ViewModelBase
+{
+    private const double TimelineAvailableWidth = 420.0;
+    private int _cuePercent;
+    private string _value;
+    private string _keySpline;
+
+    public AnimationTimelineKeyFrameViewModel(int cuePercent, string value, string keySpline)
+    {
+        _cuePercent = Math.Clamp(cuePercent, 0, 100);
+        _value = value;
+        _keySpline = keySpline;
+    }
+
+    public int CuePercent
+    {
+        get => _cuePercent;
+        set
+        {
+            if (SetProperty(ref _cuePercent, Math.Clamp(value, 0, 100)))
+            {
+                OnPropertyChanged(nameof(TimeText));
+                OnPropertyChanged(nameof(TimelineLeft));
+                OnPropertyChanged(nameof(Title));
+            }
+        }
+    }
+
+    public string Value
+    {
+        get => _value;
+        set
+        {
+            if (SetProperty(ref _value, value))
+            {
+                OnPropertyChanged(nameof(Title));
+            }
+        }
+    }
+
+    public string KeySpline
+    {
+        get => _keySpline;
+        set => SetProperty(ref _keySpline, value);
+    }
+
+    public double TimelineLeft => CuePercent / 100.0 * TimelineAvailableWidth;
+
+    public string TimeText => $"{CuePercent}%";
+
+    public string Title => $"{TimeText} = {Value}";
+}
+
+public sealed class AnimationTimelineTrackViewModel : ViewModelBase
+{
+    private string _targetSelector;
+    private string _propertyName;
+    private readonly HashSet<AnimationTimelineKeyFrameViewModel> _trackedKeyFrames = new();
+
+    public AnimationTimelineTrackViewModel(
+        string targetSelector,
+        string propertyName,
+        ObservableCollection<AnimationTimelineKeyFrameViewModel> keyFrames)
+    {
+        _targetSelector = targetSelector;
+        _propertyName = propertyName;
+        KeyFrames = keyFrames;
+        ResetKeyFrameSubscriptions();
+
+        KeyFrames.CollectionChanged += (_, args) =>
+        {
+            if (args.Action == NotifyCollectionChangedAction.Reset)
+            {
+                ResetKeyFrameSubscriptions();
+            }
+            else
+            {
+                if (args.OldItems is not null)
+                {
+                    foreach (AnimationTimelineKeyFrameViewModel keyFrame in args.OldItems)
+                    {
+                        RemoveKeyFrameSubscription(keyFrame);
+                    }
+                }
+
+                if (args.NewItems is not null)
+                {
+                    foreach (AnimationTimelineKeyFrameViewModel keyFrame in args.NewItems)
+                    {
+                        AddKeyFrameSubscription(keyFrame);
+                    }
+                }
+            }
+
+            OnPropertyChanged(nameof(KeyFrameCount));
+            OnPropertyChanged(nameof(KeySummary));
+        };
+    }
+
+    public string TargetSelector
+    {
+        get => _targetSelector;
+        set => SetProperty(ref _targetSelector, value);
+    }
+
+    public string PropertyName
+    {
+        get => _propertyName;
+        set
+        {
+            if (SetProperty(ref _propertyName, value))
+            {
+                OnPropertyChanged(nameof(Title));
+            }
+        }
+    }
+
+    public ObservableCollection<AnimationTimelineKeyFrameViewModel> KeyFrames { get; }
+
+    public int KeyFrameCount => KeyFrames.Count;
+
+    public string Title => $"{PropertyName} ({TargetSelector})";
+
+    public string KeySummary => string.Join(", ", KeyFrames
+        .OrderBy(static frame => frame.CuePercent)
+        .Select(static frame => frame.Title));
+
+    private void KeyFrameOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(AnimationTimelineKeyFrameViewModel.CuePercent) or
+            nameof(AnimationTimelineKeyFrameViewModel.Value) or
+            nameof(AnimationTimelineKeyFrameViewModel.KeySpline) or
+            nameof(AnimationTimelineKeyFrameViewModel.Title))
+        {
+            OnPropertyChanged(nameof(KeySummary));
+        }
+    }
+
+    private void ResetKeyFrameSubscriptions()
+    {
+        foreach (var keyFrame in _trackedKeyFrames)
+        {
+            keyFrame.PropertyChanged -= KeyFrameOnPropertyChanged;
+        }
+
+        _trackedKeyFrames.Clear();
+        foreach (var keyFrame in KeyFrames)
+        {
+            AddKeyFrameSubscription(keyFrame);
+        }
+    }
+
+    private void AddKeyFrameSubscription(AnimationTimelineKeyFrameViewModel keyFrame)
+    {
+        if (_trackedKeyFrames.Add(keyFrame))
+        {
+            keyFrame.PropertyChanged += KeyFrameOnPropertyChanged;
+        }
+    }
+
+    private void RemoveKeyFrameSubscription(AnimationTimelineKeyFrameViewModel keyFrame)
+    {
+        if (_trackedKeyFrames.Remove(keyFrame))
+        {
+            keyFrame.PropertyChanged -= KeyFrameOnPropertyChanged;
+        }
+    }
+
+    public AnimationTimelineTrackDefinition ToDefinition()
+    {
+        return new AnimationTimelineTrackDefinition(
+            TargetSelector,
+            PropertyName,
+            KeyFrames
+                .Select((frame, index) => new { Frame = frame, Index = index })
+                .GroupBy(static item => item.Frame.CuePercent)
+                .Select(static group => group
+                    .OrderByDescending(static item => item.Index)
+                    .First()
+                    .Frame)
+                .OrderBy(static frame => frame.CuePercent)
+                .Select(frame => new AnimationTimelineKeyFrameDefinition(
+                    frame.CuePercent,
+                    PropertyName,
+                    frame.Value,
+                    frame.KeySpline))
+                .ToArray());
+    }
 }
