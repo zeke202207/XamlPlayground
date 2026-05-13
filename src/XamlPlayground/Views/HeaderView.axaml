@@ -90,7 +90,8 @@
             <MenuItem Header="New User Control" Command="{Binding AddUserControlCommand}" />
             <MenuItem Header="New Resource Dictionary" Command="{Binding AddResourceDictionaryCommand}" />
             <Separator />
-            <MenuItem Header="Open MSBuild Workspace..." Command="{Binding OpenMsBuildWorkspaceCommand}" />
+            <MenuItem Header="Open MSBuild Solution/Project..." Command="{Binding OpenMsBuildWorkspaceCommand}" />
+            <MenuItem Header="Open MSBuild Workspace Folder..." Command="{Binding OpenMsBuildWorkspaceFolderCommand}" />
             <MenuItem Header="Save Workspace File" Command="{Binding SaveWorkspaceFileCommand}" />
             <MenuItem Header="Save All Workspace Files" Command="{Binding SaveAllWorkspaceFilesCommand}" />
             <Separator />

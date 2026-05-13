@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -8,6 +9,7 @@ using System.Xml.Linq;
 using Avalonia.Platform.Storage;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 
 namespace XamlPlayground.Workspace;
@@ -63,6 +65,7 @@ public static class MsBuildWorkspaceLoader
 
         try
         {
+            await RestoreLocalWorkspaceIfNeededAsync(solutionPath, progress, cancellationToken);
             EnsureMSBuildRegistered();
             using var workspace = MSBuildWorkspace.Create();
             using var workspaceFailed = workspace.RegisterWorkspaceFailedHandler(
@@ -98,6 +101,7 @@ public static class MsBuildWorkspaceLoader
 
         try
         {
+            await RestoreLocalWorkspaceIfNeededAsync(projectPath, progress, cancellationToken);
             EnsureMSBuildRegistered();
             using var workspace = MSBuildWorkspace.Create();
             using var workspaceFailed = workspace.RegisterWorkspaceFailedHandler(
@@ -203,6 +207,7 @@ public static class MsBuildWorkspaceLoader
                 workspaceRoot,
                 solutionFolders,
                 fileChanged,
+                progress,
                 cancellationToken);
             solution.Projects.Add(inMemoryProject);
         }
@@ -220,6 +225,7 @@ public static class MsBuildWorkspaceLoader
         string? workspaceRoot,
         IReadOnlyDictionary<string, string> solutionFolders,
         Action<InMemoryProjectFile>? fileChanged,
+        IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
         var projectFilePath = project.FilePath ?? string.Empty;
@@ -236,7 +242,9 @@ public static class MsBuildWorkspaceLoader
             SolutionFolderPath = project.FilePath is { } path && solutionFolders.TryGetValue(path, out var folder)
                 ? folder
                 : null,
-            IsMsBuildWorkspace = true
+            IsMsBuildWorkspace = true,
+            CSharpParseOptions = project.ParseOptions as CSharpParseOptions,
+            CSharpCompilationOptions = project.CompilationOptions as CSharpCompilationOptions
         };
 
         var addedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -304,7 +312,7 @@ public static class MsBuildWorkspaceLoader
                 includeInCompilation: false);
         }
 
-        AddRoslynReferences(inMemoryProject, project);
+        await AddRoslynReferencesAsync(inMemoryProject, project, progress, cancellationToken);
         return inMemoryProject;
     }
 
@@ -376,7 +384,11 @@ public static class MsBuildWorkspaceLoader
         return project;
     }
 
-    private static void AddRoslynReferences(InMemoryProject inMemoryProject, Project project)
+    private static async Task AddRoslynReferencesAsync(
+        InMemoryProject inMemoryProject,
+        Project project,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
     {
         foreach (var metadataReference in project.MetadataReferences.OfType<PortableExecutableReference>())
         {
@@ -393,14 +405,118 @@ public static class MsBuildWorkspaceLoader
         foreach (var projectReference in project.ProjectReferences)
         {
             var referencedProject = project.Solution.GetProject(projectReference.ProjectId);
+            if (referencedProject is null)
+            {
+                continue;
+            }
+
+            if (ShouldEmitProjectReferenceFromSource(referencedProject))
+            {
+                var sourceReference = await CreateProjectReferenceAssemblyAsync(referencedProject, progress, cancellationToken);
+                if (sourceReference is { })
+                {
+                    AddReference(inMemoryProject, sourceReference);
+                    continue;
+                }
+            }
+
             AddReference(inMemoryProject, WorkspaceAssemblyReference.FromPath(
-                referencedProject?.OutputFilePath,
+                referencedProject.OutputFilePath,
                 isRuntimeAssembly: true));
         }
 
         AddReference(inMemoryProject, WorkspaceAssemblyReference.FromPath(
             project.OutputFilePath,
             isRuntimeAssembly: true));
+    }
+
+    private static bool ShouldEmitProjectReferenceFromSource(Project referencedProject)
+    {
+        var outputPath = referencedProject.OutputFilePath;
+        if (string.IsNullOrWhiteSpace(outputPath) || !File.Exists(outputPath))
+        {
+            return true;
+        }
+
+        DateTime outputWriteTime;
+        try
+        {
+            outputWriteTime = File.GetLastWriteTimeUtc(outputPath);
+        }
+        catch
+        {
+            return true;
+        }
+
+        foreach (var document in referencedProject.Documents)
+        {
+            var filePath = document.FilePath;
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (File.GetLastWriteTimeUtc(filePath) > outputWriteTime)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<WorkspaceAssemblyReference?> CreateProjectReferenceAssemblyAsync(
+        Project referencedProject,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var compilation = await referencedProject
+                .GetCompilationAsync(cancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            if (compilation is null)
+            {
+                return null;
+            }
+
+            using var stream = new MemoryStream();
+            var result = compilation.Emit(stream, cancellationToken: cancellationToken);
+            if (!result.Success)
+            {
+                var firstError = result.Diagnostics.FirstOrDefault(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+                if (firstError is { })
+                {
+                    progress?.Report($"Could not compile project reference {referencedProject.Name}: {firstError.GetMessage()}");
+                }
+
+                return null;
+            }
+
+            var assemblyName = string.IsNullOrWhiteSpace(referencedProject.AssemblyName)
+                ? referencedProject.Name
+                : referencedProject.AssemblyName!;
+            return WorkspaceAssemblyReference.FromImage(
+                assemblyName + ".dll",
+                stream.ToArray(),
+                isRuntimeAssembly: true);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            progress?.Report($"Could not compile project reference {referencedProject.Name}: {exception.Message}");
+            return null;
+        }
     }
 
     private static void AddReference(InMemoryProject project, WorkspaceAssemblyReference? reference)
@@ -575,6 +691,125 @@ public static class MsBuildWorkspaceLoader
         {
             MSBuildLocator.RegisterDefaults();
         }
+    }
+
+    private static async Task RestoreLocalWorkspaceIfNeededAsync(
+        string workspacePath,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (!LocalWorkspaceNeedsRestore(workspacePath))
+        {
+            return;
+        }
+
+        progress?.Report("Restoring MSBuild workspace packages...");
+        var result = await RunDotNetAsync("restore", workspacePath, cancellationToken);
+        foreach (var line in result.OutputLines)
+        {
+            progress?.Report(line);
+        }
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidDataException(
+                $"dotnet restore failed for {workspacePath}.{Environment.NewLine}{string.Join(Environment.NewLine, result.OutputLines)}");
+        }
+    }
+
+    private static bool LocalWorkspaceNeedsRestore(string workspacePath)
+    {
+        foreach (var projectPath in EnumerateLocalWorkspaceProjectPaths(workspacePath))
+        {
+            var projectDirectory = Path.GetDirectoryName(projectPath);
+            if (string.IsNullOrWhiteSpace(projectDirectory))
+            {
+                continue;
+            }
+
+            if (!File.Exists(Path.Combine(projectDirectory, "obj", "project.assets.json")))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateLocalWorkspaceProjectPaths(string workspacePath)
+    {
+        if (IsSupportedProjectPath(workspacePath))
+        {
+            yield return workspacePath;
+            yield break;
+        }
+
+        if (!IsSolutionPath(workspacePath) || !File.Exists(workspacePath))
+        {
+            yield break;
+        }
+
+        IReadOnlyList<StandardSolutionProjectEntry> entries;
+        try
+        {
+            entries = StandardSolutionStorage.ParseSolutionEntries(
+                Path.GetFileName(workspacePath),
+                File.ReadAllText(workspacePath));
+        }
+        catch
+        {
+            yield break;
+        }
+
+        var solutionDirectory = Path.GetDirectoryName(workspacePath) ?? string.Empty;
+        foreach (var entry in entries)
+        {
+            var projectPath = Path.GetFullPath(Path.Combine(solutionDirectory, entry.Path));
+            if (File.Exists(projectPath))
+            {
+                yield return projectPath;
+            }
+        }
+    }
+
+    private static async Task<DotNetProcessResult> RunDotNetAsync(
+        string command,
+        string targetPath,
+        CancellationToken cancellationToken)
+    {
+        using var process = new Process();
+        process.StartInfo = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        process.StartInfo.ArgumentList.Add(command);
+        process.StartInfo.ArgumentList.Add(targetPath);
+        process.StartInfo.ArgumentList.Add("--nologo");
+
+        if (!process.Start())
+        {
+            throw new InvalidOperationException("Unable to start dotnet.");
+        }
+
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+
+        var lines = SplitProcessOutput(await outputTask, await errorTask);
+        return new DotNetProcessResult(process.ExitCode, lines);
+    }
+
+    private static IReadOnlyList<string> SplitProcessOutput(params string[] outputs)
+    {
+        return outputs
+            .Where(static output => !string.IsNullOrWhiteSpace(output))
+            .SelectMany(static output => output.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+            .Select(static line => line.Trim())
+            .Where(static line => !string.IsNullOrWhiteSpace(line))
+            .Distinct()
+            .ToArray();
     }
 
     private static void EnsureDotnetRoot()
@@ -1159,4 +1394,6 @@ public static class MsBuildWorkspaceLoader
     private sealed record StorageTextFile(string RelativePath, IStorageFile File, string Text);
 
     private sealed record StorageAssemblyFile(string RelativePath, byte[] Image);
+
+    private sealed record DotNetProcessResult(int ExitCode, IReadOnlyList<string> OutputLines);
 }

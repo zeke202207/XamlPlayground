@@ -220,30 +220,41 @@ public static class CompilerService
     public static async Task<ScriptCompilationResult> GetProjectAssembly(
         string assemblyName,
         IEnumerable<(string Path, string Text)> codeFiles,
-        IEnumerable<WorkspaceAssemblyReference>? workspaceReferences = null)
+        IEnumerable<WorkspaceAssemblyReference>? workspaceReferences = null,
+        CSharpParseOptions? parseOptions = null,
+        CSharpCompilationOptions? compilationOptions = null)
     {
-        var references = await GetMetadataReferences();
         var workspaceReferenceList = workspaceReferences?
             .Where(reference =>
                 string.IsNullOrWhiteSpace(assemblyName) ||
                 !string.Equals(reference.Name, assemblyName, StringComparison.OrdinalIgnoreCase))
             .ToArray() ?? Array.Empty<WorkspaceAssemblyReference>();
+
+        // MSBuild workspaces provide target-framework reference assemblies.
+        // Mixing those with the playground runtime (for example net8 System.Runtime
+        // plus net10 System.Private.CoreLib) produces duplicate core type diagnostics.
+        var references = workspaceReferenceList.Any(static reference => reference.IsReferenceAssembly)
+            ? Array.Empty<PortableExecutableReference>()
+            : await GetMetadataReferences();
         var allReferences = MergeReferences(references, workspaceReferenceList);
 
+        var effectiveParseOptions = parseOptions ?? CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
         var parsedSyntaxTrees = codeFiles
             .Where(static file => !string.IsNullOrWhiteSpace(file.Text))
-            .Select(static file => SyntaxFactory.ParseSyntaxTree(
+            .Select(file => SyntaxFactory.ParseSyntaxTree(
                 SourceText.From(file.Text, Encoding.UTF8),
-                CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest),
+                effectiveParseOptions,
                 file.Path))
             .ToArray();
 
-        var compilationOptions = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary).WithOptimizationLevel(OptimizationLevel.Release);
+        var effectiveCompilationOptions = (compilationOptions ?? new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .WithOutputKind(OutputKind.DynamicallyLinkedLibrary)
+            .WithOptimizationLevel(OptimizationLevel.Release);
         var compilation = CSharpCompilation.Create(
             string.IsNullOrWhiteSpace(assemblyName) ? Path.GetRandomFileName() : assemblyName,
             parsedSyntaxTrees,
             allReferences,
-            compilationOptions);
+            effectiveCompilationOptions);
 
         using var ms = new MemoryStream();
         var result = compilation.Emit(ms);
@@ -282,8 +293,12 @@ public static class CompilerService
         var references = new List<PortableExecutableReference>();
         var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var workspaceReference in workspaceReferences)
+        foreach (var item in workspaceReferences
+                     .Select(static (reference, index) => (Reference: reference, Index: index))
+                     .OrderByDescending(static item => item.Reference.IsReferenceAssembly)
+                     .ThenBy(static item => item.Index))
         {
+            var workspaceReference = item.Reference;
             var metadataReference = workspaceReference.CreateMetadataReference();
             if (metadataReference is null)
             {

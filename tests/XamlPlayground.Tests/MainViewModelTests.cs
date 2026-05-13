@@ -16,6 +16,7 @@ using Dock.Avalonia.Themes.Fluent;
 using Dock.Model.Controls;
 using Dock.Model.Core;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using XamlPlayground.Controls;
 using XamlPlayground.Views.Docking;
 using XamlPlayground.Services;
@@ -750,6 +751,73 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void LoadSolution_SelectsFirstPreviewableProject()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var buildProject = new InMemoryProject("_build", "_build", "msbuild");
+        buildProject.AddFile(new InMemoryProjectFile(
+            "Build.cs",
+            "using Nuke.Common; class Build : NukeBuild { }",
+            ProjectFileKind.CSharp));
+        var appProject = new InMemoryProject("App", "App", "msbuild");
+        var xamlFile = appProject.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        solution.Projects.Add(buildProject);
+        solution.Projects.Add(appProject);
+        var viewModel = new MainViewModel(null);
+        var method = typeof(MainViewModel).GetMethod(
+            "LoadSolution",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        method.Invoke(viewModel, new object[] { solution });
+
+        Assert.Same(appProject, viewModel.ActiveProject);
+        Assert.Same(xamlFile, viewModel.ActiveXamlFile);
+    }
+
+    [Fact]
+    public void ActivateWorkspaceFileFromDocument_DoesNotPreviewPreviousProjectXamlAgainstCodeOnlyProject()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var appProject = new InMemoryProject("App", "App", "msbuild");
+        var xamlFile = appProject.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        var buildProject = new InMemoryProject("_build", "_build", "msbuild");
+        var buildFile = buildProject.AddFile(new InMemoryProjectFile(
+            "Build.cs",
+            "using Nuke.Common; class Build : NukeBuild { }",
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(appProject);
+        solution.Projects.Add(buildProject);
+        var viewModel = new MainViewModel(null);
+        var method = typeof(MainViewModel).GetMethod(
+            "LoadSolution",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method.Invoke(viewModel, new object[] { solution });
+        Assert.Same(xamlFile, viewModel.ActiveXamlFile);
+
+        var activateMethod = typeof(MainViewModel).GetMethod(
+            "ActivateWorkspaceFileFromDocument",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(activateMethod);
+        activateMethod.Invoke(viewModel, new object[] { buildFile });
+
+        Assert.Same(buildProject, viewModel.ActiveProject);
+        Assert.Same(buildFile, viewModel.ActiveCodeFile);
+        Assert.Null(viewModel.ActiveXamlFile);
+    }
+
+    [Fact]
     public void RuntimeXamlLoader_DiagnosticHandler_ReportsRuntimeXamlDiagnostics()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -844,6 +912,99 @@ public sealed class MainViewModelTests
         Assert.Contains(result.Diagnostics, diagnostic =>
             diagnostic.Severity == DiagnosticSeverity.Error &&
             diagnostic.Id.StartsWith("CS", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CompilerService_UsesWorkspaceReferenceAssembliesWithoutRuntimeReferenceMixing()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var systemRuntimeReference = WorkspaceAssemblyReference.FromPath(
+            GetNetCoreReferenceAssemblyPath("System.Runtime"),
+            isRuntimeAssembly: true);
+        Assert.NotNull(systemRuntimeReference);
+        Assert.True(systemRuntimeReference.IsReferenceAssembly);
+
+        const string code = """
+            using System.Reflection;
+
+            [assembly: AssemblyTitle("WorkspaceCompile")]
+
+            public sealed class WorkspaceType
+            {
+                public string Name { get; } = "Demo";
+            }
+            """;
+
+        var result = await CompilerService.GetProjectAssembly(
+            "WorkspaceCompile",
+            new[] { ("WorkspaceType.cs", code) },
+            new[] { systemRuntimeReference },
+            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp12),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                .WithNullableContextOptions(NullableContextOptions.Enable));
+
+        Assert.DoesNotContain(result.Diagnostics, static diagnostic =>
+            diagnostic.Id is "CS0433" or "CS0518" or "CS8021" or "CS8632");
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_EmitsProjectReferencesFromSourceWhenOutputIsMissingOrStale()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var workspace = new AdhocWorkspace();
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundProjectReference-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "Referenced");
+        var sourcePath = Path.Combine(projectDirectory, "ReferencedType.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "Referenced.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(sourcePath, "public sealed class ReferencedType { }");
+
+            var referencedId = ProjectId.CreateNewId("Referenced");
+            var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
+                referencedId,
+                VersionStamp.Create(),
+                "Referenced",
+                "Referenced",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(projectDirectory, "Referenced.csproj"),
+                outputFilePath: outputPath));
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(referencedId),
+                "ReferencedType.cs",
+                Microsoft.CodeAnalysis.Text.SourceText.From("public sealed class ReferencedType { }"),
+                filePath: sourcePath);
+            Assert.True(workspace.TryApplyChanges(solution));
+            var referencedProject = workspace.CurrentSolution.GetProject(referencedId);
+            Assert.NotNull(referencedProject);
+            var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "ShouldEmitProjectReferenceFromSource",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object[] { referencedProject })!);
+
+            File.WriteAllText(outputPath, "not a real assembly");
+            File.SetLastWriteTimeUtc(sourcePath, DateTime.UtcNow.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(outputPath, DateTime.UtcNow);
+            Assert.False((bool)method.Invoke(null, new object[] { referencedProject })!);
+
+            File.SetLastWriteTimeUtc(sourcePath, DateTime.UtcNow.AddMinutes(10));
+            Assert.True((bool)method.Invoke(null, new object[] { referencedProject })!);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -3157,6 +3318,26 @@ public sealed class MainViewModelTests
                 yield return child;
             }
         }
+    }
+
+    private static string GetNetCoreReferenceAssemblyPath(string assemblyName)
+    {
+        var runtimeDirectory = new DirectoryInfo(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory());
+        var dotnetRoot = runtimeDirectory.Parent?.Parent?.Parent;
+        Assert.NotNull(dotnetRoot);
+
+        var referencePackRoot = Path.Combine(dotnetRoot.FullName, "packs", "Microsoft.NETCore.App.Ref");
+        Assert.True(Directory.Exists(referencePackRoot), $"Missing .NET reference pack directory: {referencePackRoot}");
+
+        var targetFrameworkFolder = $"ref/net{Environment.Version.Major}.0";
+        var path = Directory
+            .EnumerateFiles(referencePackRoot, assemblyName + ".dll", SearchOption.AllDirectories)
+            .Where(candidate => candidate.Replace('\\', '/').Contains(targetFrameworkFolder, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(static candidate => candidate, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        Assert.NotNull(path);
+        return path;
     }
 }
 

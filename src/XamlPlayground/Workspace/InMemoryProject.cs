@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace XamlPlayground.Workspace;
 
@@ -39,6 +40,10 @@ public sealed class InMemoryProject
     public string? SolutionFolderPath { get; set; }
 
     public bool IsMsBuildWorkspace { get; set; }
+
+    public CSharpParseOptions? CSharpParseOptions { get; set; }
+
+    public CSharpCompilationOptions? CSharpCompilationOptions { get; set; }
 
     public ObservableCollection<InMemoryProjectFile> Files { get; } = new();
 

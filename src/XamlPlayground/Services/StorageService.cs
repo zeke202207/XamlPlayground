@@ -52,6 +52,13 @@ internal static class StorageService
         MimeTypes = new[] { "application/xml", "text/xml" }
     };
 
+    public static FilePickerFileType MSBuildProject { get; } = new("MSBuild Project")
+    {
+        Patterns = new[] { "*.csproj", "*.fsproj", "*.vbproj" },
+        AppleUniformTypeIdentifiers = new[] { "public.xml" },
+        MimeTypes = new[] { "application/xml", "text/xml" }
+    };
+
     public static FilePickerFileType Json { get; } = new("Json")
     {
         Patterns = new[] { "*.json" },
