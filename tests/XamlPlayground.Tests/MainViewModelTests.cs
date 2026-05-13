@@ -102,6 +102,33 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void StyleSetterUnknownProperty_IsPreservedWhenStyleIsSelected()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ActiveXamlFile!.Text = """
+                                         <UserControl xmlns="https://github.com/avaloniaui">
+                                           <UserControl.Styles>
+                                             <Style Selector="Button">
+                                               <Setter Property="local:Custom.Value" Value="Original" />
+                                             </Style>
+                                           </UserControl.Styles>
+                                           <Button />
+                                         </UserControl>
+                                         """;
+
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+        viewModel.StyleEditorValue = "Changed";
+        viewModel.ApplyStyleEditorCommand.Execute(null);
+
+        Assert.Equal("local:Custom.Value", viewModel.StyleEditorPropertyName);
+        Assert.Null(viewModel.SelectedStyleEditorAvailableProperty);
+        Assert.Contains("Property=\"local:Custom.Value\" Value=\"Changed\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Property=\"Background\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RuntimePreviewLoader_LoadsXClassUserControlWithCodeBehindRepeatedly()
     {
         TestApplication.EnsureAvaloniaInitialized();

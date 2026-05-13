@@ -681,8 +681,7 @@ public partial class MainViewModel
             descriptor.Properties.Select(static property => new VisualEditorAvailablePropertyViewModel(property)));
         SelectedStyleEditorAvailableProperty =
             StyleEditorAvailableProperties.FirstOrDefault(property =>
-                string.Equals(property.Name, StyleEditorPropertyName, StringComparison.Ordinal)) ??
-            StyleEditorAvailableProperties.FirstOrDefault();
+                string.Equals(property.Name, StyleEditorPropertyName, StringComparison.Ordinal));
         RefreshStyleEditorPropertyOptions();
     }
 
