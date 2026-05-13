@@ -154,12 +154,23 @@ public sealed class XamlDesignEditor
         var resourceText = XamlTextEditor.NormalizeBlock(rawXaml);
         var preparedXaml = xaml;
         var start = resource.Start;
-        if (!TryEnsureXamlNamespacePrefix(xaml, resourceText, out preparedXaml, out var addedLength, out var error))
+        if (!TryIsDocumentRootResource(xaml, resource, out var isRootResource, out var error))
         {
             return new XamlDesignEditResult(false, xaml, error);
         }
 
-        if (addedLength > 0)
+        if (isRootResource)
+        {
+            if (!TryEnsureRootXamlNamespacePrefix(resourceText, out resourceText, out error))
+            {
+                return new XamlDesignEditResult(false, xaml, error);
+            }
+        }
+        else if (!TryEnsureXamlNamespacePrefix(xaml, resourceText, out preparedXaml, out var addedLength, out error))
+        {
+            return new XamlDesignEditResult(false, xaml, error);
+        }
+        else if (addedLength > 0)
         {
             start += addedLength;
         }
@@ -335,6 +346,26 @@ public sealed class XamlDesignEditor
         }
     }
 
+    private static bool TryIsDocumentRootResource(
+        string xaml,
+        XamlResourceDefinition resource,
+        out bool isRootResource,
+        out string? error)
+    {
+        isRootResource = false;
+        if (!XamlTextEditor.TryParse(xaml, out var document, out error) ||
+            document.RootSyntax is null)
+        {
+            error ??= "The XAML document does not contain a root element.";
+            return false;
+        }
+
+        isRootResource =
+            document.RootSyntax.AsNode.Span.Start == resource.Start &&
+            document.RootSyntax.AsNode.Span.Length == resource.Length;
+        return true;
+    }
+
     private static bool TryFindStyle(
         string xaml,
         XamlStyleDefinition style,
@@ -409,6 +440,79 @@ public sealed class XamlDesignEditor
         preparedXaml = XamlTextEditor.SetAttributeValue(xaml, document.RootSyntax, "xmlns:x", XamlNamespace);
         addedLength = preparedXaml.Length - xaml.Length;
         return true;
+    }
+
+    private static bool TryEnsureRootXamlNamespacePrefix(
+        string insertedText,
+        out string preparedText,
+        out string? error)
+    {
+        preparedText = insertedText;
+        error = null;
+        if (!insertedText.Contains("x:", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var tagStart = insertedText.IndexOf('<');
+        if (tagStart < 0)
+        {
+            error = "The resource XAML does not contain a root element.";
+            return false;
+        }
+
+        var tagEnd = FindStartTagEnd(insertedText, tagStart);
+        if (tagEnd < 0)
+        {
+            error = "The resource XAML root start tag is incomplete.";
+            return false;
+        }
+
+        var startTag = insertedText.Substring(tagStart, tagEnd - tagStart + 1);
+        if (startTag.Contains("xmlns:x", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var insertAt = tagEnd;
+        if (insertAt > tagStart && insertedText[insertAt - 1] == '/')
+        {
+            insertAt--;
+        }
+
+        preparedText = insertedText.Insert(insertAt, $" xmlns:x=\"{XamlNamespace}\"");
+        return true;
+    }
+
+    private static int FindStartTagEnd(string xaml, int start)
+    {
+        var quote = '\0';
+        for (var i = start + 1; i < xaml.Length; i++)
+        {
+            var current = xaml[i];
+            if (quote != '\0')
+            {
+                if (current == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (current is '"' or '\'')
+            {
+                quote = current;
+                continue;
+            }
+
+            if (current == '>')
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static XamlDesignEditResult ReplaceTrackedRange(

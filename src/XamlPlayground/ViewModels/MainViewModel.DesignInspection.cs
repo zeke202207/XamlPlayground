@@ -460,6 +460,11 @@ public partial class MainViewModel
                 StyleEditorPropertyName = setter.PropertyName;
                 StyleEditorValue = setter.Value;
             }
+            else
+            {
+                StyleEditorPropertyName = string.Empty;
+                StyleEditorValue = string.Empty;
+            }
         }
         finally
         {
@@ -1032,6 +1037,12 @@ public partial class MainViewModel
         if (ReferenceEquals(file, ActiveXamlFile))
         {
             RefreshVisualEditingModel(updateSourceSelection: false);
+        }
+
+        if (file.IsXaml)
+        {
+            RefreshThemeResourceAnalysis();
+            RefreshDesignInspection();
         }
 
         RefreshControlThemes();

@@ -288,4 +288,29 @@ public sealed class XamlDesignInspectorTests
         Assert.Contains("x:Key=\"AccentBrush\"", edit.Text);
         Assert.DoesNotContain("Key=\"AccentBrush\">#0078D4", edit.Text);
     }
+
+    [Fact]
+    public void Editor_AddsXamlNamespaceWhenReplacingRootResourceWithXKey()
+    {
+        var xaml = """<SolidColorBrush Key="AccentBrush">#0078D4</SolidColorBrush>""";
+        var inspector = new XamlDesignInspector();
+        var editor = new XamlDesignEditor();
+        var resource = inspector.Analyze(new[]
+            {
+                new XamlDesignDocument("AccentBrush.axaml", xaml, IsResourceDictionary: true)
+            })
+            .Resources
+            .Single();
+
+        var edit = editor.ReplaceResource(
+            xaml,
+            resource,
+            "<SolidColorBrush x:Key=\"AccentBrush\">#FF0000</SolidColorBrush>");
+
+        Assert.True(edit.Changed, edit.Error);
+        Assert.Contains("xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\"", edit.Text);
+        Assert.Contains("x:Key=\"AccentBrush\"", edit.Text);
+        Assert.Contains("#FF0000", edit.Text);
+        Assert.DoesNotContain("#0078D4", edit.Text);
+    }
 }
