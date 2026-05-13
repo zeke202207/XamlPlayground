@@ -33,6 +33,10 @@
     <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="$(MicrosoftCodeAnalysisVersion)" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="$(MicrosoftCodeAnalysisVersion)" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="$(MicrosoftCodeAnalysisVersion)" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="$(MicrosoftCodeAnalysisVersion)" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="$(MicrosoftCodeAnalysisVersion)" />
+    <PackageReference Include="Microsoft.Build.Locator" Version="$(MicrosoftBuildLocatorVersion)" />
+    <PackageReference Include="Microsoft.Build.Framework" Version="$(MicrosoftBuildFrameworkVersion)" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Dock.Avalonia" Version="$(DockVersion)" />
     <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="$(DockVersion)" />
     <PackageReference Include="Dock.Model.Mvvm" Version="$(DockVersion)" />

@@ -259,7 +259,8 @@ public static class StandardSolutionStorage
             projectFileName,
             projectText,
             ProjectFileKind.ProjectFile,
-            fileChanged));
+            fileChanged,
+            sourcePath: projectPath));
 
         foreach (var file in EnumerateLocalProjectFiles(projectDirectory, projectPath, projectText))
         {
@@ -273,7 +274,8 @@ public static class StandardSolutionStorage
                 file.ProjectPath,
                 text,
                 ClassifyFile(file.ProjectPath, text),
-                fileChanged));
+                fileChanged,
+                sourcePath: file.FullPath));
         }
 
         return project;
@@ -292,7 +294,8 @@ public static class StandardSolutionStorage
             projectFileName,
             projectText,
             ProjectFileKind.ProjectFile,
-            fileChanged));
+            fileChanged,
+            sourceStorageFile: projectFile));
 
         var projectFolderPath = Path.GetDirectoryName(entry.Path)?.Replace('\\', '/') ?? string.Empty;
         var projectFolder = string.IsNullOrWhiteSpace(projectFolderPath)

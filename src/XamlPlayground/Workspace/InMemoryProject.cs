@@ -17,6 +17,7 @@ public sealed class InMemoryProject
         RootNamespace = rootNamespace;
         TemplateShortName = templateShortName;
         ProjectFilePath = NormalizeProjectFilePath(projectFilePath);
+        AssemblyName = name;
     }
 
     public string Name { get; }
@@ -27,7 +28,21 @@ public sealed class InMemoryProject
 
     public string? ProjectFilePath { get; }
 
+    public string AssemblyName { get; set; }
+
+    public string? OutputAssemblyPath { get; set; }
+
+    public string? TargetFramework { get; set; }
+
+    public string? WorkspaceRootPath { get; set; }
+
+    public string? SolutionFolderPath { get; set; }
+
+    public bool IsMsBuildWorkspace { get; set; }
+
     public ObservableCollection<InMemoryProjectFile> Files { get; } = new();
+
+    public ObservableCollection<WorkspaceAssemblyReference> AssemblyReferences { get; } = new();
 
     public InMemoryProjectFile AddFile(InMemoryProjectFile file)
     {
@@ -43,7 +58,7 @@ public sealed class InMemoryProject
 
     public IEnumerable<InMemoryProjectFile> GetCSharpFiles()
     {
-        return Files.Where(static file => file.IsCSharp);
+        return Files.Where(static file => file.IsCSharp && file.IncludeInCompilation);
     }
 
     public (string Path, string Text)[] GetCSharpFileSnapshot()
