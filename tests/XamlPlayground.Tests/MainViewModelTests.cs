@@ -2013,7 +2013,7 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void WorkspaceOutputAssemblyFreshness_DetectsDirtyBuildInput()
+    public void WorkspaceOutputAssemblyFreshness_DoesNotTreatDirtyBuffersAsBuildableStaleness()
     {
         var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundDirtyOutputFreshness-{Guid.NewGuid():N}");
         var projectDirectory = Path.Combine(root, "SampleApp");
@@ -2049,10 +2049,69 @@ public sealed class MainViewModelTests
             Assert.NotNull(method);
 
             codeFile.IsDirty = true;
-            Assert.True((bool)method.Invoke(null, new object[] { project })!);
+            Assert.False((bool)method.Invoke(null, new object[] { project })!);
 
             codeFile.MarkClean();
             Assert.False((bool)method.Invoke(null, new object[] { project })!);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public async Task WorkspaceOutputFallback_DoesNotBuildFromDirtyBuffers()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundDirtyOutputFallback-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        try
+        {
+            Directory.CreateDirectory(projectDirectory);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                IsMsBuildWorkspace = true
+            };
+            var xamlFile = project.AddFile(new InMemoryProjectFile(
+                "MainWindow.axaml",
+                "<Window xmlns=\"https://github.com/avaloniaui\" />",
+                ProjectFileKind.Xaml));
+            var codeFile = project.AddFile(new InMemoryProjectFile(
+                "MainWindow.axaml.cs",
+                "public partial class MainWindow { }",
+                ProjectFileKind.CSharp,
+                sourcePath: Path.Combine(projectDirectory, "MainWindow.axaml.cs")));
+            codeFile.IsDirty = true;
+            var viewModel = new MainViewModel(null);
+            var method = typeof(MainViewModel).GetMethod(
+                "TryUseWorkspaceOutputAssemblyFallbackAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var task = Assert.IsAssignableFrom<Task>(method.Invoke(
+                viewModel,
+                new object?[]
+                {
+                    project,
+                    Array.Empty<WorkspaceAssemblyReference>(),
+                    "compile failed",
+                    xamlFile
+                }));
+            await task;
+            var result = task.GetType().GetProperty("Result")?.GetValue(task);
+            Assert.NotNull(result);
+            var success = Assert.IsType<bool>(result.GetType().GetProperty("Success")?.GetValue(result));
+            var diagnosticsMessage = Assert.IsType<string>(
+                result.GetType().GetProperty("DiagnosticsMessage")?.GetValue(result));
+
+            Assert.False(success);
+            Assert.Contains("Save MainWindow.axaml.cs", diagnosticsMessage, StringComparison.Ordinal);
+            Assert.Contains("Unsaved code, project, or resource changes", diagnosticsMessage, StringComparison.Ordinal);
         }
         finally
         {

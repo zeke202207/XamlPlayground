@@ -1606,7 +1606,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         var fallback = await TryUseWorkspaceOutputAssemblyFallbackAsync(
                             project,
                             workspaceReferences,
-                            diagnosticsMessage);
+                            diagnosticsMessage,
+                            xamlFile);
                         if (fallback.Success)
                         {
                             scriptAssembly = fallback.Assembly;
@@ -1615,7 +1616,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         }
                         else
                         {
-                            LastErrorMessage = diagnosticsMessage ?? "Failed to compile code.";
+                            LastErrorMessage = fallback.DiagnosticsMessage ?? diagnosticsMessage ?? "Failed to compile code.";
                             return;
                         }
                     }
@@ -1627,7 +1628,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     var fallback = await TryUseWorkspaceOutputAssemblyFallbackAsync(
                         project,
                         workspaceReferences,
-                        exceptionMessage);
+                        exceptionMessage,
+                        xamlFile);
                     if (fallback.Success)
                     {
                         scriptAssembly = fallback.Assembly;
@@ -1636,13 +1638,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     }
                     else
                     {
-                        LastErrorMessage = exceptionMessage;
+                        LastErrorMessage = fallback.DiagnosticsMessage ?? exceptionMessage;
                         return;
                     }
                 }
             }
             else if (project is { IsMsBuildWorkspace: true })
             {
+                if (TryGetDirtyWorkspaceBuildInput(project, xamlFile, out var dirtyFile))
+                {
+                    LastErrorMessage = GetUnsavedWorkspaceBuildInputMessage(dirtyFile);
+                    return;
+                }
+
                 var buildRequired = ShouldBuildWorkspaceProjectBeforeUsingOutput(project);
                 if (buildRequired && !await TryBuildWorkspaceProjectAsync(project))
                 {
@@ -1949,8 +1957,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private async Task<WorkspaceOutputFallbackResult> TryUseWorkspaceOutputAssemblyFallbackAsync(
         InMemoryProject project,
         IReadOnlyList<WorkspaceAssemblyReference> workspaceReferences,
-        string? failureMessage)
+        string? failureMessage,
+        InMemoryProjectFile? activeXamlFile)
     {
+        if (TryGetDirtyWorkspaceBuildInput(project, activeXamlFile, out var dirtyFile))
+        {
+            return new WorkspaceOutputFallbackResult(
+                false,
+                null,
+                GetUnsavedWorkspaceBuildInputMessage(dirtyFile));
+        }
+
         var buildRequired = ShouldBuildWorkspaceProjectBeforeUsingOutput(project);
         if (buildRequired)
         {
@@ -2182,11 +2199,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private static bool IsWorkspaceOutputAssemblyStale(InMemoryProject project, string targetAssemblyPath)
     {
-        if (TryGetDirtyWorkspaceBuildInput(project, null, out _))
-        {
-            return true;
-        }
-
         DateTime outputWriteTime;
         try
         {
