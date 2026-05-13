@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Xml.Linq;
 using Avalonia;
@@ -761,6 +762,24 @@ public sealed class MainViewModelTests
         {
             TryDeleteDirectory(root);
         }
+    }
+
+    [Fact]
+    public void PreviewerHostProject_ReferencesAvaloniaPackageForDesignerSupport()
+    {
+        var projectPath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "XamlPlayground.PreviewerHost",
+            "XamlPlayground.PreviewerHost.csproj");
+        var document = XDocument.Load(projectPath);
+        var packageReference = document
+            .Descendants("PackageReference")
+            .SingleOrDefault(static element =>
+                string.Equals((string?)element.Attribute("Include"), "Avalonia", StringComparison.Ordinal));
+
+        Assert.NotNull(packageReference);
+        Assert.Equal("$(AvaloniaVersion)", (string?)packageReference.Attribute("Version"));
     }
 
     [Fact]
@@ -5178,6 +5197,11 @@ public sealed class MainViewModelTests
                 yield return child;
             }
         }
+    }
+
+    private static string GetRepositoryRoot([CallerFilePath] string sourcePath = "")
+    {
+        return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
     }
 
     private static SolutionExplorerNodeViewModel? FindNode(
