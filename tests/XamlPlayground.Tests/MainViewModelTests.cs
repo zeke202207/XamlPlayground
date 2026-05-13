@@ -804,6 +804,80 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void WorkspaceRemotePreviewService_StopWaitsForKilledProcessToExit()
+    {
+        static System.Diagnostics.Process StartLongRunningProcess()
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            if (OperatingSystem.IsWindows())
+            {
+                startInfo.FileName = "cmd";
+                startInfo.ArgumentList.Add("/c");
+                startInfo.ArgumentList.Add("ping -n 30 127.0.0.1 > nul");
+            }
+            else
+            {
+                startInfo.FileName = "/bin/sh";
+                startInfo.ArgumentList.Add("-c");
+                startInfo.ArgumentList.Add("sleep 30");
+            }
+
+            var process = System.Diagnostics.Process.Start(startInfo);
+            Assert.NotNull(process);
+            return process;
+        }
+
+        static bool IsProcessRunning(int processId)
+        {
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(processId);
+                return !process.HasExited;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        var service = new WorkspaceRemotePreviewService();
+        var process = StartLongRunningProcess();
+        var processId = process.Id;
+        var field = typeof(WorkspaceRemotePreviewService).GetField(
+            "_process",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        field.SetValue(service, process);
+
+        try
+        {
+            service.Stop();
+
+            Assert.False(IsProcessRunning(processId));
+        }
+        finally
+        {
+            if (IsProcessRunning(processId))
+            {
+                using var runningProcess = System.Diagnostics.Process.GetProcessById(processId);
+                runningProcess.Kill(entireProcessTree: true);
+                runningProcess.WaitForExit(5000);
+            }
+        }
+    }
+
+    [Fact]
     public void PreviewerHostProject_ReferencesAvaloniaPackageForDesignerSupport()
     {
         var projectPath = Path.Combine(

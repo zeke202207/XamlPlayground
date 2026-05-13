@@ -17,6 +17,8 @@ namespace XamlPlayground.Services;
 
 public sealed class WorkspaceRemotePreviewService : IDisposable
 {
+    private const int StopProcessExitTimeoutMilliseconds = 5000;
+
     private Process? _process;
     private RemotePreviewTcpSession? _session;
     private string? _targetAssemblyPath;
@@ -140,19 +142,28 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
         _session?.Dispose();
         _session = null;
 
+        var process = _process;
+        _process = null;
+        if (process is null)
+        {
+            return;
+        }
+
         try
         {
-            if (_process is { HasExited: false })
+            if (!process.HasExited)
             {
-                _process.Kill(entireProcessTree: true);
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(StopProcessExitTimeoutMilliseconds);
             }
         }
         catch
         {
         }
-
-        _process?.Dispose();
-        _process = null;
+        finally
+        {
+            process.Dispose();
+        }
     }
 
     private static ProcessStartInfo BuildStartInfo(
