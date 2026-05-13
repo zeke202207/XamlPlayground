@@ -12,13 +12,15 @@ public sealed class WorkspaceAssemblyLoadContext : AssemblyLoadContext
 {
     private readonly IReadOnlyDictionary<string, WorkspaceAssemblyReference> _referencesByName;
     private readonly HashSet<string> _privateAssemblyNames;
+    private readonly AssemblyDependencyResolver? _dependencyResolver;
     private readonly string? _outputDirectory;
 
     public WorkspaceAssemblyLoadContext(
         string name,
         IEnumerable<WorkspaceAssemblyReference> references,
         string? outputDirectory = null,
-        IEnumerable<string>? privateAssemblyNames = null)
+        IEnumerable<string>? privateAssemblyNames = null,
+        string? mainAssemblyPath = null)
         : base(name, isCollectible: true)
     {
         _referencesByName = references
@@ -31,6 +33,9 @@ public sealed class WorkspaceAssemblyLoadContext : AssemblyLoadContext
             : privateAssemblyNames
                 .Where(static name => !string.IsNullOrWhiteSpace(name))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _dependencyResolver = !string.IsNullOrWhiteSpace(mainAssemblyPath) && File.Exists(mainAssemblyPath)
+            ? new AssemblyDependencyResolver(mainAssemblyPath)
+            : null;
     }
 
     public IReadOnlyList<Assembly> LoadRuntimeAssemblies(string? skipAssemblyName = null)
@@ -102,7 +107,39 @@ public sealed class WorkspaceAssemblyLoadContext : AssemblyLoadContext
             return referencedAssembly;
         }
 
+        if (TryResolveFromDependencyResolver(assemblyName) is { } resolvedAssembly)
+        {
+            return resolvedAssembly;
+        }
+
         return TryLoadFromOutputDirectory(name);
+    }
+
+    protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
+    {
+        var path = _dependencyResolver?.ResolveUnmanagedDllToPath(unmanagedDllName);
+        return path is { } && File.Exists(path)
+            ? LoadUnmanagedDllFromPath(path)
+            : IntPtr.Zero;
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "The playground runtime preview intentionally loads workspace assemblies selected by the user.")]
+    private Assembly? TryResolveFromDependencyResolver(AssemblyName assemblyName)
+    {
+        var path = _dependencyResolver?.ResolveAssemblyToPath(assemblyName);
+        if (path is null || !File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return LoadFromAssemblyPath(path);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private Assembly? TryResolveSharedDefaultAssembly(string name)
@@ -166,7 +203,7 @@ public sealed class WorkspaceAssemblyLoadContext : AssemblyLoadContext
         return name is "mscorlib" or "netstandard" or "System" or "Microsoft.CSharp" or
                    "Microsoft.VisualBasic" or "SkiaSharp" or "HarfBuzzSharp" or "XamlX" or
                    "Avalonia.Base" or "Avalonia.Controls" or "Avalonia.Diagnostics" or
-                   "Avalonia.Markup" or "Avalonia.Markup.Xaml" or "Avalonia.Markup.Xaml.Loader" ||
+                   "Avalonia.Markup" ||
                name.StartsWith("System.", StringComparison.Ordinal) ||
                name.StartsWith("Microsoft.Win32.", StringComparison.Ordinal) ||
                name.StartsWith("XamlX.", StringComparison.Ordinal);

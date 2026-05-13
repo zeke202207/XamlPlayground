@@ -1,16 +1,20 @@
 ﻿using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Octokit;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -25,6 +29,8 @@ using Dock.Avalonia.Themes.Fluent;
 using Dock.Model.Controls;
 using Dock.Model.Core;
 using Microsoft.CodeAnalysis;
+using RemotePixelFormat = Avalonia.Remote.Protocol.Viewport.PixelFormat;
+using Avalonia.Remote.Protocol.Viewport;
 using XamlPlayground.Services;
 using XamlPlayground.Services.IntelliSense;
 using XamlPlayground.ViewModels.Docking;
@@ -34,7 +40,7 @@ using Avalonia.Threading;
 
 namespace XamlPlayground.ViewModels;
 
-public partial class MainViewModel : ViewModelBase
+public partial class MainViewModel : ViewModelBase, IDisposable
 {
     private static readonly TimeSpan AutoRunDelay = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan SolutionExplorerSearchDelay = TimeSpan.FromMilliseconds(200);
@@ -44,6 +50,8 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<SampleViewModel> _samples;
     [ObservableProperty] private SampleViewModel? _currentSample;
     [ObservableProperty] private Control? _control;
+    [ObservableProperty] private Bitmap? _remotePreviewBitmap;
+    [ObservableProperty] private bool _isRemotePreviewActive;
     [ObservableProperty] private AvaloniaObject? _diagnosticsRoot;
     [ObservableProperty] private IFactory? _dockFactory;
     [ObservableProperty] private IRootDock? _dockLayout;
@@ -66,6 +74,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool _isWorkspaceLoading;
     private readonly IDockThemeManager _dockThemeManager;
     private readonly InMemorySolutionFactory _solutionFactory;
+    private readonly WorkspaceRemotePreviewService _remotePreviewService = new();
     private bool _update;
     private bool _rerunRequested;
     private bool _openingSample;
@@ -85,6 +94,8 @@ public partial class MainViewModel : ViewModelBase
         _isDarkTheme = IsApplicationDarkTheme();
         _dockThemeManager = new DockFluentThemeManager();
         _solutionFactory = new InMemorySolutionFactory(OnProjectFileChanged);
+        _remotePreviewService.FrameReceived += OnRemotePreviewFrameReceived;
+        _remotePreviewService.ErrorReceived += error => Dispatcher.UIThread.Post(() => LastErrorMessage = error);
 
         NewFileCommand = new RelayCommand(NewFile);
         ShowNewProjectWizardCommand = new RelayCommand(ShowNewProjectWizard);
@@ -121,6 +132,22 @@ public partial class MainViewModel : ViewModelBase
     }
 
     public IStorageProvider? StorageProvider { get; set; }
+
+    public bool IsInProcessPreviewActive => !IsRemotePreviewActive;
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        _solutionExplorerSearchThrottle?.Dispose();
+        _remotePreviewService.Dispose();
+        _previous?.Unload();
+        _previous = null;
+    }
+
+    partial void OnIsRemotePreviewActiveChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsInProcessPreviewActive));
+    }
     
     public ICommand RunCommand { get; }
 
@@ -1487,7 +1514,6 @@ public partial class MainViewModel : ViewModelBase
             }
 #endif
             Assembly? scriptAssembly = null;
-            var usePreviewRootForXClass = false;
             if (xamlFile is null)
             {
                 LastErrorMessage = "No XAML document is active.";
@@ -1516,6 +1542,12 @@ public partial class MainViewModel : ViewModelBase
 
             var codeFiles = project?.GetCSharpFileSnapshot() ?? Array.Empty<(string Path, string Text)>();
             var workspaceReferences = project?.AssemblyReferences.ToArray() ?? Array.Empty<WorkspaceAssemblyReference>();
+
+            if (ShouldUseRemoteWorkspacePreview(project) &&
+                await TryRunRemoteWorkspacePreviewAsync(project!, xamlFile, xamlText))
+            {
+                return;
+            }
 
             if (project is { } && codeFiles.Length > 0)
             {
@@ -1551,7 +1583,6 @@ public partial class MainViewModel : ViewModelBase
                             scriptAssembly = fallback.Assembly;
                             previewAssemblyScope = fallback.AssemblyScope;
                             diagnosticsMessage = fallback.DiagnosticsMessage;
-                            usePreviewRootForXClass = true;
                         }
                         else
                         {
@@ -1573,7 +1604,6 @@ public partial class MainViewModel : ViewModelBase
                         scriptAssembly = fallback.Assembly;
                         previewAssemblyScope = fallback.AssemblyScope;
                         diagnosticsMessage = fallback.DiagnosticsMessage;
-                        usePreviewRootForXClass = true;
                     }
                     else
                     {
@@ -1587,7 +1617,6 @@ public partial class MainViewModel : ViewModelBase
             {
                 scriptAssembly = outputAssembly;
                 previewAssemblyScope = new WorkspacePreviewAssemblyScope(outputAssembly, outputContext, loadedAssemblies);
-                usePreviewRootForXClass = true;
                 XamlIntelliSenseService.RegisterWorkspaceAssemblies(new[] { outputAssembly }.Concat(loadedAssemblies));
                 Console.WriteLine($"Loaded workspace output assembly: {outputAssembly.GetName().Name}");
             }
@@ -1623,8 +1652,7 @@ public partial class MainViewModel : ViewModelBase
                         xamlFile.Path,
                         xamlDiagnostics,
                         projectResourceFiles,
-                        documentAssemblyName,
-                        usePreviewRootForXClass);
+                        documentAssemblyName);
                 if (control is { })
                 {
                     ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
@@ -1696,6 +1724,156 @@ public partial class MainViewModel : ViewModelBase
         XamlIntelliSenseService.RegisterWorkspaceAssemblies(new[] { outputAssembly }.Concat(loadedAssemblies));
         Console.WriteLine($"Loaded workspace output assembly after live compile failure: {outputAssembly.GetName().Name}");
         return true;
+    }
+
+    private async Task<bool> TryRunRemoteWorkspacePreviewAsync(
+        InMemoryProject project,
+        InMemoryProjectFile xamlFile,
+        string xamlText)
+    {
+        if (string.IsNullOrWhiteSpace(project.OutputAssemblyPath) ||
+            !File.Exists(project.OutputAssemblyPath))
+        {
+            if (!await TryBuildWorkspaceProjectAsync(project) ||
+                !File.Exists(project.OutputAssemblyPath))
+            {
+                LastErrorMessage = "Project output assembly not found. Build the project first.";
+                return true;
+            }
+        }
+
+        var previousScope = _previous;
+        var projectDirectory = string.IsNullOrWhiteSpace(project.ProjectFilePath)
+            ? Path.GetDirectoryName(project.OutputAssemblyPath)
+            : Path.GetDirectoryName(project.ProjectFilePath);
+        var projectPath = BuildRemotePreviewXamlProjectPath(xamlFile.Path, projectDirectory);
+        var result = await _remotePreviewService.StartOrUpdateAsync(
+            xamlText,
+            project.OutputAssemblyPath,
+            projectPath,
+            projectDirectory);
+        if (!result.IsSuccess)
+        {
+            LastErrorMessage = result.ErrorMessage;
+            return true;
+        }
+
+        Control = null;
+        DiagnosticsRoot = null;
+        IsRemotePreviewActive = true;
+        LastErrorMessage = "Using isolated workspace preview host.";
+        _previous = null;
+        previousScope?.Unload();
+        return true;
+    }
+
+    [UnconditionalSuppressMessage("SingleFile", "IL3000", Justification = "Workspace preview compares host assembly files when running from a normal desktop build output.")]
+    private static bool ShouldUseRemoteWorkspacePreview(InMemoryProject? project)
+    {
+        if (Utilities.IsBrowser() ||
+            project is not { IsMsBuildWorkspace: true } ||
+            string.IsNullOrWhiteSpace(project.OutputAssemblyPath))
+        {
+            return false;
+        }
+
+        var outputDirectory = Path.GetDirectoryName(project.OutputAssemblyPath);
+        if (string.IsNullOrWhiteSpace(outputDirectory) ||
+            !Directory.Exists(outputDirectory))
+        {
+            return false;
+        }
+
+        return WorkspaceAssemblyDiffersFromHost(outputDirectory, "Avalonia.Base", typeof(AvaloniaObject).Assembly.Location) ||
+               WorkspaceAssemblyDiffersFromHost(outputDirectory, "Avalonia.Controls", typeof(Control).Assembly.Location) ||
+               WorkspaceAssemblyDiffersFromHost(outputDirectory, "Avalonia.Markup.Xaml", typeof(AvaloniaXamlLoader).Assembly.Location);
+    }
+
+    private static bool WorkspaceAssemblyDiffersFromHost(
+        string outputDirectory,
+        string assemblyName,
+        string hostAssemblyPath)
+    {
+        if (string.IsNullOrWhiteSpace(hostAssemblyPath) ||
+            !File.Exists(hostAssemblyPath))
+        {
+            return false;
+        }
+
+        var candidate = Path.Combine(outputDirectory, assemblyName + ".dll");
+        return File.Exists(candidate) && !FilesHaveSameContent(candidate, hostAssemblyPath);
+    }
+
+    private static bool FilesHaveSameContent(string firstPath, string secondPath)
+    {
+        try
+        {
+            using var first = File.OpenRead(firstPath);
+            using var second = File.OpenRead(secondPath);
+            if (first.Length != second.Length)
+            {
+                return false;
+            }
+
+            var firstBuffer = new byte[8192];
+            var secondBuffer = new byte[8192];
+            while (true)
+            {
+                var firstRead = first.Read(firstBuffer, 0, firstBuffer.Length);
+                var secondRead = second.Read(secondBuffer, 0, secondBuffer.Length);
+                if (firstRead != secondRead)
+                {
+                    return false;
+                }
+
+                if (firstRead == 0)
+                {
+                    return true;
+                }
+
+                for (var i = 0; i < firstRead; i++)
+                {
+                    if (firstBuffer[i] != secondBuffer[i])
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string BuildRemotePreviewXamlProjectPath(string xamlFilePath, string? projectDirectory)
+    {
+        if (!Path.IsPathRooted(xamlFilePath))
+        {
+            return EnsureRemotePreviewProjectPath(xamlFilePath);
+        }
+
+        if (string.IsNullOrWhiteSpace(projectDirectory))
+        {
+            return EnsureRemotePreviewProjectPath(xamlFilePath);
+        }
+
+        try
+        {
+            var relative = Path.GetRelativePath(projectDirectory, xamlFilePath)
+                .Replace(Path.DirectorySeparatorChar, '/');
+            return EnsureRemotePreviewProjectPath(relative);
+        }
+        catch
+        {
+            return EnsureRemotePreviewProjectPath(xamlFilePath);
+        }
+    }
+
+    private static string EnsureRemotePreviewProjectPath(string path)
+    {
+        path = path.Replace('\\', '/');
+        return path.StartsWith("/", StringComparison.Ordinal) ? path : "/" + path;
     }
 
     private async Task<WorkspaceOutputFallbackResult> TryUseWorkspaceOutputAssemblyFallbackAsync(
@@ -1794,11 +1972,15 @@ public partial class MainViewModel : ViewModelBase
     {
         foreach (var reference in GetWorkspaceOutputAssemblyCandidates(project, workspaceReferences))
         {
+            var mainAssemblyPath = reference.FilePath is { } && File.Exists(reference.FilePath)
+                ? reference.FilePath
+                : project.OutputAssemblyPath;
             var candidateContext = new WorkspaceAssemblyLoadContext(
                 Path.GetRandomFileName(),
                 workspaceReferences,
                 Path.GetDirectoryName(project.OutputAssemblyPath),
-                new[] { project.AssemblyName, project.Name, reference.Name });
+                new[] { project.AssemblyName, project.Name, reference.Name },
+                mainAssemblyPath);
 
             if (candidateContext.LoadAssemblyReference(reference) is { } loadedAssembly)
             {
@@ -2026,11 +2208,55 @@ public partial class MainViewModel : ViewModelBase
             Child = control
         };
 
+        IsRemotePreviewActive = false;
+        RemotePreviewBitmap = null;
         Control = scope;
         DiagnosticsRoot = scope;
         LastErrorMessage = diagnosticsMessage;
         _previous = assemblyScope;
         previousScope?.Unload();
+    }
+
+    private void OnRemotePreviewFrameReceived(FrameMessage frame)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (TryCreateRemotePreviewBitmap(frame) is { } bitmap)
+            {
+                RemotePreviewBitmap = bitmap;
+            }
+        });
+    }
+
+    private static Bitmap? TryCreateRemotePreviewBitmap(FrameMessage frame)
+    {
+        if (frame.Width <= 0 ||
+            frame.Height <= 0 ||
+            frame.Data.Length == 0 ||
+            frame.Format != RemotePixelFormat.Bgra8888)
+        {
+            return null;
+        }
+
+        var bitmap = new WriteableBitmap(
+            new PixelSize(frame.Width, frame.Height),
+            new Vector(frame.DpiX <= 0 ? 96 : frame.DpiX, frame.DpiY <= 0 ? 96 : frame.DpiY),
+            Avalonia.Platform.PixelFormat.Bgra8888,
+            AlphaFormat.Premul);
+        using var locked = bitmap.Lock();
+        var copyWidth = Math.Min(frame.Stride, locked.RowBytes);
+        for (var row = 0; row < frame.Height; row++)
+        {
+            var sourceOffset = row * frame.Stride;
+            if (sourceOffset + copyWidth > frame.Data.Length)
+            {
+                break;
+            }
+
+            Marshal.Copy(frame.Data, sourceOffset, locked.Address + row * locked.RowBytes, copyWidth);
+        }
+
+        return bitmap;
     }
 
     private async Task OpenXamlFile()

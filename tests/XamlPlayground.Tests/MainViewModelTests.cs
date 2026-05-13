@@ -406,7 +406,7 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void RuntimePreviewLoader_UsesEditableDocumentRootForBuiltWorkspaceXClass()
+    public void RuntimePreviewLoader_LoadsWorkspaceXClassWithPrivateRuntimeLoader()
     {
         TestApplication.EnsureAvaloniaInitialized();
 
@@ -416,6 +416,7 @@ public sealed class MainViewModelTests
             $$"""
             using System;
             using Avalonia.Controls;
+            using Avalonia.Interactivity;
 
             namespace {{assemblyName}}
             {
@@ -423,8 +424,16 @@ public sealed class MainViewModelTests
                 {
                     public AddDeleteRowsPage()
                     {
-                        throw new InvalidOperationException("Code-behind constructor should not run for editable previews.");
+                        ConstructorRan = true;
+                        DataContext = new ViewModels.AddDeleteRowsViewModel();
                     }
+
+                    public bool ConstructorRan { get; }
+
+                    public void OnPreviewLoaded(object? sender, RoutedEventArgs e)
+                    {
+                    }
+
                 }
             }
 
@@ -441,35 +450,166 @@ public sealed class MainViewModelTests
                 MetadataReference.CreateFromFile(typeof(Control).Assembly.Location),
                 MetadataReference.CreateFromFile(typeof(AvaloniaObject).Assembly.Location)
             });
-        var assembly = Assembly.Load(assemblyImage);
+        var runtimeReference = WorkspaceAssemblyReference.FromPath(
+            typeof(AvaloniaRuntimeXamlLoader).Assembly.Location,
+            isRuntimeAssembly: true);
+        Assert.NotNull(runtimeReference);
+        var context = new WorkspaceAssemblyLoadContext(
+            "WorkspaceRuntimeXamlLoaderTest",
+            new[] { runtimeReference },
+            privateAssemblyNames: new[] { assemblyName });
+        var runtimeAssembly = context.LoadAssemblyReference(runtimeReference);
+        Assert.NotNull(runtimeAssembly);
+        Assert.NotSame(typeof(AvaloniaRuntimeXamlLoader).Assembly, runtimeAssembly);
 
-        Dispatcher.UIThread.Invoke(() =>
+        using var assemblyStream = new MemoryStream(assemblyImage, writable: false);
+        var assembly = context.LoadFromStream(assemblyStream);
+
+        try
         {
-            var xaml = $$"""
-                         <UserControl xmlns="https://github.com/avaloniaui"
-                                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                                      xmlns:viewModels="clr-namespace:{{assemblyName}}.ViewModels;assembly={{assemblyName}}"
-                                      x:Class="{{assemblyName}}.AddDeleteRowsPage"
-                                      x:DataType="viewModels:AddDeleteRowsViewModel">
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                var xaml = $$"""
+                             <UserControl xmlns="https://github.com/avaloniaui"
+                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                          xmlns:viewModels="clr-namespace:{{assemblyName}}.ViewModels;assembly={{assemblyName}}"
+                                          x:Class="{{assemblyName}}.AddDeleteRowsPage"
+                                      x:DataType="viewModels:AddDeleteRowsViewModel"
+                                      Loaded="OnPreviewLoaded">
                            <TextBlock Text="{Binding Title}" />
                          </UserControl>
                          """;
-            var diagnostics = new List<RuntimeXamlDiagnostic>();
+                var diagnostics = new List<RuntimeXamlDiagnostic>();
 
-            var control = RuntimeXamlPreviewLoader.LoadControl(
-                xaml,
-                assembly,
-                fallbackRootTypeName: "AddDeleteRowsPage",
-                documentName: "Pages/AddDeleteRowsPage.axaml",
-                diagnostics: diagnostics,
-                documentAssemblyName: assemblyName,
-                usePreviewRootForXClass: true);
+                var control = RuntimeXamlPreviewLoader.LoadControl(
+                    xaml,
+                    assembly,
+                    fallbackRootTypeName: "AddDeleteRowsPage",
+                    documentName: "Pages/AddDeleteRowsPage.axaml",
+                    diagnostics: diagnostics,
+                    documentAssemblyName: assemblyName);
 
-            var userControl = Assert.IsType<UserControl>(control);
-            Assert.NotEqual(assembly.GetType(assemblyName + ".AddDeleteRowsPage"), userControl.GetType());
-            Assert.Equal(assemblyName + ".ViewModels.AddDeleteRowsViewModel", userControl.DataContext?.GetType().FullName);
-            Assert.DoesNotContain(diagnostics, static diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
-        });
+                var userControl = Assert.IsAssignableFrom<UserControl>(control);
+                Assert.Equal(assembly.GetType(assemblyName + ".AddDeleteRowsPage"), userControl.GetType());
+                Assert.Same(context, AssemblyLoadContext.GetLoadContext(userControl.GetType().Assembly));
+                Assert.True((bool)userControl.GetType().GetProperty("ConstructorRan")!.GetValue(userControl)!);
+                Assert.Equal(assemblyName + ".ViewModels.AddDeleteRowsViewModel", userControl.DataContext?.GetType().FullName);
+                Assert.DoesNotContain(diagnostics, static diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+            });
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    [Fact]
+    public void RuntimePreviewLoader_CanInstantiateInternalWorkspaceControls()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var dependencyName = "WorkspaceInternalControls" + Guid.NewGuid().ToString("N");
+        var appName = "WorkspaceInternalPreview" + Guid.NewGuid().ToString("N");
+        var dependencyImage = CompileTestAssemblyImage(
+            dependencyName,
+            $$"""
+            using Avalonia.Controls;
+
+            namespace {{dependencyName}}
+            {
+                internal sealed class InternalPreviewControl : UserControl
+                {
+                    public InternalPreviewControl()
+                    {
+                        Content = new TextBlock { Text = "Internal workspace control" };
+                    }
+                }
+            }
+            """,
+            new[]
+            {
+                MetadataReference.CreateFromFile(typeof(Control).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(AvaloniaObject).Assembly.Location)
+            });
+        var appImage = CompileTestAssemblyImage(
+            appName,
+            $$"""
+            using Avalonia.Controls;
+
+            namespace {{appName}}
+            {
+                public sealed class PreviewPage : UserControl
+                {
+                    public PreviewPage()
+                    {
+                        ConstructorRan = true;
+                    }
+
+                    public bool ConstructorRan { get; }
+                }
+            }
+            """,
+            new[]
+            {
+                MetadataReference.CreateFromFile(typeof(Control).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(AvaloniaObject).Assembly.Location),
+                MetadataReference.CreateFromImage(dependencyImage)
+            });
+        var runtimeReference = WorkspaceAssemblyReference.FromPath(
+            typeof(AvaloniaRuntimeXamlLoader).Assembly.Location,
+            isRuntimeAssembly: true);
+        var dependencyReference = WorkspaceAssemblyReference.FromImage(
+            dependencyName + ".dll",
+            dependencyImage,
+            isRuntimeAssembly: true);
+        Assert.NotNull(runtimeReference);
+        Assert.NotNull(dependencyReference);
+
+        var context = new WorkspaceAssemblyLoadContext(
+            "WorkspaceInternalControlPreviewTest",
+            new[] { runtimeReference, dependencyReference },
+            privateAssemblyNames: new[] { appName, dependencyName });
+        _ = context.LoadAssemblyReference(runtimeReference);
+        var dependencyAssembly = context.LoadAssemblyReference(dependencyReference);
+        Assert.NotNull(dependencyAssembly);
+        using var appStream = new MemoryStream(appImage, writable: false);
+        var appAssembly = context.LoadFromStream(appStream);
+
+        try
+        {
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                var xaml = $$"""
+                             <UserControl xmlns="https://github.com/avaloniaui"
+                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                          xmlns:controls="clr-namespace:{{dependencyName}};assembly={{dependencyName}}"
+                                          x:Class="{{appName}}.PreviewPage">
+                               <controls:InternalPreviewControl />
+                             </UserControl>
+                             """;
+                var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+                var control = RuntimeXamlPreviewLoader.LoadControl(
+                    xaml,
+                    appAssembly,
+                    fallbackRootTypeName: "PreviewPage",
+                    documentName: "Views/PreviewPage.axaml",
+                    diagnostics: diagnostics,
+                    documentAssemblyName: appName);
+
+                var userControl = Assert.IsAssignableFrom<UserControl>(control);
+                Assert.Equal(appAssembly.GetType(appName + ".PreviewPage"), userControl.GetType());
+                Assert.True((bool)userControl.GetType().GetProperty("ConstructorRan")!.GetValue(userControl)!);
+                var internalControl = Assert.IsAssignableFrom<UserControl>(userControl.Content);
+                Assert.Equal(dependencyName + ".InternalPreviewControl", internalControl.GetType().FullName);
+                Assert.Same(context, AssemblyLoadContext.GetLoadContext(internalControl.GetType().Assembly));
+                Assert.DoesNotContain(diagnostics, static diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+            });
+        }
+        finally
+        {
+            context.Unload();
+        }
     }
 
     [Fact]
@@ -1190,6 +1330,29 @@ public sealed class MainViewModelTests
         Assert.True(projectNode.IsExpanded);
         Assert.False(viewsNode.IsExpanded);
         Assert.False(nestedNode.IsExpanded);
+    }
+
+    [Fact]
+    public void RemotePreviewProjectPath_UsesProjectRelativeWorkspaceFilePath()
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "BuildRemotePreviewXamlProjectPath",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var relative = Assert.IsType<string>(method.Invoke(
+            null,
+            new object?[] { "Pages/AddDeleteRowsPage.axaml", "/Users/wieslawsoltes/GitHub/Avalonia.Controls.DataGrid/samples/DataGridSample" }));
+        var absolute = Assert.IsType<string>(method.Invoke(
+            null,
+            new object?[]
+            {
+                "/Users/wieslawsoltes/GitHub/Avalonia.Controls.DataGrid/samples/DataGridSample/Pages/AddDeleteRowsPage.axaml",
+                "/Users/wieslawsoltes/GitHub/Avalonia.Controls.DataGrid/samples/DataGridSample"
+            }));
+
+        Assert.Equal("/Pages/AddDeleteRowsPage.axaml", relative);
+        Assert.Equal("/Pages/AddDeleteRowsPage.axaml", absolute);
     }
 
     [Fact]

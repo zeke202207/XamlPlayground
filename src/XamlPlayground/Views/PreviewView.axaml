@@ -15,8 +15,17 @@
                 DragDrop.AllowDrop="{Binding VisualEditorDesignerMode}">
     <Grid x:Name="PreviewSurface">
       <controls:ExclusiveContentControl x:Name="PreviewContentHost"
+                                        IsVisible="{Binding IsInProcessPreviewActive}"
                                         IsHitTestVisible="{Binding VisualEditorPreviewContentHitTestVisible}"
                                         Source="{Binding Control}" />
+      <Border IsVisible="{Binding IsRemotePreviewActive}"
+              Background="{DynamicResource DockSurfacePanelBrush}"
+              Padding="0">
+        <Image Source="{Binding RemotePreviewBitmap}"
+               HorizontalAlignment="Left"
+               VerticalAlignment="Top"
+               Stretch="None" />
+      </Border>
       <Canvas x:Name="DesignerOverlay"
               Panel.ZIndex="10000"
               Background="Transparent"
