@@ -159,6 +159,17 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ThemeToggleToolTip));
     }
 
+    partial void OnEnableAutoRunChanged(bool value)
+    {
+        if (value)
+        {
+            return;
+        }
+
+        _timer?.Dispose();
+        _timer = null;
+    }
+
     partial void OnLastErrorMessageChanged(string? value)
     {
         if (string.IsNullOrWhiteSpace(value) ||
