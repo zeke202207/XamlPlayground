@@ -106,7 +106,8 @@ public sealed class XamlDesignEditor
         }
 
         var styleText = CreateStyleText(xaml, selector.Trim(), setterText);
-        if (string.Equals(document.RootSyntax.NameNode.LocalName, "ResourceDictionary", StringComparison.Ordinal))
+        if (string.Equals(document.RootSyntax.NameNode.LocalName, "ResourceDictionary", StringComparison.Ordinal) ||
+            string.Equals(document.RootSyntax.NameNode.LocalName, "Styles", StringComparison.Ordinal))
         {
             return new XamlDesignEditResult(true, XamlTextEditor.InsertChild(xaml, document.RootSyntax, styleText));
         }

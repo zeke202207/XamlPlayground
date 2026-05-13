@@ -262,6 +262,25 @@ public sealed class XamlDesignInspectorTests
     }
 
     [Fact]
+    public void Editor_AddsStyleDirectlyToStylesRoot()
+    {
+        var xaml = """
+                   <Styles xmlns="https://github.com/avaloniaui">
+                     <Style Selector="TextBlock.title">
+                       <Setter Property="FontWeight" Value="SemiBold" />
+                     </Style>
+                   </Styles>
+                   """;
+        var editor = new XamlDesignEditor();
+
+        var edit = editor.AddStyleToDocument(xaml, "Button.primary", new[] { ("Opacity", "1") });
+
+        Assert.True(edit.Changed, edit.Error);
+        Assert.Contains("<Style Selector=\"Button.primary\">", edit.Text);
+        Assert.DoesNotContain("<Styles.Styles>", edit.Text);
+    }
+
+    [Fact]
     public void Editor_AddsXamlNamespaceWhenReplacingResourceWithXKey()
     {
         var xaml = """
