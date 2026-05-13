@@ -1109,22 +1109,10 @@ public static class MsBuildWorkspaceLoader
             yield break;
         }
 
-        IEnumerable<string> files;
-        try
-        {
-            files = Directory.EnumerateFiles(projectDirectory, "*", SearchOption.AllDirectories);
-        }
-        catch
-        {
-            yield break;
-        }
-
         var excludedFolders = excludedProjectFolders?.ToArray() ?? Array.Empty<string>();
-        foreach (var file in files)
+        foreach (var file in EnumerateProjectFilesSkippingIgnoredDirectories(projectDirectory, excludedFolders))
         {
             if (file.Equals(projectFilePath, StringComparison.OrdinalIgnoreCase) ||
-                IsUnderExcludedLocalProjectFolder(file, excludedFolders) ||
-                IsIgnoredProjectPath(file) ||
                 !IsImportableFilePath(file))
             {
                 continue;
@@ -1132,6 +1120,66 @@ public static class MsBuildWorkspaceLoader
 
             yield return file;
         }
+    }
+
+    private static IEnumerable<string> EnumerateProjectFilesSkippingIgnoredDirectories(
+        string projectDirectory,
+        IReadOnlyList<string> excludedProjectFolders)
+    {
+        string[] files;
+        try
+        {
+            files = Directory.EnumerateFiles(projectDirectory, "*", SearchOption.TopDirectoryOnly).ToArray();
+        }
+        catch
+        {
+            files = Array.Empty<string>();
+        }
+
+        foreach (var file in files)
+        {
+            if (IsUnderExcludedLocalProjectFolder(file, excludedProjectFolders) ||
+                IsIgnoredProjectPath(file))
+            {
+                continue;
+            }
+
+            yield return file;
+        }
+
+        string[] directories;
+        try
+        {
+            directories = Directory.EnumerateDirectories(projectDirectory, "*", SearchOption.TopDirectoryOnly).ToArray();
+        }
+        catch
+        {
+            yield break;
+        }
+
+        foreach (var directory in directories)
+        {
+            if (ShouldSkipLocalProjectDirectory(directory, excludedProjectFolders))
+            {
+                continue;
+            }
+
+            foreach (var file in EnumerateProjectFilesSkippingIgnoredDirectories(directory, excludedProjectFolders))
+            {
+                yield return file;
+            }
+        }
+    }
+
+    private static bool ShouldSkipLocalProjectDirectory(
+        string directory,
+        IReadOnlyList<string> excludedProjectFolders)
+    {
+        var name = Path.GetFileName(directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return IsIgnoredDirectoryName(name) ||
+               IsBuildOutputDirectoryName(name) ||
+               IsIgnoredProjectPath(directory) ||
+               IsSameOrUnderExcludedLocalProjectFolder(directory, excludedProjectFolders);
     }
 
     private static async Task EnumerateStorageFolderAsync(
@@ -1839,6 +1887,19 @@ public static class MsBuildWorkspaceLoader
     {
         var normalizedFilePath = NormalizeLocalPath(filePath);
         return excludedProjectFolders.Any(folder => IsUnderProjectFolder(folder, normalizedFilePath));
+    }
+
+    private static bool IsSameOrUnderExcludedLocalProjectFolder(
+        string path,
+        IEnumerable<string> excludedProjectFolders)
+    {
+        var normalizedPath = NormalizeLocalPath(path);
+        return excludedProjectFolders.Any(folder =>
+        {
+            var normalizedFolder = NormalizeLocalPath(folder).TrimEnd('/');
+            return normalizedPath.Equals(normalizedFolder, StringComparison.OrdinalIgnoreCase) ||
+                   IsUnderProjectFolder(normalizedFolder, normalizedPath);
+        });
     }
 
     private static bool IsUnderProjectFolder(string projectFolder, string filePath)

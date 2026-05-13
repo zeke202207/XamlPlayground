@@ -1042,6 +1042,24 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task InMemoryProjectFile_SaveToStorageKeepsDirtyWhenFlushFails()
+    {
+        var storageFile = FailingFlushStorageFileProxy.Create("Flush.axaml");
+        var file = new InMemoryProjectFile(
+            "Flush.axaml",
+            "previous content",
+            ProjectFileKind.Xaml,
+            sourceStorageFile: storageFile)
+        {
+            Text = "changed content"
+        };
+
+        await Assert.ThrowsAsync<IOException>(file.SaveToSourceAsync);
+
+        Assert.True(file.IsDirty);
+    }
+
+    [Fact]
     public void StandardSolutionStorage_WritesSlnProjectTypeGuidForProjectExtension()
     {
         var solution = new InMemorySolution("Mixed");
@@ -1310,6 +1328,60 @@ public sealed class MainViewModelTests
             Assert.Contains("App.axaml", files);
             Assert.DoesNotContain("Lib/LibView.axaml", files);
             Assert.DoesNotContain("Samples/Controls/Demo.axaml", files);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_SkipsIgnoredLocalDirectoriesDuringProjectFileEnumeration()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundLocalIgnoredPaths-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Views"));
+            Directory.CreateDirectory(Path.Combine(root, "bin", "Debug"));
+            Directory.CreateDirectory(Path.Combine(root, "obj", "Debug"));
+            Directory.CreateDirectory(Path.Combine(root, ".git", "objects"));
+            Directory.CreateDirectory(Path.Combine(root, ".vs", "config"));
+            File.WriteAllText(Path.Combine(root, "App.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(Path.Combine(root, "Views", "MainView.axaml"), "<UserControl />");
+            File.WriteAllText(Path.Combine(root, "bin", "Debug", "Generated.axaml"), "<UserControl />");
+            File.WriteAllText(Path.Combine(root, "obj", "Debug", "Generated.cs"), "public sealed class Generated { }");
+            File.WriteAllText(Path.Combine(root, ".git", "objects", "Loose.cs"), "public sealed class Loose { }");
+            File.WriteAllText(Path.Combine(root, ".vs", "config", "State.axaml"), "<UserControl />");
+
+            var skipMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "ShouldSkipLocalProjectDirectory",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            var enumerateMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "EnumerateProjectFiles",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(skipMethod);
+            Assert.NotNull(enumerateMethod);
+
+            Assert.True((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, "bin"), Array.Empty<string>() })!);
+            Assert.True((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, "obj"), Array.Empty<string>() })!);
+            Assert.True((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, ".git"), Array.Empty<string>() })!);
+            Assert.True((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, ".vs"), Array.Empty<string>() })!);
+            Assert.False((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, "Views"), Array.Empty<string>() })!);
+
+            var files = Assert.IsAssignableFrom<IEnumerable<string>>(enumerateMethod.Invoke(
+                    null,
+                    new object[] { root, Path.Combine(root, "App.csproj"), Array.Empty<string>() }))
+                .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+                .ToArray();
+
+            Assert.Contains("Views/MainView.axaml", files);
+            Assert.DoesNotContain("bin/Debug/Generated.axaml", files);
+            Assert.DoesNotContain("obj/Debug/Generated.cs", files);
+            Assert.DoesNotContain(".git/objects/Loose.cs", files);
+            Assert.DoesNotContain(".vs/config/State.axaml", files);
         }
         finally
         {
@@ -5669,6 +5741,68 @@ public sealed class MainViewModelTests
         public override void SetLength(long value)
         {
             throw new NotSupportedException();
+        }
+    }
+
+    private class FailingFlushStorageFileProxy : DispatchProxy
+    {
+        private string _name = string.Empty;
+        private Uri _path = new("file:///storage.axaml");
+
+        public static Avalonia.Platform.Storage.IStorageFile Create(string name)
+        {
+            var storageFile = DispatchProxy.Create<Avalonia.Platform.Storage.IStorageFile, FailingFlushStorageFileProxy>();
+            var proxy = (FailingFlushStorageFileProxy)(object)storageFile;
+            proxy.Initialize(name);
+            return storageFile;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            return targetMethod?.Name switch
+            {
+                "get_Name" => _name,
+                "get_Path" => _path,
+                "get_CanBookmark" => false,
+                "OpenReadAsync" => Task.FromResult<Stream>(new MemoryStream()),
+                "OpenWriteAsync" => Task.FromResult<Stream>(new FailingFlushMemoryStream()),
+                "GetBasicPropertiesAsync" => Task.FromResult(new Avalonia.Platform.Storage.StorageItemProperties()),
+                "SaveBookmarkAsync" => Task.FromResult<string?>(null),
+                "GetParentAsync" => Task.FromResult<Avalonia.Platform.Storage.IStorageFolder?>(null),
+                "DeleteAsync" => Task.CompletedTask,
+                "MoveAsync" => Task.FromResult<Avalonia.Platform.Storage.IStorageItem?>(null),
+                "Dispose" => null,
+                _ => GetDefaultValue(targetMethod?.ReturnType)
+            };
+        }
+
+        private void Initialize(string name)
+        {
+            _name = name;
+            _path = new Uri("file:///" + name);
+        }
+
+        private static object? GetDefaultValue(Type? type)
+        {
+            if (type is null || type == typeof(void))
+            {
+                return null;
+            }
+
+            return type.IsValueType ? Activator.CreateInstance(type) : null;
+        }
+    }
+
+    private sealed class FailingFlushMemoryStream : MemoryStream
+    {
+        public override void Flush()
+        {
+            throw new IOException("flush failed");
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            throw new IOException("flush failed");
         }
     }
 

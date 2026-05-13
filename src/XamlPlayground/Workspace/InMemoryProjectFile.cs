@@ -147,8 +147,11 @@ public sealed partial class InMemoryProjectFile : ObservableObject
                     $"Unable to safely save {Path} because the storage provider does not support truncating the existing file.");
             }
 
-            await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(Text);
+            await using (var writer = new StreamWriter(stream))
+            {
+                await writer.WriteAsync(Text);
+            }
+
             MarkClean();
         }
     }
