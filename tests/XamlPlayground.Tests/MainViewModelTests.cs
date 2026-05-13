@@ -178,6 +178,61 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void BindingEditorFieldEdits_AreAppliedWithoutBuildingRawValue()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ActiveXamlFile!.Text = """
+                                         <UserControl xmlns="https://github.com/avaloniaui">
+                                           <TextBlock Text="{Binding Title, Mode=TwoWay}" />
+                                         </UserControl>
+                                         """;
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+        viewModel.SelectedBindingInspectorNode = viewModel.BindingInspectorNodes
+            .SelectMany(static node => node.Children)
+            .Single(static node => node.Binding?.Path == "Title");
+
+        viewModel.BindingEditorPath = "DisplayName";
+        viewModel.BindingEditorMode = "OneWay";
+        viewModel.ApplyBindingEditorCommand.Execute(null);
+
+        Assert.Contains("Text=\"{Binding DisplayName, Mode=OneWay}\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Title", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("TwoWay", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResourceEditorFieldEdits_AreAppliedWithoutEditingRawXaml()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ActiveXamlFile!.Text = """
+                                         <UserControl xmlns="https://github.com/avaloniaui"
+                                                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                           <UserControl.Resources>
+                                             <SolidColorBrush x:Key="AccentBrush">#112233</SolidColorBrush>
+                                           </UserControl.Resources>
+                                         </UserControl>
+                                         """;
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+        viewModel.SelectedResourceInspectorNode = viewModel.ResourceInspectorNodes
+            .SelectMany(static node => node.Children)
+            .Single(node => node.Resource?.Key == "AccentBrush" &&
+                            node.Resource.FilePath == viewModel.ActiveXamlFile.Path);
+
+        viewModel.ResourceEditorKey = "PanelBrush";
+        viewModel.ResourceEditorValue = "#445566";
+        viewModel.ApplyResourceEditorCommand.Execute(null);
+
+        Assert.Contains("x:Key=\"PanelBrush\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.Contains("#445566", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("AccentBrush", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("#112233", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StyleSetterUnknownProperty_IsPreservedWhenStyleIsSelected()
     {
         TestApplication.EnsureAvaloniaInitialized();

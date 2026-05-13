@@ -301,6 +301,56 @@ public partial class MainViewModel
         NotifyDesignInspectionCommandsChanged();
     }
 
+    partial void OnBindingEditorKindChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnBindingEditorPathChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnBindingEditorModeChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnBindingEditorSourceChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnBindingEditorElementNameChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnBindingEditorRelativeSourceChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnBindingEditorConverterChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnBindingEditorStringFormatChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnBindingEditorFallbackValueChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnBindingEditorTargetNullValueChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
     partial void OnResourceEditorRawXamlChanged(string value)
     {
         NotifyDesignInspectionCommandsChanged();
@@ -963,35 +1013,14 @@ public partial class MainViewModel
 
     private void BuildBindingMarkupFromFields()
     {
-        BindingEditorRawValue = _selectedBindingDefinition?.LocationKind == XamlBindingLocationKind.ObjectElement
-            ? XamlDesignEditor.BuildBindingObjectElement(
-                BindingEditorKind,
-                BindingEditorPath,
-                BindingEditorMode,
-                BindingEditorSource,
-                BindingEditorElementName,
-                BindingEditorRelativeSource,
-                BindingEditorConverter,
-                BindingEditorStringFormat,
-                BindingEditorFallbackValue,
-                BindingEditorTargetNullValue)
-            : XamlDesignEditor.BuildBindingMarkup(
-                BindingEditorKind,
-                BindingEditorPath,
-                BindingEditorMode,
-                BindingEditorSource,
-                BindingEditorElementName,
-                BindingEditorRelativeSource,
-                BindingEditorConverter,
-                BindingEditorStringFormat,
-                BindingEditorFallbackValue,
-                BindingEditorTargetNullValue);
+        BindingEditorRawValue = CreateBindingRawValueFromFields(
+            _selectedBindingDefinition?.LocationKind ?? XamlBindingLocationKind.Attribute);
     }
 
     private bool CanApplyBindingEditor()
     {
         return _selectedBindingDefinition is not null &&
-               !string.IsNullOrWhiteSpace(BindingEditorRawValue);
+               (!string.IsNullOrWhiteSpace(BindingEditorRawValue) || HasBindingEditorFieldInput());
     }
 
     private void ApplyBindingEditor()
@@ -1003,10 +1032,8 @@ public partial class MainViewModel
             return;
         }
 
-        var rawValue = binding.LocationKind == XamlBindingLocationKind.ObjectElement &&
-                       BindingEditorRawValue.TrimStart().StartsWith("{", StringComparison.Ordinal)
-            ? XamlDesignEditor.BuildBindingObjectElementFromMarkup(BindingEditorRawValue)
-            : BindingEditorRawValue;
+        var rawValue = CreateBindingRawValueForApply(binding);
+        BindingEditorRawValue = rawValue;
         var edit = _designEditor.ReplaceBinding(file.Text, binding, rawValue);
         ApplyDesignFileEdit(file, edit, $"Updated binding on {binding.PropertyName}.");
         SelectBindingBySource(binding.FilePath, binding.Start);
@@ -1015,7 +1042,7 @@ public partial class MainViewModel
     private bool CanApplyResourceEditor()
     {
         return _selectedResourceDefinition is not null &&
-               !string.IsNullOrWhiteSpace(ResourceEditorRawXaml);
+               (!string.IsNullOrWhiteSpace(ResourceEditorRawXaml) || HasResourceEditorFieldInput());
     }
 
     private void ApplyResourceEditor()
@@ -1027,7 +1054,9 @@ public partial class MainViewModel
             return;
         }
 
-        var edit = _designEditor.ReplaceResource(file.Text, resource, ResourceEditorRawXaml);
+        var rawXaml = CreateResourceRawXamlForApply(resource);
+        ResourceEditorRawXaml = rawXaml;
+        var edit = _designEditor.ReplaceResource(file.Text, resource, rawXaml);
         ApplyDesignFileEdit(file, edit, $"Updated resource {resource.Key}.");
         SelectResourceByKey(ResourceEditorKey);
     }
@@ -1078,6 +1107,107 @@ public partial class MainViewModel
         return value.TrimStart().StartsWith('<')
             ? $"<{type} x:Key=\"{EscapeDesignAttribute(key)}\">{Environment.NewLine}{value}{Environment.NewLine}</{type}>"
             : $"<{type} x:Key=\"{EscapeDesignAttribute(key)}\">{EscapeDesignText(value)}</{type}>";
+    }
+
+    private string CreateBindingRawValueForApply(XamlBindingDefinition binding)
+    {
+        var rawValue = BindingEditorRawValue;
+        if ((string.IsNullOrWhiteSpace(rawValue) && HasBindingEditorFieldInput()) ||
+            (AreBindingFieldsChanged(binding) &&
+             string.Equals(rawValue, binding.RawValue, StringComparison.Ordinal)))
+        {
+            rawValue = CreateBindingRawValueFromFields(binding.LocationKind);
+        }
+
+        return binding.LocationKind == XamlBindingLocationKind.ObjectElement &&
+               rawValue.TrimStart().StartsWith("{", StringComparison.Ordinal)
+            ? XamlDesignEditor.BuildBindingObjectElementFromMarkup(rawValue)
+            : rawValue;
+    }
+
+    private string CreateBindingRawValueFromFields(XamlBindingLocationKind locationKind)
+    {
+        return locationKind == XamlBindingLocationKind.ObjectElement
+            ? XamlDesignEditor.BuildBindingObjectElement(
+                BindingEditorKind,
+                BindingEditorPath,
+                BindingEditorMode,
+                BindingEditorSource,
+                BindingEditorElementName,
+                BindingEditorRelativeSource,
+                BindingEditorConverter,
+                BindingEditorStringFormat,
+                BindingEditorFallbackValue,
+                BindingEditorTargetNullValue)
+            : XamlDesignEditor.BuildBindingMarkup(
+                BindingEditorKind,
+                BindingEditorPath,
+                BindingEditorMode,
+                BindingEditorSource,
+                BindingEditorElementName,
+                BindingEditorRelativeSource,
+                BindingEditorConverter,
+                BindingEditorStringFormat,
+                BindingEditorFallbackValue,
+                BindingEditorTargetNullValue);
+    }
+
+    private bool AreBindingFieldsChanged(XamlBindingDefinition binding)
+    {
+        return !IsSameEditorValue(BindingEditorKind, binding.Kind) ||
+               !IsSameEditorValue(BindingEditorPath, binding.Path) ||
+               !IsSameEditorValue(BindingEditorMode, binding.Mode) ||
+               !IsSameEditorValue(BindingEditorSource, binding.Source) ||
+               !IsSameEditorValue(BindingEditorElementName, binding.ElementName) ||
+               !IsSameEditorValue(BindingEditorRelativeSource, binding.RelativeSource) ||
+               !IsSameEditorValue(BindingEditorConverter, binding.Converter) ||
+               !IsSameEditorValue(BindingEditorStringFormat, binding.StringFormat) ||
+               !IsSameEditorValue(BindingEditorFallbackValue, binding.FallbackValue) ||
+               !IsSameEditorValue(BindingEditorTargetNullValue, binding.TargetNullValue);
+    }
+
+    private bool HasBindingEditorFieldInput()
+    {
+        return !string.IsNullOrWhiteSpace(BindingEditorPath) ||
+               !string.IsNullOrWhiteSpace(BindingEditorMode) ||
+               !string.IsNullOrWhiteSpace(BindingEditorSource) ||
+               !string.IsNullOrWhiteSpace(BindingEditorElementName) ||
+               !string.IsNullOrWhiteSpace(BindingEditorRelativeSource) ||
+               !string.IsNullOrWhiteSpace(BindingEditorConverter) ||
+               !string.IsNullOrWhiteSpace(BindingEditorStringFormat) ||
+               !string.IsNullOrWhiteSpace(BindingEditorFallbackValue) ||
+               !string.IsNullOrWhiteSpace(BindingEditorTargetNullValue);
+    }
+
+    private string CreateResourceRawXamlForApply(XamlResourceDefinition resource)
+    {
+        var rawChanged = !string.Equals(ResourceEditorRawXaml, resource.RawXaml, StringComparison.Ordinal);
+        var fieldsChanged = AreResourceFieldsChanged(resource);
+        if (!string.IsNullOrWhiteSpace(ResourceEditorRawXaml) && (rawChanged || !fieldsChanged))
+        {
+            return ResourceEditorRawXaml;
+        }
+
+        return CreateResourceXamlFromFields();
+    }
+
+    private bool AreResourceFieldsChanged(XamlResourceDefinition resource)
+    {
+        return !IsSameEditorValue(ResourceEditorKey, resource.Key) ||
+               !IsSameEditorValue(ResourceEditorType, GetLocalName(resource.ResourceType)) ||
+               !IsSameEditorValue(ResourceEditorValue, resource.ValuePreview);
+    }
+
+    private bool HasResourceEditorFieldInput()
+    {
+        return !string.IsNullOrWhiteSpace(ResourceEditorKey) ||
+               !string.IsNullOrWhiteSpace(ResourceEditorType) ||
+               !string.IsNullOrWhiteSpace(ResourceEditorValue);
+    }
+
+    private static bool IsSameEditorValue(string? left, string? right)
+    {
+        return string.Equals(left ?? string.Empty, right ?? string.Empty, StringComparison.Ordinal);
     }
 
     private string CreateUniqueResourceKey(string type)
