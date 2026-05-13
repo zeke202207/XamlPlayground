@@ -1204,6 +1204,98 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ThemeProjectSourceLoader_LoadsThemeFolderThroughThemeProjectFormat()
+    {
+        var themeRoot = CreateTemporaryFluentThemeRoot();
+
+        try
+        {
+            var source = ThemeProjectSourceLoader.LoadFromDirectory(themeRoot);
+            var catalog = new FluentControlThemeCatalog(source);
+
+            Assert.Equal(themeRoot, source.SourceRoot);
+            Assert.Contains(source.Project.Files, file => file.Path == "FluentTheme.xaml");
+            Assert.Contains(source.Project.Files, file => file.Path == "Controls/Button.xaml");
+            Assert.Contains(catalog.Templates, template =>
+                template.TargetType == "Button" &&
+                template.SourcePath == "Controls/Button.xaml");
+        }
+        finally
+        {
+            Directory.Delete(themeRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ThemeProjectSourceLoader_LoadsBundledFluentThemeProject()
+    {
+        var source = ThemeProjectSourceLoader.LoadEmbeddedFluentThemeProject();
+        var catalog = new FluentControlThemeCatalog(source);
+
+        Assert.Null(source.SourceRoot);
+        Assert.Contains(source.Project.Files, file => file.Path == "FluentTheme.xaml");
+        Assert.Contains(source.Project.Files, file => file.Path == "Controls/Button.xaml");
+        Assert.Contains(catalog.Templates, template => template.TargetType == "Button");
+    }
+
+    [Fact]
+    public async Task ThemeProjectSourceLoader_RejectsNonHttpsRepositoryUrls()
+    {
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => ThemeProjectSourceLoader.LoadFromRemoteGitRepositoryAsync("http://github.com/owner/theme"));
+    }
+
+    [Fact]
+    public void ApplyControlThemeProject_PreservesFluentCatalogWhenLoadingSavedThemeProject()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var themeRoot = CreateTemporaryFluentThemeRoot();
+        var previousThemeRoot = Environment.GetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH");
+        Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", themeRoot);
+
+        try
+        {
+            var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
+            Assert.Contains(viewModel.FluentControlThemeTemplates, template => template.TargetType == "Button");
+
+            var themeProject = ThemeProjectStorage.CreateDocument(
+                "SavedTheme",
+                new[]
+                {
+                    (
+                        "Themes/SavedButton.axaml",
+                        """
+                        <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                          <ControlTheme x:Key="SavedButtonTheme" TargetType="Button" />
+                        </ResourceDictionary>
+                        """)
+                });
+            var method = typeof(MainViewModel).GetMethod(
+                "ApplyControlThemeProject",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var loadedCount = Assert.IsType<int>(method.Invoke(
+                viewModel,
+                new object[] { viewModel.ActiveProject!, themeProject, "Theme project: SavedTheme", false }));
+
+            Assert.Equal(1, loadedCount);
+            Assert.Contains(viewModel.FluentControlThemeTemplates, template => template.TargetType == "Button");
+            Assert.Contains(viewModel.ControlThemes, theme => theme.Key == "SavedButtonTheme");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH", previousThemeRoot);
+            Directory.Delete(themeRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void InMemorySolutionFactory_AddOrUpdateResource_UpdatesExistingThemeResource()
     {
         var changedFiles = new List<string>();
