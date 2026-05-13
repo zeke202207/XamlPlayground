@@ -516,6 +516,19 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ExportSolution_DoesNotMarkCleanForStandardMetadataOnlyExtensions()
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "IsStandardSolutionMetadataExtension",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.True((bool)method.Invoke(null, new object[] { ".sln" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { ".slnx" })!);
+        Assert.False((bool)method.Invoke(null, new object[] { ".xamlsln" })!);
+    }
+
+    [Fact]
     public void RuntimeXamlLoader_DiagnosticHandler_ReportsRuntimeXamlDiagnostics()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -1417,10 +1430,75 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void IsolatedControlThemeEdits_DoNotSchedulePreview()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            EnableAutoRun = false
+        };
+        var source = CreateMaterialLikeThemeSource();
+        var catalog = new FluentControlThemeCatalog(source);
+        var catalogField = typeof(MainViewModel).GetField(
+            "_controlThemeCatalog",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(catalogField);
+        catalogField.SetValue(viewModel, catalog);
+        var loadTemplates = typeof(MainViewModel).GetMethod(
+            "LoadFluentControlThemeTemplates",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(loadTemplates);
+        loadTemplates.Invoke(viewModel, null);
+        viewModel.SelectedFluentControlThemeTemplate = Assert.Single(
+            viewModel.FluentControlThemeTemplates,
+            template => template.Key == "MaterialCheckBox");
+        viewModel.CreateCustomControlThemeCommand.Execute(null);
+        var themeFile = viewModel.ActiveProject!.FindFile("Themes/MyCheckBoxTheme1.axaml");
+        Assert.NotNull(themeFile);
+        Assert.Same(themeFile, viewModel.ActiveXamlFile);
+        Assert.False(themeFile.IncludeInRuntimePreview);
+
+        var timerField = typeof(MainViewModel).GetField(
+            "_timer",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(timerField);
+        Assert.Null(timerField.GetValue(viewModel));
+
+        viewModel.EnableAutoRun = true;
+        themeFile.Text += Environment.NewLine;
+
+        Assert.Null(timerField.GetValue(viewModel));
+        Assert.Null(viewModel.LastErrorMessage);
+    }
+
+    [Fact]
     public async Task ThemeProjectSourceLoader_RejectsNonHttpsRepositoryUrls()
     {
         await Assert.ThrowsAsync<InvalidDataException>(
             () => ThemeProjectSourceLoader.LoadFromRemoteGitRepositoryAsync("http://github.com/owner/theme"));
+    }
+
+    [Fact]
+    public void ThemeProjectSourceLoader_SelectsNestedFluentThemeRoot()
+    {
+        var method = typeof(ThemeProjectSourceLoader).GetMethod(
+            "SelectPreferredThemeRootFiles",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var files = new (string Path, string Text)[]
+        {
+            ("repository/src/Avalonia.Themes.Fluent/FluentTheme.xaml", "<ResourceDictionary />"),
+            ("repository/src/Avalonia.Themes.Fluent/Controls/Button.xaml", "<ResourceDictionary />"),
+            ("repository/samples/Unrelated.xaml", "<UserControl />")
+        };
+
+        var result = ((IEnumerable<(string Path, string Text)>)method.Invoke(null, new object[] { files })!).ToArray();
+
+        Assert.Collection(
+            result,
+            file => Assert.Equal("FluentTheme.xaml", file.Path),
+            file => Assert.Equal("Controls/Button.xaml", file.Path));
     }
 
     [Fact]

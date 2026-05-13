@@ -425,6 +425,7 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             var extension = Path.GetExtension(file.Name);
+            var isStandardSolutionMetadataExport = IsStandardSolutionMetadataExtension(extension);
             var text = extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)
                 ? StandardSolutionStorage.SaveSlnx(solution)
                 : extension.Equals(".sln", StringComparison.OrdinalIgnoreCase)
@@ -433,9 +434,12 @@ public partial class MainViewModel : ViewModelBase
             await using var stream = await file.OpenWriteAsync();
             await using var writer = new StreamWriter(stream);
             await writer.WriteAsync(text);
-            MarkSolutionClean(solution);
-            WorkspaceStatus = extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) ||
-                              extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)
+            if (!isStandardSolutionMetadataExport)
+            {
+                MarkSolutionClean(solution);
+            }
+
+            WorkspaceStatus = isStandardSolutionMetadataExport
                 ? $"Exported {extension} solution metadata for {solution.Name}. Use folder export for project files."
                 : $"Exported solution {solution.Name}.";
         }
@@ -581,6 +585,12 @@ public partial class MainViewModel : ViewModelBase
         {
             file.MarkClean();
         }
+    }
+
+    private static bool IsStandardSolutionMetadataExtension(string extension)
+    {
+        return extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase);
     }
 
     private ObservableCollection<SolutionExplorerNodeViewModel> BuildSolutionExplorer(InMemorySolution solution)
@@ -913,6 +923,11 @@ public partial class MainViewModel : ViewModelBase
         }
 
         if (!EnableAutoRun)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(file, ActiveXamlFile) && !CanPreviewXamlFile(ActiveXamlFile))
         {
             return;
         }

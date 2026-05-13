@@ -586,7 +586,8 @@ public static class ThemeProjectSourceLoader
         foreach (var fluentThemePath in pathArray.Where(static path => path.EndsWith("/FluentTheme.xaml", StringComparison.OrdinalIgnoreCase)))
         {
             var prefix = fluentThemePath[..^"FluentTheme.xaml".Length];
-            if (pathArray.Any(path => path.StartsWith(prefix + "Controls/", StringComparison.OrdinalIgnoreCase)))
+            var controlsPrefix = $"{prefix.TrimEnd('/')}/Controls/";
+            if (pathArray.Any(path => path.StartsWith(controlsPrefix, StringComparison.OrdinalIgnoreCase)))
             {
                 return prefix;
             }
