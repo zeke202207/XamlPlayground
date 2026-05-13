@@ -47,6 +47,11 @@
       </Button>
     </WrapPanel>
 
+    <TextBox DockPanel.Dock="Top"
+             Margin="6,0,6,4"
+             PlaceholderText="Search solution"
+             Text="{Binding Shell.SolutionExplorerSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
     <Border DockPanel.Dock="Bottom"
             BorderThickness="0,1,0,0"
             BorderBrush="{DynamicResource EditorBorderBrush}"
@@ -71,6 +76,21 @@
           <Grid ColumnDefinitions="Auto,*"
                 ColumnSpacing="6"
                 MinHeight="24">
+            <Grid.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="Open"
+                          Command="{Binding OpenCommand}" />
+                <Separator />
+                <MenuItem Header="Expand"
+                          Command="{Binding ExpandCommand}" />
+                <MenuItem Header="Collapse"
+                          Command="{Binding CollapseCommand}" />
+                <MenuItem Header="Expand Recursive"
+                          Command="{Binding ExpandRecursiveCommand}" />
+                <MenuItem Header="Collapse Recursive"
+                          Command="{Binding CollapseRecursiveCommand}" />
+              </ContextMenu>
+            </Grid.ContextMenu>
             <Border Width="22"
                     Height="18"
                     CornerRadius="3"

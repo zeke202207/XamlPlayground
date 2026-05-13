@@ -48,6 +48,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private int _editorFontSize;
     [ObservableProperty] private InMemorySolution? _solution;
     [ObservableProperty] private ObservableCollection<SolutionExplorerNodeViewModel> _solutionExplorerNodes = new();
+    [ObservableProperty] private string _solutionExplorerSearchText = string.Empty;
     [ObservableProperty] private SolutionExplorerNodeViewModel? _selectedSolutionExplorerNode;
     [ObservableProperty] private NewProjectWizardViewModel _newProjectWizard = new();
     [ObservableProperty] private InMemoryProject? _activeProject;
@@ -62,6 +63,7 @@ public partial class MainViewModel : ViewModelBase
     private (Assembly? Assembly, AssemblyLoadContext? Context)? _previous;
     private IStorageFile? _openXamlFile;
     private IStorageFile? _openCodeFile;
+    private ObservableCollection<SolutionExplorerNodeViewModel> _allSolutionExplorerNodes = new();
     private IDisposable? _timer;
 
     public MainViewModel(string? initialGist)
@@ -194,6 +196,11 @@ public partial class MainViewModel : ViewModelBase
         }
 
         factory.ActivateErrors();
+    }
+
+    partial void OnSolutionExplorerSearchTextChanged(string value)
+    {
+        ApplySolutionExplorerSearch();
     }
 
     private void ToggleTheme()
@@ -372,7 +379,7 @@ public partial class MainViewModel : ViewModelBase
     {
         Solution = solution;
         ActiveProject = solution.Projects.FirstOrDefault();
-        SolutionExplorerNodes = BuildSolutionExplorer(solution);
+        SetSolutionExplorerNodes(solution);
         WorkspaceStatus = $"{solution.Name}: {solution.Projects.Count} project(s)";
 
         var firstXaml = ActiveProject?.GetXamlFiles()
@@ -610,6 +617,77 @@ public partial class MainViewModel : ViewModelBase
         return new ObservableCollection<SolutionExplorerNodeViewModel> { solutionNode };
     }
 
+    private void SetSolutionExplorerNodes(InMemorySolution? solution)
+    {
+        _allSolutionExplorerNodes = solution is { }
+            ? BuildSolutionExplorer(solution)
+            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        ApplySolutionExplorerSearch();
+    }
+
+    private void ApplySolutionExplorerSearch()
+    {
+        SelectedSolutionExplorerNode = null;
+
+        var searchText = SolutionExplorerSearchText.Trim();
+        if (searchText.Length == 0)
+        {
+            SolutionExplorerNodes = _allSolutionExplorerNodes;
+            return;
+        }
+
+        var filteredNodes = new ObservableCollection<SolutionExplorerNodeViewModel>();
+        foreach (var node in _allSolutionExplorerNodes)
+        {
+            if (FilterSolutionExplorerNode(node, searchText) is { } filteredNode)
+            {
+                filteredNodes.Add(filteredNode);
+            }
+        }
+
+        SolutionExplorerNodes = filteredNodes;
+    }
+
+    private static SolutionExplorerNodeViewModel? FilterSolutionExplorerNode(
+        SolutionExplorerNodeViewModel node,
+        string searchText)
+    {
+        if (node.MatchesSearch(searchText))
+        {
+            return CloneSolutionExplorerSubtree(node);
+        }
+
+        var clone = node.CloneShallow();
+        foreach (var child in node.Children)
+        {
+            if (FilterSolutionExplorerNode(child, searchText) is { } filteredChild)
+            {
+                clone.Children.Add(filteredChild);
+            }
+        }
+
+        if (clone.Children.Count == 0)
+        {
+            return null;
+        }
+
+        clone.IsExpanded = true;
+        return clone;
+    }
+
+    private static SolutionExplorerNodeViewModel CloneSolutionExplorerSubtree(SolutionExplorerNodeViewModel node)
+    {
+        var clone = node.CloneShallow();
+        clone.IsExpanded = true;
+
+        foreach (var child in node.Children)
+        {
+            clone.Children.Add(CloneSolutionExplorerSubtree(child));
+        }
+
+        return clone;
+    }
+
     private void AddFileNode(SolutionExplorerNodeViewModel projectNode, InMemoryProject project, InMemoryProjectFile file)
     {
         var segments = file.Path.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -762,9 +840,7 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var file = _solutionFactory.AddUserControl(project);
-        SolutionExplorerNodes = Solution is { } solution
-            ? BuildSolutionExplorer(solution)
-            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        SetSolutionExplorerNodes(Solution);
         RefreshControlThemes();
         OpenWorkspaceFile(file);
     }
@@ -777,9 +853,7 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var file = _solutionFactory.AddResourceDictionary(project);
-        SolutionExplorerNodes = Solution is { } solution
-            ? BuildSolutionExplorer(solution)
-            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        SetSolutionExplorerNodes(Solution);
         RefreshControlThemes();
         OpenWorkspaceFile(file);
     }

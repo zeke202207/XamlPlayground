@@ -1209,6 +1209,53 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void SolutionExplorerSearch_FiltersTreeToMatchingAncestorPath()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+
+        viewModel.SolutionExplorerSearchText = "Resources.axaml";
+
+        var solutionNode = Assert.Single(viewModel.SolutionExplorerNodes);
+        var projectNode = Assert.Single(solutionNode.Children);
+        var folderNode = Assert.Single(projectNode.Children);
+        var fileNode = Assert.Single(folderNode.Children);
+        Assert.True(solutionNode.IsExpanded);
+        Assert.True(projectNode.IsExpanded);
+        Assert.True(folderNode.IsExpanded);
+        Assert.Equal("Styles", folderNode.Title);
+        Assert.Equal("Resources.axaml", fileNode.Title);
+        Assert.Null(FindNode(viewModel.SolutionExplorerNodes, "Main.axaml"));
+
+        viewModel.SolutionExplorerSearchText = string.Empty;
+
+        Assert.NotNull(FindNode(viewModel.SolutionExplorerNodes, "Main.axaml"));
+    }
+
+    [Fact]
+    public void SolutionExplorerNodeCommands_ExpandAndCollapseSubtree()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var solutionNode = Assert.Single(viewModel.SolutionExplorerNodes);
+
+        solutionNode.CollapseRecursiveCommand.Execute(null);
+
+        Assert.All(FlattenNodes(viewModel.SolutionExplorerNodes), static node => Assert.False(node.IsExpanded));
+
+        solutionNode.ExpandRecursiveCommand.Execute(null);
+
+        Assert.All(FlattenNodes(viewModel.SolutionExplorerNodes), static node => Assert.True(node.IsExpanded));
+
+        solutionNode.CollapseCommand.Execute(null);
+
+        Assert.False(solutionNode.IsExpanded);
+        Assert.All(solutionNode.Children, static node => Assert.True(node.IsExpanded));
+    }
+
+    [Fact]
     public void ControlThemeResourceBuilder_CreatesKeyedThemeResource()
     {
         var template = new FluentControlThemeTemplate(
@@ -2677,6 +2724,20 @@ public sealed class MainViewModelTests
         }
 
         return null;
+    }
+
+    private static IEnumerable<SolutionExplorerNodeViewModel> FlattenNodes(
+        IEnumerable<SolutionExplorerNodeViewModel> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+
+            foreach (var child in FlattenNodes(node.Children))
+            {
+                yield return child;
+            }
+        }
     }
 }
 
