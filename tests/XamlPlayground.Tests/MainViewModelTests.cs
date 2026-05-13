@@ -443,6 +443,79 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void StandardSolutionStorage_WritesSlnAndSlnxProjectReferences()
+    {
+        var solutionFactory = new InMemorySolutionFactory(_ => { });
+        var solution = solutionFactory.CreateSolution(
+            "StandardApp",
+            Assert.Single(AvaloniaProjectTemplates.All, template => template.ShortName == "avalonia.xplat"));
+
+        var sln = StandardSolutionStorage.SaveSln(solution);
+        var slnEntries = StandardSolutionStorage.ParseSolutionEntries("StandardApp.sln", sln);
+        var slnx = StandardSolutionStorage.SaveSlnx(solution);
+        var slnxEntries = StandardSolutionStorage.ParseSolutionEntries("StandardApp.slnx", slnx);
+
+        var slnEntry = Assert.Single(slnEntries);
+        Assert.Equal("StandardApp", slnEntry.Name);
+        Assert.Equal("StandardApp/StandardApp.csproj", slnEntry.Path);
+        var slnxEntry = Assert.Single(slnxEntries);
+        Assert.Equal("StandardApp", slnxEntry.Name);
+        Assert.Equal("StandardApp/StandardApp.csproj", slnxEntry.Path);
+    }
+
+    [Fact]
+    public void StandardSolutionStorage_LoadsLocalSlnxProjectFiles()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundStandardSolution-{Guid.NewGuid():N}");
+        try
+        {
+            var projectRoot = Path.Combine(root, "ImportedApp");
+            Directory.CreateDirectory(Path.Combine(projectRoot, "Views"));
+            Directory.CreateDirectory(Path.Combine(projectRoot, "Styles"));
+            var slnxPath = Path.Combine(root, "ImportedApp.slnx");
+            File.WriteAllText(slnxPath, """
+                                        <Solution>
+                                          <Project Path="ImportedApp/ImportedApp.csproj" />
+                                        </Solution>
+                                        """);
+            File.WriteAllText(Path.Combine(projectRoot, "ImportedApp.csproj"), """
+                                                                               <Project Sdk="Microsoft.NET.Sdk">
+                                                                                 <PropertyGroup>
+                                                                                   <RootNamespace>Imported.Root</RootNamespace>
+                                                                                 </PropertyGroup>
+                                                                               </Project>
+                                                                               """);
+            File.WriteAllText(Path.Combine(projectRoot, "Views", "MainView.axaml"), """
+                                                                                    <UserControl xmlns="https://github.com/avaloniaui">
+                                                                                      <TextBlock Text="Imported" />
+                                                                                    </UserControl>
+                                                                                    """);
+            File.WriteAllText(Path.Combine(projectRoot, "Styles", "Resources.axaml"), """
+                                                                                      <ResourceDictionary xmlns="https://github.com/avaloniaui" />
+                                                                                      """);
+            File.WriteAllText(Path.Combine(projectRoot, "Views", "MainView.axaml.cs"), "namespace Imported.Root.Views; public partial class MainView { }");
+
+            var solution = StandardSolutionStorage.LoadFromLocalPath(slnxPath, File.ReadAllText(slnxPath));
+
+            Assert.Equal("ImportedApp", solution.Name);
+            var project = Assert.Single(solution.Projects);
+            Assert.Equal("ImportedApp", project.Name);
+            Assert.Equal("Imported.Root", project.RootNamespace);
+            Assert.Contains(project.Files, file => file.Path == "ImportedApp.csproj" && file.Kind == ProjectFileKind.ProjectFile);
+            Assert.Contains(project.Files, file => file.Path == "Views/MainView.axaml" && file.Kind == ProjectFileKind.Xaml);
+            Assert.Contains(project.Files, file => file.Path == "Styles/Resources.axaml" && file.Kind == ProjectFileKind.Resource);
+            Assert.Contains(project.Files, file => file.Path == "Views/MainView.axaml.cs" && file.Kind == ProjectFileKind.CSharp);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void RuntimeXamlLoader_DiagnosticHandler_ReportsRuntimeXamlDiagnostics()
     {
         TestApplication.EnsureAvaloniaInitialized();

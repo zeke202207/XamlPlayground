@@ -81,6 +81,7 @@ public partial class MainViewModel : ViewModelBase
         AddResourceDictionaryCommand = new RelayCommand(AddResourceDictionary, () => ActiveProject is not null);
         ImportSolutionCommand = new AsyncRelayCommand(ImportSolution);
         ExportSolutionCommand = new AsyncRelayCommand(ExportSolution, CanExportSolution);
+        ExportStandardSolutionFolderCommand = new AsyncRelayCommand(ExportStandardSolutionFolder, CanExportSolution);
         BuildSolutionCommand = new RelayCommand(RunActiveDocument);
         OpenXamlFileCommand = new AsyncRelayCommand(async () => await OpenXamlFile());
         SaveXamlFileCommand = new AsyncRelayCommand(async () => await SaveXamlFile());
@@ -126,6 +127,8 @@ public partial class MainViewModel : ViewModelBase
 
     public ICommand ExportSolutionCommand { get; }
 
+    public ICommand ExportStandardSolutionFolderCommand { get; }
+
     public ICommand BuildSolutionCommand { get; }
 
     public ICommand OpenXamlFileCommand { get; }
@@ -161,6 +164,7 @@ public partial class MainViewModel : ViewModelBase
         if (e.PropertyName == nameof(Solution))
         {
             (ExportSolutionCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+            (ExportStandardSolutionFolderCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         }
     }
 
@@ -420,16 +424,55 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            var json = SolutionStorage.Save(solution);
+            var extension = Path.GetExtension(file.Name);
+            var text = extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)
+                ? StandardSolutionStorage.SaveSlnx(solution)
+                : extension.Equals(".sln", StringComparison.OrdinalIgnoreCase)
+                    ? StandardSolutionStorage.SaveSln(solution)
+                    : SolutionStorage.Save(solution);
             await using var stream = await file.OpenWriteAsync();
             await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(json);
+            await writer.WriteAsync(text);
             MarkSolutionClean(solution);
-            WorkspaceStatus = $"Exported solution {solution.Name}.";
+            WorkspaceStatus = extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) ||
+                              extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)
+                ? $"Exported {extension} solution metadata for {solution.Name}. Use folder export for project files."
+                : $"Exported solution {solution.Name}.";
         }
         catch (Exception exception)
         {
             WorkspaceStatus = $"Failed to export solution: {exception.Message}";
+        }
+    }
+
+    private async Task ExportStandardSolutionFolder()
+    {
+        if (Solution is not { } solution || StorageProvider is null || !StorageProvider.CanPickFolder)
+        {
+            return;
+        }
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Export standard solution folder",
+            AllowMultiple = false
+        });
+
+        var folder = folders.FirstOrDefault();
+        if (folder is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await StandardSolutionStorage.ExportStandardSolutionFolderAsync(solution, folder);
+            MarkSolutionClean(solution);
+            WorkspaceStatus = $"Exported {solution.Name}.sln, {solution.Name}.slnx, and project files.";
+        }
+        catch (Exception exception)
+        {
+            WorkspaceStatus = $"Failed to export standard solution folder: {exception.Message}";
         }
     }
 
@@ -457,8 +500,8 @@ public partial class MainViewModel : ViewModelBase
         {
             await using var stream = await file.OpenReadAsync();
             using var reader = new StreamReader(stream);
-            var json = await reader.ReadToEndAsync();
-            var solution = SolutionStorage.Load(json, OnProjectFileChanged);
+            var text = await reader.ReadToEndAsync();
+            var solution = await LoadSolutionFileAsync(file, text);
             _openXamlFile = null;
             _openCodeFile = null;
             CurrentSample = null;
@@ -477,6 +520,59 @@ public partial class MainViewModel : ViewModelBase
         {
             WorkspaceStatus = $"Failed to import solution: {exception.Message}";
         }
+    }
+
+    private async Task<InMemorySolution> LoadSolutionFileAsync(
+        IStorageFile file,
+        string text)
+    {
+        var extension = Path.GetExtension(file.Name);
+        if (extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase))
+        {
+            return await LoadStandardSolutionFileAsync(file, text);
+        }
+
+        return SolutionStorage.Load(text, OnProjectFileChanged);
+    }
+
+    private async Task<InMemorySolution> LoadStandardSolutionFileAsync(
+        IStorageFile file,
+        string text)
+    {
+        if (!OperatingSystem.IsBrowser() &&
+            file.Path.IsFile &&
+            File.Exists(file.Path.LocalPath))
+        {
+            try
+            {
+                return StandardSolutionStorage.LoadFromLocalPath(file.Path.LocalPath, text, OnProjectFileChanged);
+            }
+            catch
+            {
+                // Fall back to an explicit root-folder picker below. Some storage providers expose
+                // a path URI that cannot be used to read sibling project files.
+            }
+        }
+
+        if (StorageProvider is null || !StorageProvider.CanPickFolder)
+        {
+            throw new InvalidDataException("Standard .sln/.slnx import needs access to the solution root folder.");
+        }
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select solution root folder",
+            AllowMultiple = false
+        });
+
+        var folder = folders.FirstOrDefault();
+        if (folder is null)
+        {
+            throw new InvalidDataException("Standard solution import was canceled before selecting a solution root folder.");
+        }
+
+        return await StandardSolutionStorage.LoadFromStorageFolderAsync(file.Name, text, folder, OnProjectFileChanged);
     }
 
     private static void MarkSolutionClean(InMemorySolution solution)
@@ -768,6 +864,8 @@ public partial class MainViewModel : ViewModelBase
         return new List<FilePickerFileType>
         {
             StorageService.SolutionProject,
+            StorageService.VisualStudioXmlSolution,
+            StorageService.VisualStudioSolution,
             StorageService.Json,
             StorageService.All
         };

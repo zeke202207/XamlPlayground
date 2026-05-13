@@ -10,6 +10,7 @@
   <UserControl.Resources>
     <StreamGeometry x:Key="SolutionImportIcon">M5,20H19V18H5V20M19,9H15V3H9V9H5L12,16L19,9Z</StreamGeometry>
     <StreamGeometry x:Key="SolutionExportIcon">M5,20H19V18H5V20M19,10L12,3L5,10H9V16H15V10H19Z</StreamGeometry>
+    <StreamGeometry x:Key="SolutionFolderExportIcon">M10,4L12,6H20C21.1,6 22,6.9 22,8V18C22,19.1 21.1,20 20,20H4C2.9,20 2,19.1 2,18V6C2,4.9 2.9,4 4,4H10M5,11H9V8L14,13L9,18V15H5V11Z</StreamGeometry>
   </UserControl.Resources>
   <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
     <WrapPanel DockPanel.Dock="Top"
@@ -36,6 +37,13 @@
         <PathIcon Width="16"
                   Height="16"
                   Data="{StaticResource SolutionExportIcon}" />
+      </Button>
+      <Button ToolTip.Tip="Export standard .sln/.slnx folder"
+              Margin="0,0,4,4"
+              Command="{Binding Shell.ExportStandardSolutionFolderCommand}">
+        <PathIcon Width="16"
+                  Height="16"
+                  Data="{StaticResource SolutionFolderExportIcon}" />
       </Button>
     </WrapPanel>
 
