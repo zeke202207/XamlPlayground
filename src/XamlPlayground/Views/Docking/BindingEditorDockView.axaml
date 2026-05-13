@@ -61,99 +61,54 @@
                  Opacity="0.72" />
     </Border>
 
-    <Grid ColumnDefinitions="1.2*,1.4*,0.8*"
+    <Grid ColumnDefinitions="1.05*,1.45*,0.8*"
           ColumnSpacing="8"
           Margin="8"
           MinHeight="260">
       <Border Classes="design-panel">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+        <Grid RowDefinitions="Auto,*"
               RowSpacing="6">
           <TextBlock Classes="design-title"
                      Text="Binding Fields" />
-          <Grid Grid.Row="1"
-                ColumnDefinitions="Auto,*,Auto,*"
-                ColumnSpacing="6">
-            <TextBlock Classes="design-label"
-                       Text="Kind" />
-            <TextBox Grid.Column="1"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorKind, Mode=TwoWay}" />
-            <TextBlock Grid.Column="2"
-                       Classes="design-label"
-                       Text="Property" />
-            <TextBox Grid.Column="3"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorPropertyName, Mode=TwoWay}" />
-          </Grid>
-          <Grid Grid.Row="2"
-                ColumnDefinitions="Auto,*,Auto,120"
-                ColumnSpacing="6">
-            <TextBlock Classes="design-label"
-                       Text="Path" />
-            <TextBox Grid.Column="1"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorPath, Mode=TwoWay}" />
-            <TextBlock Grid.Column="2"
-                       Classes="design-label"
-                       Text="Mode" />
-            <TextBox Grid.Column="3"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorMode, Mode=TwoWay}" />
-          </Grid>
-          <Grid Grid.Row="3"
-                ColumnDefinitions="Auto,*,Auto,*"
-                ColumnSpacing="6">
-            <TextBlock Classes="design-label"
-                       Text="Element" />
-            <TextBox Grid.Column="1"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorElementName, Mode=TwoWay}" />
-            <TextBlock Grid.Column="2"
-                       Classes="design-label"
-                       Text="Source" />
-            <TextBox Grid.Column="3"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorSource, Mode=TwoWay}" />
-          </Grid>
-          <Grid Grid.Row="4"
-                ColumnDefinitions="Auto,*,Auto,*"
-                ColumnSpacing="6">
-            <TextBlock Classes="design-label"
-                       Text="Relative" />
-            <TextBox Grid.Column="1"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorRelativeSource, Mode=TwoWay}" />
-            <TextBlock Grid.Column="2"
-                       Classes="design-label"
-                       Text="Converter" />
-            <TextBox Grid.Column="3"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorConverter, Mode=TwoWay}" />
-          </Grid>
-          <Grid Grid.Row="5"
-                ColumnDefinitions="Auto,*,Auto,*"
-                ColumnSpacing="6">
-            <TextBlock Classes="design-label"
-                       Text="Format" />
-            <TextBox Grid.Column="1"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorStringFormat, Mode=TwoWay}" />
-            <TextBlock Grid.Column="2"
-                       Classes="design-label"
-                       Text="Fallback" />
-            <TextBox Grid.Column="3"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorFallbackValue, Mode=TwoWay}" />
-          </Grid>
-          <Grid Grid.Row="6"
-                ColumnDefinitions="Auto,*"
-                ColumnSpacing="6">
-            <TextBlock Classes="design-label"
-                       Text="Null" />
-            <TextBox Grid.Column="1"
-                     Classes="design-field"
-                     Text="{Binding Shell.BindingEditorTargetNullValue, Mode=TwoWay}" />
-          </Grid>
+          <ScrollViewer Grid.Row="1"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="design-label"
+                         Text="Kind" />
+              <TextBox Text="{Binding Shell.BindingEditorKind, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Property" />
+              <TextBox Text="{Binding Shell.BindingEditorPropertyName, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Path" />
+              <TextBox Text="{Binding Shell.BindingEditorPath, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Mode" />
+              <TextBox Text="{Binding Shell.BindingEditorMode, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="ElementName" />
+              <TextBox Text="{Binding Shell.BindingEditorElementName, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Source" />
+              <TextBox Text="{Binding Shell.BindingEditorSource, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="RelativeSource" />
+              <TextBox Text="{Binding Shell.BindingEditorRelativeSource, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Converter" />
+              <TextBox Text="{Binding Shell.BindingEditorConverter, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="StringFormat" />
+              <TextBox Text="{Binding Shell.BindingEditorStringFormat, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="FallbackValue" />
+              <TextBox Text="{Binding Shell.BindingEditorFallbackValue, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="TargetNullValue" />
+              <TextBox Text="{Binding Shell.BindingEditorTargetNullValue, Mode=TwoWay}" />
+            </StackPanel>
+          </ScrollViewer>
         </Grid>
       </Border>
 
@@ -164,7 +119,6 @@
           <TextBlock Classes="design-title"
                      Text="Raw Binding" />
           <TextBox Grid.Row="1"
-                   Classes="design-field"
                    Text="{Binding Shell.BindingEditorRawValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                    AcceptsReturn="True"
                    TextWrapping="NoWrap"
