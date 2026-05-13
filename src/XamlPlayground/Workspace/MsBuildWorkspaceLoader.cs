@@ -457,17 +457,25 @@ public static class MsBuildWorkspaceLoader
                 progress,
                 cancellationToken);
 
-            foreach (var transitiveReference in referencedProject.AssemblyReferences)
-            {
-                AddReference(project, transitiveReference);
-            }
-
             var reference = await GetOrCreateStorageProjectReferenceAssemblyAsync(
                 referencedProject,
                 emittedReferences,
                 progress,
                 cancellationToken);
-            AddReference(project, reference);
+            if (reference is { })
+            {
+                ReplaceReference(project, reference);
+            }
+
+            foreach (var transitiveReference in referencedProject.AssemblyReferences)
+            {
+                if (reference is { } && IsProjectAssemblyReference(referencedProject, transitiveReference))
+                {
+                    continue;
+                }
+
+                AddReference(project, transitiveReference);
+            }
         }
 
         visiting.Remove(projectKey);
@@ -604,6 +612,11 @@ public static class MsBuildWorkspaceLoader
 
         foreach (var workspaceReference in project.AssemblyReferences)
         {
+            if (IsProjectAssemblyReference(project, workspaceReference))
+            {
+                continue;
+            }
+
             var metadataReference = workspaceReference.CreateMetadataReference();
             var key = workspaceReference.Image is { Length: > 0 }
                 ? workspaceReference.Name
@@ -633,6 +646,18 @@ public static class MsBuildWorkspaceLoader
         return string.IsNullOrWhiteSpace(project.ProjectFilePath)
             ? project.Name
             : NormalizePath(project.ProjectFilePath);
+    }
+
+    private static bool IsProjectAssemblyReference(InMemoryProject project, WorkspaceAssemblyReference reference)
+    {
+        return string.Equals(reference.Name, GetProjectAssemblyName(project), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetProjectAssemblyName(InMemoryProject project)
+    {
+        return string.IsNullOrWhiteSpace(project.AssemblyName)
+            ? project.Name
+            : project.AssemblyName;
     }
 
     private static string? GetReferenceKey(PortableExecutableReference reference)
@@ -794,6 +819,19 @@ public static class MsBuildWorkspaceLoader
         }
 
         project.AssemblyReferences.Add(reference);
+    }
+
+    private static void ReplaceReference(InMemoryProject project, WorkspaceAssemblyReference reference)
+    {
+        for (var i = project.AssemblyReferences.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(project.AssemblyReferences[i].Name, reference.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                project.AssemblyReferences.RemoveAt(i);
+            }
+        }
+
+        AddReference(project, reference);
     }
 
     private static void AddLocalFile(

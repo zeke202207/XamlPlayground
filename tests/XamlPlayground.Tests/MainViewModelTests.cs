@@ -809,6 +809,96 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task MsBuildWorkspaceLoader_PrefersStorageProjectReferenceSourceOverStaleBinOutput()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("StorageWorkspace");
+        var staleLibReference = WorkspaceAssemblyReference.FromImage(
+            "Lib/bin/Debug/net8.0/Lib.dll",
+            CompileTestAssemblyImage(
+                "Lib",
+                """
+                namespace Lib;
+
+                public sealed class LibValue
+                {
+                    public string OldValue => "stale";
+                }
+                """),
+            isRuntimeAssembly: true);
+        Assert.NotNull(staleLibReference);
+
+        var libProject = new InMemoryProject("Lib", "Lib", "browser.storage", "Lib/Lib.csproj")
+        {
+            AssemblyName = "Lib"
+        };
+        libProject.AddFile(new InMemoryProjectFile(
+            "Lib.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            ProjectFileKind.ProjectFile));
+        libProject.AddFile(new InMemoryProjectFile(
+            "LibValue.cs",
+            """
+            namespace Lib;
+
+            public sealed class LibValue
+            {
+                public string NewValue => "fresh";
+            }
+            """,
+            ProjectFileKind.CSharp));
+        libProject.AssemblyReferences.Add(staleLibReference);
+
+        var appProject = new InMemoryProject("App", "App", "browser.storage", "App/App.csproj")
+        {
+            AssemblyName = "App"
+        };
+        appProject.AddFile(new InMemoryProjectFile(
+            "App.csproj",
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <ProjectReference Include="..\Lib\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """,
+            ProjectFileKind.ProjectFile));
+        appProject.AddFile(new InMemoryProjectFile(
+            "AppViewModel.cs",
+            """
+            using Lib;
+
+            namespace App;
+
+            public sealed class AppViewModel
+            {
+                public string Name => new LibValue().NewValue;
+            }
+            """,
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(appProject);
+        solution.Projects.Add(libProject);
+
+        await AddStorageProjectReferencesForTestAsync(solution);
+
+        var libReferences = appProject.AssemblyReferences
+            .Where(static reference => string.Equals(reference.Name, "Lib", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var libReference = Assert.Single(libReferences);
+        Assert.Equal("Lib.dll", libReference.FilePath);
+        Assert.NotNull(libReference.Image);
+        var result = await CompilerService.GetProjectAssembly(
+            appProject.AssemblyName,
+            appProject.GetCSharpFileSnapshot(),
+            appProject.AssemblyReferences);
+
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+    }
+
+    [Fact]
     public void MsBuildWorkspaceLoader_ResolvesNestedStorageSolutionProjectPaths()
     {
         var method = typeof(MsBuildWorkspaceLoader).GetMethod(
