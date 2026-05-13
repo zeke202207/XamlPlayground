@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -20,21 +19,34 @@ public sealed record ControlThemeDefinition(
 
 public sealed class FluentControlThemeCatalog
 {
-    private const string AvaloniaFluentThemeRelativePath = "src/Avalonia.Themes.Fluent";
-    private const string ExternalAvaloniaFluentThemeRelativePath = "external/Avalonia/src/Avalonia.Themes.Fluent";
     private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
-    private static readonly object s_templateCacheLock = new();
-    private static readonly Dictionary<string, IReadOnlyList<FluentControlThemeTemplate>> s_templateCache = new(StringComparer.Ordinal);
 
+    private readonly ThemeProjectSource _source;
     private readonly Lazy<IReadOnlyList<FluentControlThemeTemplate>> _templates;
 
     public FluentControlThemeCatalog()
+        : this(ThemeProjectSourceLoader.LoadDefaultFluentThemeProject())
     {
-        SourceRoot = ResolveSourceRoot();
+    }
+
+    public FluentControlThemeCatalog(ThemeProjectSource source)
+    {
+        _source = source;
+        SourceRoot = source.SourceRoot;
+        SourceDescription = source.Description;
         _templates = new Lazy<IReadOnlyList<FluentControlThemeTemplate>>(LoadTemplates);
     }
 
+    public FluentControlThemeCatalog(
+        ThemeProjectDocument project,
+        string sourceDescription)
+        : this(new ThemeProjectSource(project, sourceDescription, SourceRoot: null))
+    {
+    }
+
     public string? SourceRoot { get; }
+
+    public string SourceDescription { get; }
 
     public IReadOnlyList<FluentControlThemeTemplate> Templates => _templates.Value;
 
@@ -50,44 +62,19 @@ public sealed class FluentControlThemeCatalog
 
     private IReadOnlyList<FluentControlThemeTemplate> LoadTemplates()
     {
-        if (SourceRoot is null || !Directory.Exists(SourceRoot))
-        {
-            return Array.Empty<FluentControlThemeTemplate>();
-        }
-
-        lock (s_templateCacheLock)
-        {
-            if (s_templateCache.TryGetValue(SourceRoot, out var cachedTemplates))
-            {
-                return cachedTemplates;
-            }
-        }
-
-        var templates = Directory
-            .EnumerateFiles(SourceRoot, "*.xaml", SearchOption.AllDirectories)
-            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+        return _source.Project.Files
+            .Where(static file => IsThemeSourceFile(file.Path))
+            .OrderBy(static file => file.Path, StringComparer.OrdinalIgnoreCase)
             .SelectMany(LoadTemplatesFromFile)
             .ToArray();
-
-        lock (s_templateCacheLock)
-        {
-            if (s_templateCache.TryGetValue(SourceRoot, out var cachedTemplates))
-            {
-                return cachedTemplates;
-            }
-
-            s_templateCache[SourceRoot] = templates;
-        }
-
-        return templates;
     }
 
-    private IEnumerable<FluentControlThemeTemplate> LoadTemplatesFromFile(string path)
+    private static IEnumerable<FluentControlThemeTemplate> LoadTemplatesFromFile(ThemeProjectFile file)
     {
         XDocument document;
         try
         {
-            document = XDocument.Load(path, LoadOptions.PreserveWhitespace);
+            document = XDocument.Parse(file.Text, LoadOptions.PreserveWhitespace);
         }
         catch
         {
@@ -106,60 +93,15 @@ public sealed class FluentControlThemeCatalog
             yield return new FluentControlThemeTemplate(
                 key,
                 targetType,
-                NormalizeResourcePath(Path.GetRelativePath(SourceRoot!, path)),
+                file.Path,
                 theme.ToString(SaveOptions.DisableFormatting));
         }
     }
 
-    private static string NormalizeResourcePath(string path)
+    private static bool IsThemeSourceFile(string path)
     {
-        return path.Replace(Path.DirectorySeparatorChar, '/')
-            .Replace(Path.AltDirectorySeparatorChar, '/');
-    }
-
-    private static string? ResolveSourceRoot()
-    {
-        var environmentOverride = Environment.GetEnvironmentVariable("XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH");
-        if (IsThemeRoot(environmentOverride))
-        {
-            return environmentOverride;
-        }
-
-        foreach (var basePath in EnumerateBasePaths())
-        {
-            var externalCandidate = Path.GetFullPath(Path.Combine(basePath, ExternalAvaloniaFluentThemeRelativePath));
-            if (IsThemeRoot(externalCandidate))
-            {
-                return externalCandidate;
-            }
-
-            var siblingCandidate = Path.GetFullPath(Path.Combine(basePath, "..", "Avalonia", AvaloniaFluentThemeRelativePath));
-            if (IsThemeRoot(siblingCandidate))
-            {
-                return siblingCandidate;
-            }
-        }
-
-        return null;
-    }
-
-    private static IEnumerable<string> EnumerateBasePaths()
-    {
-        yield return Environment.CurrentDirectory;
-        yield return AppContext.BaseDirectory;
-
-        for (var current = new DirectoryInfo(AppContext.BaseDirectory); current is not null; current = current.Parent)
-        {
-            yield return current.FullName;
-        }
-    }
-
-    private static bool IsThemeRoot(string? path)
-    {
-        return !string.IsNullOrWhiteSpace(path) &&
-               Directory.Exists(path) &&
-               File.Exists(Path.Combine(path, "FluentTheme.xaml")) &&
-               Directory.Exists(Path.Combine(path, "Controls"));
+        return path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) ||
+               path.EndsWith(".axaml", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static string GetLocalName(string typeName)
