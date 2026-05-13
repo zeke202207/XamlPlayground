@@ -759,10 +759,7 @@ public sealed class MainViewModelTests
         }
         finally
         {
-            if (Directory.Exists(root))
-            {
-                Directory.Delete(root, recursive: true);
-            }
+            TryDeleteDirectory(root);
         }
     }
 
@@ -799,10 +796,7 @@ public sealed class MainViewModelTests
         }
         finally
         {
-            if (Directory.Exists(root))
-            {
-                Directory.Delete(root, recursive: true);
-            }
+            TryDeleteDirectory(root);
         }
     }
 
