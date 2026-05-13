@@ -7,18 +7,37 @@
              mc:Ignorable="d" d:DesignWidth="280" d:DesignHeight="600"
              x:Class="XamlPlayground.Views.Docking.SolutionExplorerDockView"
              x:CompileBindings="True" x:DataType="vm:SolutionExplorerDockViewModel">
+  <UserControl.Resources>
+    <StreamGeometry x:Key="SolutionImportIcon">M5,20H19V18H5V20M19,9H15V3H9V9H5L12,16L19,9Z</StreamGeometry>
+    <StreamGeometry x:Key="SolutionExportIcon">M5,20H19V18H5V20M19,10L12,3L5,10H9V16H15V10H19Z</StreamGeometry>
+  </UserControl.Resources>
   <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
-    <StackPanel DockPanel.Dock="Top"
-                Orientation="Horizontal"
-                Spacing="4"
-                Margin="6">
+    <WrapPanel DockPanel.Dock="Top"
+               Margin="6">
       <Button Content="New Project"
+              Margin="0,0,4,4"
               Command="{Binding Shell.ShowNewProjectWizardCommand}" />
       <Button Content="User Control"
+              Margin="0,0,4,4"
               Command="{Binding Shell.AddUserControlCommand}" />
       <Button Content="Resource"
+              Margin="0,0,4,4"
               Command="{Binding Shell.AddResourceDictionaryCommand}" />
-    </StackPanel>
+      <Button ToolTip.Tip="Import solution"
+              Margin="0,0,4,4"
+              Command="{Binding Shell.ImportSolutionCommand}">
+        <PathIcon Width="16"
+                  Height="16"
+                  Data="{StaticResource SolutionImportIcon}" />
+      </Button>
+      <Button ToolTip.Tip="Export solution"
+              Margin="0,0,4,4"
+              Command="{Binding Shell.ExportSolutionCommand}">
+        <PathIcon Width="16"
+                  Height="16"
+                  Data="{StaticResource SolutionExportIcon}" />
+      </Button>
+    </WrapPanel>
 
     <Border DockPanel.Dock="Bottom"
             BorderThickness="0,1,0,0"

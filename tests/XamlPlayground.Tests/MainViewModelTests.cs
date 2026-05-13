@@ -404,6 +404,45 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void SolutionStorage_RoundTripsFullSolution()
+    {
+        var changedFiles = new List<string>();
+        var solutionFactory = new InMemorySolutionFactory(file => changedFiles.Add(file.Path));
+        var solution = solutionFactory.CreateSolution(
+            "RoundTripApp",
+            Assert.Single(AvaloniaProjectTemplates.All, template => template.ShortName == "avalonia.xplat"));
+        var project = Assert.Single(solution.Projects);
+        var userControl = solutionFactory.AddUserControl(project);
+        userControl.Text = """
+                           <UserControl xmlns="https://github.com/avaloniaui">
+                             <TextBlock Text="Imported solution" />
+                           </UserControl>
+                           """;
+        solutionFactory.AddControlThemeResource(
+            project,
+            "ExternalTheme",
+            "<ResourceDictionary xmlns=\"https://github.com/avaloniaui\" />",
+            includeInRuntimePreview: false);
+
+        var json = SolutionStorage.Save(solution);
+        var loaded = SolutionStorage.Load(json, file => changedFiles.Add($"loaded:{file.Path}"));
+
+        Assert.Contains("\"format\": \"xamlplayground.solution\"", json, StringComparison.Ordinal);
+        Assert.Equal("RoundTripApp", loaded.Name);
+        var loadedProject = Assert.Single(loaded.Projects);
+        Assert.Equal(project.Name, loadedProject.Name);
+        Assert.Equal(project.RootNamespace, loadedProject.RootNamespace);
+        Assert.Equal(project.TemplateShortName, loadedProject.TemplateShortName);
+        Assert.Equal(project.Files.Count, loadedProject.Files.Count);
+        Assert.Contains(loadedProject.Files, file => file.Path == "Views/UserControl1.axaml" &&
+                                                     file.Text.Contains("Imported solution", StringComparison.Ordinal) &&
+                                                     file.Kind == ProjectFileKind.Xaml);
+        var isolatedTheme = Assert.Single(loadedProject.Files, file => file.Path == "Themes/ExternalTheme.axaml");
+        Assert.Equal(ProjectFileKind.Resource, isolatedTheme.Kind);
+        Assert.False(isolatedTheme.IncludeInRuntimePreview);
+    }
+
+    [Fact]
     public void RuntimeXamlLoader_DiagnosticHandler_ReportsRuntimeXamlDiagnostics()
     {
         TestApplication.EnsureAvaloniaInitialized();

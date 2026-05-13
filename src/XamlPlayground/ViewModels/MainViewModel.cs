@@ -79,6 +79,8 @@ public partial class MainViewModel : ViewModelBase
         CancelNewProjectCommand = new RelayCommand(() => NewProjectWizard.IsOpen = false);
         AddUserControlCommand = new RelayCommand(AddUserControl, () => ActiveProject is not null);
         AddResourceDictionaryCommand = new RelayCommand(AddResourceDictionary, () => ActiveProject is not null);
+        ImportSolutionCommand = new AsyncRelayCommand(ImportSolution);
+        ExportSolutionCommand = new AsyncRelayCommand(ExportSolution, CanExportSolution);
         BuildSolutionCommand = new RelayCommand(RunActiveDocument);
         OpenXamlFileCommand = new AsyncRelayCommand(async () => await OpenXamlFile());
         SaveXamlFileCommand = new AsyncRelayCommand(async () => await SaveXamlFile());
@@ -120,6 +122,10 @@ public partial class MainViewModel : ViewModelBase
 
     public ICommand AddResourceDictionaryCommand { get; }
 
+    public ICommand ImportSolutionCommand { get; }
+
+    public ICommand ExportSolutionCommand { get; }
+
     public ICommand BuildSolutionCommand { get; }
 
     public ICommand OpenXamlFileCommand { get; }
@@ -150,6 +156,11 @@ public partial class MainViewModel : ViewModelBase
             (AddUserControlCommand as RelayCommand)?.NotifyCanExecuteChanged();
             (AddResourceDictionaryCommand as RelayCommand)?.NotifyCanExecuteChanged();
             NotifyControlThemeCommandsChanged();
+        }
+
+        if (e.PropertyName == nameof(Solution))
+        {
+            (ExportSolutionCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         }
     }
 
@@ -379,6 +390,101 @@ public partial class MainViewModel : ViewModelBase
 
         RefreshVisualEditingModel(updateSourceSelection: false);
         RefreshControlThemes();
+    }
+
+    private bool CanExportSolution()
+    {
+        return Solution is not null;
+    }
+
+    private async Task ExportSolution()
+    {
+        if (Solution is not { } solution || StorageProvider is null)
+        {
+            return;
+        }
+
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export solution",
+            FileTypeChoices = GetSolutionFileTypes(),
+            SuggestedFileName = $"{solution.Name}.xamlsln",
+            DefaultExtension = "xamlsln",
+            ShowOverwritePrompt = true
+        });
+
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var json = SolutionStorage.Save(solution);
+            await using var stream = await file.OpenWriteAsync();
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(json);
+            MarkSolutionClean(solution);
+            WorkspaceStatus = $"Exported solution {solution.Name}.";
+        }
+        catch (Exception exception)
+        {
+            WorkspaceStatus = $"Failed to export solution: {exception.Message}";
+        }
+    }
+
+    private async Task ImportSolution()
+    {
+        if (StorageProvider is null)
+        {
+            return;
+        }
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import solution",
+            FileTypeFilter = GetSolutionFileTypes(),
+            AllowMultiple = false
+        });
+
+        var file = files.FirstOrDefault();
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var stream = await file.OpenReadAsync();
+            using var reader = new StreamReader(stream);
+            var json = await reader.ReadToEndAsync();
+            var solution = SolutionStorage.Load(json, OnProjectFileChanged);
+            _openXamlFile = null;
+            _openCodeFile = null;
+            CurrentSample = null;
+            Control = null;
+            DiagnosticsRoot = null;
+            LastErrorMessage = null;
+            LoadSolution(solution);
+            WorkspaceStatus = $"Imported solution {solution.Name}.";
+
+            if (EnableAutoRun && CanPreviewXamlFile(ActiveXamlFile))
+            {
+                RunActiveDocument();
+            }
+        }
+        catch (Exception exception)
+        {
+            WorkspaceStatus = $"Failed to import solution: {exception.Message}";
+        }
+    }
+
+    private static void MarkSolutionClean(InMemorySolution solution)
+    {
+        foreach (var file in solution.Projects.SelectMany(static project => project.Files))
+        {
+            file.MarkClean();
+        }
     }
 
     private ObservableCollection<SolutionExplorerNodeViewModel> BuildSolutionExplorer(InMemorySolution solution)
@@ -652,6 +758,16 @@ public partial class MainViewModel : ViewModelBase
         return new List<FilePickerFileType>
         {
             StorageService.ThemeProject,
+            StorageService.Json,
+            StorageService.All
+        };
+    }
+
+    private static List<FilePickerFileType> GetSolutionFileTypes()
+    {
+        return new List<FilePickerFileType>
+        {
+            StorageService.SolutionProject,
             StorageService.Json,
             StorageService.All
         };

@@ -31,6 +31,13 @@ internal static class StorageService
         MimeTypes = new[] { "application/json" }
     };
 
+    public static FilePickerFileType SolutionProject { get; } = new("XamlPlayground Solution")
+    {
+        Patterns = new[] { "*.xamlsln" },
+        AppleUniformTypeIdentifiers = new[] { "com.xamlplayground.solution" },
+        MimeTypes = new[] { "application/json" }
+    };
+
     public static FilePickerFileType Json { get; } = new("Json")
     {
         Patterns = new[] { "*.json" },
