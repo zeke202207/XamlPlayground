@@ -570,7 +570,7 @@ public static class MsBuildWorkspaceLoader
     {
         try
         {
-            var sourceFiles = referencedProject.GetCSharpFileSnapshot();
+            var sourceFiles = CreateStorageProjectReferenceSourceFiles(referencedProject).ToArray();
             if (sourceFiles.Length == 0)
             {
                 return null;
@@ -623,6 +623,74 @@ public static class MsBuildWorkspaceLoader
             progress?.Report($"Could not compile storage project reference {referencedProject.Name}: {exception.Message}");
             return null;
         }
+    }
+
+    private static IEnumerable<(string Path, string Text)> CreateStorageProjectReferenceSourceFiles(
+        InMemoryProject project)
+    {
+        foreach (var sourceFile in project.GetCSharpFileSnapshot())
+        {
+            yield return sourceFile;
+        }
+
+        foreach (var xamlFile in project.GetXamlFiles())
+        {
+            var className = ReadXamlClassName(xamlFile.Text);
+            if (string.IsNullOrWhiteSpace(className))
+            {
+                continue;
+            }
+
+            yield return ($"{xamlFile.Path}.g.cs", CreateXamlGeneratedPartialSource(className));
+        }
+    }
+
+    private static string? ReadXamlClassName(string xaml)
+    {
+        try
+        {
+            var document = XDocument.Parse(xaml, LoadOptions.None);
+            return document.Root?
+                .Attributes()
+                .FirstOrDefault(static attribute =>
+                    attribute.Name.LocalName == "Class" &&
+                    attribute.Name.NamespaceName == "http://schemas.microsoft.com/winfx/2006/xaml")
+                ?.Value
+                ?.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string CreateXamlGeneratedPartialSource(string className)
+    {
+        var separatorIndex = className.LastIndexOf('.');
+        var namespaceName = separatorIndex > 0
+            ? className[..separatorIndex]
+            : null;
+        var typeName = separatorIndex > 0
+            ? className[(separatorIndex + 1)..]
+            : className;
+
+        var typeSource =
+            $$"""
+            partial class {{typeName}}
+            {
+                private void InitializeComponent()
+                {
+                }
+            }
+            """;
+
+        return string.IsNullOrWhiteSpace(namespaceName)
+            ? typeSource
+            : $$"""
+              namespace {{namespaceName}};
+
+              {{typeSource}}
+              """;
     }
 
     private static async Task<IReadOnlyList<PortableExecutableReference>> GetStorageCompilationReferencesAsync(

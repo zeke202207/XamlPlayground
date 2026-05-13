@@ -1223,6 +1223,88 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task MsBuildWorkspaceLoader_EmitsStorageProjectReferenceWithGeneratedXamlPartial()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("StorageWorkspace");
+        var libProject = new InMemoryProject("Lib", "Lib", "browser.storage", "Lib/Lib.csproj")
+        {
+            AssemblyName = "Lib"
+        };
+        libProject.AddFile(new InMemoryProjectFile(
+            "Lib.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            ProjectFileKind.ProjectFile));
+        libProject.AddFile(new InMemoryProjectFile(
+            "Views/LibView.axaml",
+            """
+            <UserControl
+                x:Class="Lib.LibView"
+                xmlns="https://github.com/avaloniaui"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
+            """,
+            ProjectFileKind.Xaml));
+        libProject.AddFile(new InMemoryProjectFile(
+            "Views/LibView.axaml.cs",
+            """
+            using Avalonia.Controls;
+
+            namespace Lib;
+
+            public partial class LibView : UserControl
+            {
+                public LibView()
+                {
+                    InitializeComponent();
+                }
+            }
+            """,
+            ProjectFileKind.CSharp));
+        var appProject = new InMemoryProject("App", "App", "browser.storage", "App/App.csproj")
+        {
+            AssemblyName = "App"
+        };
+        appProject.AddFile(new InMemoryProjectFile(
+            "App.csproj",
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <ProjectReference Include="..\Lib\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """,
+            ProjectFileKind.ProjectFile));
+        appProject.AddFile(new InMemoryProjectFile(
+            "AppViewModel.cs",
+            """
+            using Lib;
+
+            namespace App;
+
+            public sealed class AppViewModel
+            {
+                public string ViewName => typeof(LibView).Name;
+            }
+            """,
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(appProject);
+        solution.Projects.Add(libProject);
+
+        await AddStorageProjectReferencesForTestAsync(solution);
+
+        Assert.Contains(appProject.AssemblyReferences, reference => reference.Name == "Lib" && reference.Image is { Length: > 0 });
+        var result = await CompilerService.GetProjectAssembly(
+            appProject.AssemblyName,
+            appProject.GetCSharpFileSnapshot(),
+            appProject.AssemblyReferences);
+
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+    }
+
+    [Fact]
     public async Task MsBuildWorkspaceLoader_WiresLocalTransitiveProjectReferences()
     {
         TestApplication.EnsureAvaloniaInitialized();
