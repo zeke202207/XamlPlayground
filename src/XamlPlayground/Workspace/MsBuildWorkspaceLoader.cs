@@ -25,6 +25,7 @@ public static class MsBuildWorkspaceLoader
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        workspacePath = ResolveExistingLocalPath(workspacePath);
         if (Directory.Exists(workspacePath))
         {
             var entry = FindLocalWorkspaceEntry(workspacePath);
@@ -57,6 +58,7 @@ public static class MsBuildWorkspaceLoader
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        solutionPath = ResolveExistingLocalPath(solutionPath);
         var previousDirectory = Directory.GetCurrentDirectory();
         var solutionDirectory = Path.GetDirectoryName(solutionPath);
         if (!string.IsNullOrWhiteSpace(solutionDirectory))
@@ -93,6 +95,7 @@ public static class MsBuildWorkspaceLoader
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        projectPath = ResolveExistingLocalPath(projectPath);
         var previousDirectory = Directory.GetCurrentDirectory();
         var projectDirectory = Path.GetDirectoryName(projectPath);
         if (!string.IsNullOrWhiteSpace(projectDirectory))
@@ -1812,6 +1815,21 @@ public static class MsBuildWorkspaceLoader
         {
             return NormalizePath(path);
         }
+    }
+
+    private static string ResolveExistingLocalPath(string path)
+    {
+        var normalizedPath = path.Replace('\\', '/').Trim();
+        if (File.Exists(normalizedPath) || Directory.Exists(normalizedPath))
+        {
+            return normalizedPath;
+        }
+
+        var rootedPath = "/" + normalizedPath.TrimStart('/');
+        return Path.DirectorySeparatorChar == '/' &&
+               (File.Exists(rootedPath) || Directory.Exists(rootedPath))
+            ? rootedPath
+            : path;
     }
 
     private static string GetRelativePath(string? projectPath, string filePath, string fallbackName)

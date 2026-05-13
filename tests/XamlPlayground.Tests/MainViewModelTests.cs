@@ -703,6 +703,73 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void InMemoryProject_RepairsMissingUnixRootForExistingAbsoluteProjectFilePath()
+    {
+        if (Path.DirectorySeparatorChar != '/')
+        {
+            return;
+        }
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundAbsoluteProject-{Guid.NewGuid():N}");
+        var absoluteProjectPath = Path.Combine(root, "App.csproj");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(absoluteProjectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            var project = new InMemoryProject(
+                "App",
+                "App",
+                "msbuild",
+                absoluteProjectPath.TrimStart('/'));
+
+            Assert.Equal(absoluteProjectPath.Replace('\\', '/').TrimEnd('/'), project.ProjectFilePath);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void RemotePreviewStartInfo_RepairsMissingUnixRootForWorkingDirectory()
+    {
+        if (Path.DirectorySeparatorChar != '/')
+        {
+            return;
+        }
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewHost-{Guid.NewGuid():N}");
+        var hostPath = Path.Combine(root, "XamlPlayground.PreviewerHost.dll");
+        var targetPath = Path.Combine(root, "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllBytes(hostPath, Array.Empty<byte>());
+            File.WriteAllBytes(targetPath, Array.Empty<byte>());
+            var method = typeof(WorkspaceRemotePreviewService).GetMethod(
+                "BuildStartInfo",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var startInfo = Assert.IsType<System.Diagnostics.ProcessStartInfo>(method.Invoke(
+                null,
+                new object[] { hostPath, targetPath, 12345, root.TrimStart('/') }));
+
+            Assert.Equal(root.Replace('\\', '/'), startInfo.WorkingDirectory.Replace('\\', '/'));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void StandardSolutionStorage_PreservesImportedProjectPathOnExport()
     {
         var solution = new InMemorySolution("StandardApp");

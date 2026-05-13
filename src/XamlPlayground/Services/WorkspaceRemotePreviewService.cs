@@ -142,6 +142,7 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
         string? workingDirectory)
     {
         var targetDirectory = Path.GetDirectoryName(targetAssemblyPath) ?? AppContext.BaseDirectory;
+        var resolvedWorkingDirectory = ResolveExistingDirectory(workingDirectory) ?? targetDirectory;
         var baseName = Path.GetFileNameWithoutExtension(targetAssemblyPath);
         var targetRuntimeConfig = Path.Combine(targetDirectory, baseName + ".runtimeconfig.json");
         var targetDeps = Path.Combine(targetDirectory, baseName + ".deps.json");
@@ -165,12 +166,31 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
         {
             FileName = "dotnet",
             Arguments = args,
-            WorkingDirectory = string.IsNullOrWhiteSpace(workingDirectory) ? targetDirectory : workingDirectory,
+            WorkingDirectory = resolvedWorkingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+    }
+
+    private static string? ResolveExistingDirectory(string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return null;
+        }
+
+        var normalizedDirectory = directory.Replace('\\', '/').Trim();
+        if (Directory.Exists(normalizedDirectory))
+        {
+            return normalizedDirectory;
+        }
+
+        var rootedDirectory = "/" + normalizedDirectory.TrimStart('/');
+        return Path.DirectorySeparatorChar == '/' && Directory.Exists(rootedDirectory)
+            ? rootedDirectory
+            : null;
     }
 
     private static (double? Width, double? Height) TryGetDesignSize(string xamlText)

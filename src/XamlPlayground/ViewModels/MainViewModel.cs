@@ -1766,9 +1766,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         var previousScope = _previous;
-        var projectDirectory = string.IsNullOrWhiteSpace(project.ProjectFilePath)
-            ? Path.GetDirectoryName(project.OutputAssemblyPath)
-            : Path.GetDirectoryName(project.ProjectFilePath);
+        var projectDirectory = ResolveWorkspaceDirectory(Path.GetDirectoryName(project.ProjectFilePath)) ??
+                               ResolveWorkspaceDirectory(Path.GetDirectoryName(project.OutputAssemblyPath));
         var projectPath = BuildRemotePreviewXamlProjectPath(xamlFile.Path, projectDirectory);
         var result = await _remotePreviewService.StartOrUpdateAsync(
             xamlText,
@@ -1938,9 +1937,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private async Task<bool> TryBuildWorkspaceProjectAsync(InMemoryProject project)
     {
+        var projectFilePath = ResolveWorkspaceFilePath(project.ProjectFilePath);
         if (!project.IsMsBuildWorkspace ||
-            string.IsNullOrWhiteSpace(project.ProjectFilePath) ||
-            !File.Exists(project.ProjectFilePath))
+            string.IsNullOrWhiteSpace(projectFilePath) ||
+            !File.Exists(projectFilePath))
         {
             return false;
         }
@@ -1948,7 +1948,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         try
         {
             WorkspaceStatus = $"Building {project.Name}...";
-            var result = await RunDotNetBuildAsync(project.ProjectFilePath);
+            var result = await RunDotNetBuildAsync(projectFilePath);
             if (result.ExitCode == 0)
             {
                 project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
@@ -1957,7 +1957,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 return true;
             }
 
-            Console.WriteLine($"dotnet build failed for {project.ProjectFilePath}:{Environment.NewLine}{string.Join(Environment.NewLine, result.OutputLines)}");
+            Console.WriteLine($"dotnet build failed for {projectFilePath}:{Environment.NewLine}{string.Join(Environment.NewLine, result.OutputLines)}");
         }
         catch (Exception exception)
         {
@@ -2076,9 +2076,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             return project.OutputAssemblyPath;
         }
 
-        var projectDirectory = string.IsNullOrWhiteSpace(project.ProjectFilePath)
+        var projectFilePath = ResolveWorkspaceFilePath(project.ProjectFilePath);
+        var projectDirectory = string.IsNullOrWhiteSpace(projectFilePath)
             ? null
-            : Path.GetDirectoryName(project.ProjectFilePath);
+            : Path.GetDirectoryName(projectFilePath);
         if (string.IsNullOrWhiteSpace(projectDirectory))
         {
             return null;
@@ -2139,6 +2140,44 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         return null;
+    }
+
+    private static string? ResolveWorkspaceFilePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var normalizedPath = path.Replace('\\', '/').Trim();
+        if (File.Exists(normalizedPath))
+        {
+            return normalizedPath;
+        }
+
+        var rootedPath = "/" + normalizedPath.TrimStart('/');
+        return Path.DirectorySeparatorChar == '/' && File.Exists(rootedPath)
+            ? rootedPath
+            : normalizedPath;
+    }
+
+    private static string? ResolveWorkspaceDirectory(string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return null;
+        }
+
+        var normalizedDirectory = directory.Replace('\\', '/').Trim();
+        if (Directory.Exists(normalizedDirectory))
+        {
+            return normalizedDirectory;
+        }
+
+        var rootedDirectory = "/" + normalizedDirectory.TrimStart('/');
+        return Path.DirectorySeparatorChar == '/' && Directory.Exists(rootedDirectory)
+            ? rootedDirectory
+            : null;
     }
 
     private static async Task<DotNetProcessResult> RunDotNetBuildAsync(string projectPath)
