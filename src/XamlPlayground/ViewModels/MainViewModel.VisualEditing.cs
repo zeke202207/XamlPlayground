@@ -4630,7 +4630,7 @@ public partial class MainViewModel
 
         var themeKey = CreateUniqueControlThemeKey(project, targetType);
         var xaml = ControlThemeResourceBuilder.CreateResourceDictionary(template, themeKey);
-        var isolateFromRuntimePreview = TemplateRequiresRuntimeIsolation(template.Xaml);
+        var isolateFromRuntimePreview = TemplateRequiresRuntimeIsolation(template.Xaml, project);
         var themeFile = _solutionFactory.AddControlThemeResource(
             project,
             themeKey,
@@ -4727,7 +4727,7 @@ public partial class MainViewModel
         }
     }
 
-    private static bool TemplateRequiresRuntimeIsolation(string xaml)
+    private static bool TemplateRequiresRuntimeIsolation(string xaml, InMemoryProject? project = null)
     {
         try
         {
@@ -4737,7 +4737,7 @@ public partial class MainViewModel
                 .Attributes()
                 .Where(static attribute => attribute.IsNamespaceDeclaration)
                 .Select(static attribute => attribute.Value)
-                .Any(static value => IsExternalClrNamespace(value));
+                .Any(value => IsExternalClrNamespace(value, project));
         }
         catch
         {
@@ -4746,32 +4746,69 @@ public partial class MainViewModel
         }
     }
 
-    private static bool IsExternalClrNamespace(string namespaceValue)
+    private static bool IsExternalClrNamespace(string namespaceValue, InMemoryProject? project)
     {
         if (!namespaceValue.StartsWith("clr-namespace:", StringComparison.Ordinal))
         {
             return false;
         }
 
-        var assembly = namespaceValue
+        var parts = namespaceValue
             .Split(';', StringSplitOptions.RemoveEmptyEntries)
             .Select(static part => part.Trim())
-            .FirstOrDefault(static part => part.StartsWith("assembly=", StringComparison.Ordinal));
+            .ToArray();
+        var clrNamespace = parts[0]["clr-namespace:".Length..];
+        var assembly = parts.FirstOrDefault(static part => part.StartsWith("assembly=", StringComparison.Ordinal));
 
         if (assembly is null)
         {
-            var clrNamespace = namespaceValue["clr-namespace:".Length..]
-                .Split(';', StringSplitOptions.RemoveEmptyEntries)[0];
-            return !clrNamespace.StartsWith("Avalonia.", StringComparison.Ordinal) &&
-                   !clrNamespace.StartsWith("System", StringComparison.Ordinal) &&
-                   !clrNamespace.StartsWith("XamlPlayground", StringComparison.Ordinal);
+            return !IsKnownRuntimeClrNamespace(clrNamespace) &&
+                   !IsProjectClrNamespace(clrNamespace, project);
         }
 
         var assemblyName = assembly["assembly=".Length..];
-        return !assemblyName.Equals("netstandard", StringComparison.OrdinalIgnoreCase) &&
-               !assemblyName.StartsWith("System", StringComparison.OrdinalIgnoreCase) &&
-               !assemblyName.StartsWith("Avalonia", StringComparison.OrdinalIgnoreCase) &&
-               !assemblyName.StartsWith("XamlPlayground", StringComparison.OrdinalIgnoreCase);
+        return !IsKnownRuntimeAssembly(assemblyName) &&
+               !IsProjectAssembly(assemblyName, project);
+    }
+
+    private static bool IsKnownRuntimeClrNamespace(string clrNamespace)
+    {
+        return clrNamespace.StartsWith("Avalonia.", StringComparison.Ordinal) ||
+               clrNamespace.StartsWith("System", StringComparison.Ordinal) ||
+               clrNamespace.StartsWith("XamlPlayground", StringComparison.Ordinal);
+    }
+
+    private static bool IsKnownRuntimeAssembly(string assemblyName)
+    {
+        return assemblyName.Equals("netstandard", StringComparison.OrdinalIgnoreCase) ||
+               assemblyName.StartsWith("System", StringComparison.OrdinalIgnoreCase) ||
+               assemblyName.StartsWith("Avalonia", StringComparison.OrdinalIgnoreCase) ||
+               assemblyName.StartsWith("XamlPlayground", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsProjectClrNamespace(string clrNamespace, InMemoryProject? project)
+    {
+        return IsNameOrChildNamespace(clrNamespace, project?.RootNamespace) ||
+               IsNameOrChildNamespace(clrNamespace, project?.Name);
+    }
+
+    private static bool IsProjectAssembly(string assemblyName, InMemoryProject? project)
+    {
+        return MatchesProjectName(assemblyName, project?.Name) ||
+               MatchesProjectName(assemblyName, project?.RootNamespace);
+    }
+
+    private static bool IsNameOrChildNamespace(string clrNamespace, string? rootNamespace)
+    {
+        return !string.IsNullOrWhiteSpace(rootNamespace) &&
+               (clrNamespace.Equals(rootNamespace, StringComparison.Ordinal) ||
+                clrNamespace.StartsWith($"{rootNamespace}.", StringComparison.Ordinal));
+    }
+
+    private static bool MatchesProjectName(string name, string? projectName)
+    {
+        return !string.IsNullOrWhiteSpace(projectName) &&
+               name.Equals(projectName, StringComparison.OrdinalIgnoreCase);
     }
 
     private string CreateUniqueControlThemeKey(InMemoryProject project, string targetType)
@@ -5569,7 +5606,7 @@ public partial class MainViewModel
                 project,
                 themeFile.Path,
                 themeFile.Text,
-                includeInRuntimePreview: !TemplateRequiresRuntimeIsolation(themeFile.Text)))
+                includeInRuntimePreview: !TemplateRequiresRuntimeIsolation(themeFile.Text, project)))
             .ToArray();
 
         if (updateSourceCatalog)

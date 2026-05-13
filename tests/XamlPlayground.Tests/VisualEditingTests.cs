@@ -4439,8 +4439,10 @@ public sealed class VisualEditingTests
         }
         catch (XamlLoadException)
         {
-            include.Source = null;
-            application.Styles.Remove(include);
+            if (application.Styles.Contains(include))
+            {
+                application.Styles.Remove(include);
+            }
         }
     }
 

@@ -1741,6 +1741,47 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ApplyControlThemeProject_KeepsSameProjectClrNamespacesInRuntimePreview()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            EnableAutoRun = false
+        };
+        var project = viewModel.ActiveProject!;
+        var themeProject = ThemeProjectStorage.CreateDocument(
+            "SavedLocalTheme",
+            new[]
+            {
+                (
+                    "Themes/SavedLocalButton.axaml",
+                    $$"""
+                    <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                        xmlns:local="clr-namespace:{{project.RootNamespace}}.Converters">
+                      <ControlTheme x:Key="SavedLocalButtonTheme" TargetType="Button">
+                        <Setter Property="Tag" Value="{x:Static local:ThemeConverter.Instance}" />
+                      </ControlTheme>
+                    </ResourceDictionary>
+                    """)
+            });
+        var method = typeof(MainViewModel).GetMethod(
+            "ApplyControlThemeProject",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var loadedCount = Assert.IsType<int>(method.Invoke(
+            viewModel,
+            new object[] { project, themeProject, "Theme project: SavedLocalTheme", false }));
+
+        Assert.Equal(1, loadedCount);
+        var file = project.FindFile("Themes/SavedLocalButton.axaml");
+        Assert.NotNull(file);
+        Assert.True(file.IncludeInRuntimePreview);
+    }
+
+    [Fact]
     public void InMemorySolutionFactory_AddOrUpdateResource_UpdatesExistingThemeResource()
     {
         var changedFiles = new List<string>();
