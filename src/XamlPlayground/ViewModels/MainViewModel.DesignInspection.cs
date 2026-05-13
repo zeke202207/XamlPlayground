@@ -1093,7 +1093,7 @@ public partial class MainViewModel
         }
     }
 
-    private string CreateResourceXamlFromFields(bool ensureUniqueKey = false)
+    private string CreateResourceXamlFromFields(bool ensureUniqueKey = false, XamlResourceDefinition? sourceResource = null)
     {
         var type = string.IsNullOrWhiteSpace(ResourceEditorType) ? "SolidColorBrush" : ResourceEditorType.Trim();
         var key = string.IsNullOrWhiteSpace(ResourceEditorKey) ? CreateUniqueResourceKey(type) : ResourceEditorKey.Trim();
@@ -1104,9 +1104,12 @@ public partial class MainViewModel
         }
 
         var value = ResourceEditorValue ?? string.Empty;
+        var preservedShapeAttributes = sourceResource is null
+            ? string.Empty
+            : CreatePreservedResourceShapeAttributeText(sourceResource.RawXaml);
         return value.TrimStart().StartsWith('<')
-            ? $"<{type} x:Key=\"{EscapeDesignAttribute(key)}\">{Environment.NewLine}{value}{Environment.NewLine}</{type}>"
-            : $"<{type} x:Key=\"{EscapeDesignAttribute(key)}\">{EscapeDesignText(value)}</{type}>";
+            ? $"<{type} x:Key=\"{EscapeDesignAttribute(key)}\"{preservedShapeAttributes}>{Environment.NewLine}{value}{Environment.NewLine}</{type}>"
+            : $"<{type} x:Key=\"{EscapeDesignAttribute(key)}\"{preservedShapeAttributes}>{EscapeDesignText(value)}</{type}>";
     }
 
     private string CreateBindingRawValueForApply(XamlBindingDefinition binding)
@@ -1188,7 +1191,17 @@ public partial class MainViewModel
             return ResourceEditorRawXaml;
         }
 
-        return CreateResourceXamlFromFields();
+        var typeChanged = !IsSameEditorValue(ResourceEditorType, GetLocalName(resource.ResourceType));
+        var valueChanged = !IsSameEditorValue(ResourceEditorValue, resource.ValuePreview);
+        if (!typeChanged &&
+            !valueChanged &&
+            !string.IsNullOrWhiteSpace(ResourceEditorRawXaml) &&
+            !IsSameEditorValue(ResourceEditorKey, resource.Key))
+        {
+            return ReplaceResourceKeyInRawXaml(resource.RawXaml, ResourceEditorKey);
+        }
+
+        return CreateResourceXamlFromFields(sourceResource: typeChanged ? null : resource);
     }
 
     private bool AreResourceFieldsChanged(XamlResourceDefinition resource)
@@ -1208,6 +1221,173 @@ public partial class MainViewModel
     private static bool IsSameEditorValue(string? left, string? right)
     {
         return string.Equals(left ?? string.Empty, right ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    private string ReplaceResourceKeyInRawXaml(string rawXaml, string key)
+    {
+        var replacementKey = string.IsNullOrWhiteSpace(key)
+            ? CreateUniqueResourceKey(ResourceEditorType)
+            : key.Trim();
+        var keyAttribute = EnumerateStartTagAttributes(rawXaml)
+            .Select(static attribute => (XamlAttributeFragment?)attribute)
+            .FirstOrDefault(static attribute => attribute is { } value && string.Equals(
+                GetAttributeLocalName(value.Name),
+                "Key",
+                StringComparison.Ordinal));
+
+        if (keyAttribute.HasValue)
+        {
+            return rawXaml.Remove(keyAttribute.Value.ValueStart, keyAttribute.Value.ValueLength)
+                .Insert(
+                    keyAttribute.Value.ValueStart,
+                    EscapeDesignAttribute(replacementKey, keyAttribute.Value.Quote));
+        }
+
+        var insertAt = FindStartTagCloseStart(rawXaml);
+        return insertAt < 0
+            ? CreateResourceXamlFromFields()
+            : rawXaml.Insert(insertAt, $" x:Key=\"{EscapeDesignAttribute(replacementKey)}\"");
+    }
+
+    private static string CreatePreservedResourceShapeAttributeText(string rawXaml)
+    {
+        var attributes = EnumerateStartTagAttributes(rawXaml)
+            .Where(static attribute =>
+                string.Equals(GetAttributeLocalName(attribute.Name), "TargetType", StringComparison.Ordinal) ||
+                string.Equals(GetAttributeLocalName(attribute.Name), "DataType", StringComparison.Ordinal))
+            .Select(attribute => rawXaml.Substring(attribute.Start, attribute.Length).Trim())
+            .Where(static attribute => !string.IsNullOrWhiteSpace(attribute))
+            .ToArray();
+
+        return attributes.Length == 0 ? string.Empty : $" {string.Join(" ", attributes)}";
+    }
+
+    private static IEnumerable<XamlAttributeFragment> EnumerateStartTagAttributes(string rawXaml)
+    {
+        var index = rawXaml.IndexOf('<', StringComparison.Ordinal);
+        if (index < 0)
+        {
+            yield break;
+        }
+
+        index++;
+        while (index < rawXaml.Length && !char.IsWhiteSpace(rawXaml[index]) && rawXaml[index] is not '>' and not '/')
+        {
+            index++;
+        }
+
+        while (index < rawXaml.Length)
+        {
+            while (index < rawXaml.Length && char.IsWhiteSpace(rawXaml[index]))
+            {
+                index++;
+            }
+
+            if (index >= rawXaml.Length ||
+                rawXaml[index] == '>' ||
+                (rawXaml[index] == '/' && index + 1 < rawXaml.Length && rawXaml[index + 1] == '>'))
+            {
+                yield break;
+            }
+
+            var start = index;
+            while (index < rawXaml.Length &&
+                   !char.IsWhiteSpace(rawXaml[index]) &&
+                   rawXaml[index] is not '=' and not '>' and not '/')
+            {
+                index++;
+            }
+
+            var name = rawXaml[start..index];
+            while (index < rawXaml.Length && char.IsWhiteSpace(rawXaml[index]))
+            {
+                index++;
+            }
+
+            if (index >= rawXaml.Length || rawXaml[index] != '=')
+            {
+                yield return new XamlAttributeFragment(name, start, index, index, 0, '"');
+                continue;
+            }
+
+            index++;
+            while (index < rawXaml.Length && char.IsWhiteSpace(rawXaml[index]))
+            {
+                index++;
+            }
+
+            var hasQuote = index < rawXaml.Length && rawXaml[index] is '"' or '\'';
+            var quote = hasQuote ? rawXaml[index] : '"';
+            var valueStart = hasQuote ? ++index : index;
+            if (hasQuote)
+            {
+                while (index < rawXaml.Length && rawXaml[index] != quote)
+                {
+                    index++;
+                }
+            }
+            else
+            {
+                while (index < rawXaml.Length && !char.IsWhiteSpace(rawXaml[index]) && rawXaml[index] != '>')
+                {
+                    index++;
+                }
+            }
+
+            var valueLength = index - valueStart;
+            if (hasQuote && index < rawXaml.Length && rawXaml[index] == quote)
+            {
+                index++;
+            }
+
+            yield return new XamlAttributeFragment(name, start, index, valueStart, valueLength, quote);
+        }
+    }
+
+    private static int FindStartTagCloseStart(string rawXaml)
+    {
+        var inQuote = false;
+        var quote = '\0';
+        for (var index = rawXaml.IndexOf('<', StringComparison.Ordinal) + 1; index > 0 && index < rawXaml.Length; index++)
+        {
+            var ch = rawXaml[index];
+            if (inQuote)
+            {
+                inQuote = ch != quote;
+                continue;
+            }
+
+            if (ch is '"' or '\'')
+            {
+                inQuote = true;
+                quote = ch;
+                continue;
+            }
+
+            if (ch == '>')
+            {
+                return index > 0 && rawXaml[index - 1] == '/' ? index - 1 : index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string GetAttributeLocalName(string name)
+    {
+        var colon = name.LastIndexOf(':');
+        return colon >= 0 ? name[(colon + 1)..] : name;
+    }
+
+    private readonly record struct XamlAttributeFragment(
+        string Name,
+        int Start,
+        int End,
+        int ValueStart,
+        int ValueLength,
+        char Quote)
+    {
+        public int Length => End - Start;
     }
 
     private string CreateUniqueResourceKey(string type)
@@ -1380,13 +1560,15 @@ public partial class MainViewModel
         return null;
     }
 
-    private static string EscapeDesignAttribute(string value)
+    private static string EscapeDesignAttribute(string value, char quote = '"')
     {
-        return value
+        var escaped = value
             .Replace("&", "&amp;", StringComparison.Ordinal)
-            .Replace("\"", "&quot;", StringComparison.Ordinal)
             .Replace("<", "&lt;", StringComparison.Ordinal)
             .Replace(">", "&gt;", StringComparison.Ordinal);
+        return quote == '\''
+            ? escaped.Replace("'", "&apos;", StringComparison.Ordinal)
+            : escaped.Replace("\"", "&quot;", StringComparison.Ordinal);
     }
 
     private static string EscapeDesignText(string value)

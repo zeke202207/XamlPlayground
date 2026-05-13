@@ -233,6 +233,38 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ResourceEditorFieldApply_PreservesControlThemeTargetType()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ActiveXamlFile!.Text = """
+                                         <UserControl xmlns="https://github.com/avaloniaui"
+                                                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                           <UserControl.Resources>
+                                             <ControlTheme x:Key="PrimaryButtonTheme" TargetType="Button">
+                                               <Setter Property="Background" Value="Blue" />
+                                             </ControlTheme>
+                                           </UserControl.Resources>
+                                         </UserControl>
+                                         """;
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+        viewModel.SelectedResourceInspectorNode = viewModel.ResourceInspectorNodes
+            .SelectMany(static node => node.Children)
+            .Single(node => node.Resource?.Key == "PrimaryButtonTheme" &&
+                            node.Resource.FilePath == viewModel.ActiveXamlFile.Path);
+
+        viewModel.ResourceEditorKey = "SecondaryButtonTheme";
+        viewModel.ResourceEditorValue = """<Setter Property="Background" Value="Red" />""";
+        viewModel.ApplyResourceEditorCommand.Execute(null);
+
+        Assert.Contains("x:Key=\"SecondaryButtonTheme\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.Contains("TargetType=\"Button\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.Contains("Value=\"Red\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("PrimaryButtonTheme", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StyleSetterUnknownProperty_IsPreservedWhenStyleIsSelected()
     {
         TestApplication.EnsureAvaloniaInitialized();
