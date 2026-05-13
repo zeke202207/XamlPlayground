@@ -703,7 +703,10 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        if (resourceChanged && !ReferenceEquals(file, ActiveXamlFile) && CanPreviewXamlFile(ActiveXamlFile))
+        if (resourceChanged &&
+            file.IncludeInRuntimePreview &&
+            !ReferenceEquals(file, ActiveXamlFile) &&
+            CanPreviewXamlFile(ActiveXamlFile))
         {
             RunActiveDocument();
             return;
@@ -807,7 +810,7 @@ public partial class MainViewModel : ViewModelBase
 
             RuntimeXamlPreviewLoader.ApplyProjectResources(
                 project?.GetXamlFiles()
-                    .Where(static file => file.Kind == ProjectFileKind.Resource)
+                    .Where(static file => file.Kind == ProjectFileKind.Resource && file.IncludeInRuntimePreview)
                     .Select(static file => (file.Path, file.Text)) ??
                 Array.Empty<(string Path, string Text)>(),
                 scriptAssembly,
@@ -873,8 +876,13 @@ public partial class MainViewModel : ViewModelBase
 
     private static bool CanPreviewXamlFile(InMemoryProjectFile? file)
     {
-        return file?.Kind is ProjectFileKind.Xaml or ProjectFileKind.Resource &&
-               !file.Path.Equals("App.axaml", StringComparison.OrdinalIgnoreCase);
+        if (file is null || file.Path.Equals("App.axaml", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return file.Kind == ProjectFileKind.Xaml ||
+               file.Kind == ProjectFileKind.Resource && file.IncludeInRuntimePreview;
     }
 
     private static bool TryValidateXml(string? xaml, out string? errorMessage)

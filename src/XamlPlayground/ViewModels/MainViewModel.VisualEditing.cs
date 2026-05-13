@@ -9,6 +9,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
@@ -4629,7 +4630,12 @@ public partial class MainViewModel
 
         var themeKey = CreateUniqueControlThemeKey(project, targetType);
         var xaml = ControlThemeResourceBuilder.CreateResourceDictionary(template, themeKey);
-        var themeFile = _solutionFactory.AddControlThemeResource(project, themeKey, xaml);
+        var isolateFromRuntimePreview = TemplateRequiresRuntimeIsolation(template.Xaml);
+        var themeFile = _solutionFactory.AddControlThemeResource(
+            project,
+            themeKey,
+            xaml,
+            includeInRuntimePreview: !isolateFromRuntimePreview);
         var ownerFile = ActiveXamlFile;
 
         ClearControlThemeSearchFilter();
@@ -4654,8 +4660,17 @@ public partial class MainViewModel
             EnterThemeEditScope(ownerFile, themeKey);
         }
 
-        OpenWorkspaceFile(themeFile);
-        ControlThemeStatus = $"Created {themeKey} from Fluent {targetType}. {ControlThemes.Count} custom theme(s) available.";
+        if (isolateFromRuntimePreview)
+        {
+            OpenWorkspaceFileWithoutPreview(themeFile);
+            ControlThemeStatus =
+                $"Created isolated {themeKey} from {targetType}. External CLR theme types are kept out of runtime preview.";
+        }
+        else
+        {
+            OpenWorkspaceFile(themeFile);
+            ControlThemeStatus = $"Created {themeKey} from {targetType}. {ControlThemes.Count} custom theme(s) available.";
+        }
     }
 
     private bool TryResolveControlThemeTemplateForCreate(
@@ -4696,6 +4711,67 @@ public partial class MainViewModel
         {
             ControlThemeSearchText = string.Empty;
         }
+    }
+
+    private void OpenWorkspaceFileWithoutPreview(InMemoryProjectFile file)
+    {
+        var wasOpeningSample = _openingSample;
+        try
+        {
+            _openingSample = true;
+            OpenWorkspaceFile(file);
+        }
+        finally
+        {
+            _openingSample = wasOpeningSample;
+        }
+    }
+
+    private static bool TemplateRequiresRuntimeIsolation(string xaml)
+    {
+        try
+        {
+            var document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace);
+            return document.Root is not null && document.Root
+                .DescendantsAndSelf()
+                .Attributes()
+                .Where(static attribute => attribute.IsNamespaceDeclaration)
+                .Select(static attribute => attribute.Value)
+                .Any(static value => IsExternalClrNamespace(value));
+        }
+        catch
+        {
+            return xaml.Contains("clr-namespace:Material.", StringComparison.Ordinal) ||
+                   xaml.Contains("assembly=Material.", StringComparison.Ordinal);
+        }
+    }
+
+    private static bool IsExternalClrNamespace(string namespaceValue)
+    {
+        if (!namespaceValue.StartsWith("clr-namespace:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var assembly = namespaceValue
+            .Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Select(static part => part.Trim())
+            .FirstOrDefault(static part => part.StartsWith("assembly=", StringComparison.Ordinal));
+
+        if (assembly is null)
+        {
+            var clrNamespace = namespaceValue["clr-namespace:".Length..]
+                .Split(';', StringSplitOptions.RemoveEmptyEntries)[0];
+            return !clrNamespace.StartsWith("Avalonia.", StringComparison.Ordinal) &&
+                   !clrNamespace.StartsWith("System", StringComparison.Ordinal) &&
+                   !clrNamespace.StartsWith("XamlPlayground", StringComparison.Ordinal);
+        }
+
+        var assemblyName = assembly["assembly=".Length..];
+        return !assemblyName.Equals("netstandard", StringComparison.OrdinalIgnoreCase) &&
+               !assemblyName.StartsWith("System", StringComparison.OrdinalIgnoreCase) &&
+               !assemblyName.StartsWith("Avalonia", StringComparison.OrdinalIgnoreCase) &&
+               !assemblyName.StartsWith("XamlPlayground", StringComparison.OrdinalIgnoreCase);
     }
 
     private string CreateUniqueControlThemeKey(InMemoryProject project, string targetType)
@@ -5400,7 +5476,7 @@ public partial class MainViewModel
 
     private async Task LoadControlThemeFolder()
     {
-        if (ActiveProject is not { } project || StorageProvider is null)
+        if (ActiveProject is null || StorageProvider is null)
         {
             return;
         }
@@ -5420,12 +5496,8 @@ public partial class MainViewModel
         try
         {
             var source = await ThemeProjectSourceLoader.LoadFromStorageFolderAsync(folder);
-            var loadedFileCount = ApplyControlThemeProject(
-                project,
-                source.Project,
-                source.Description,
-                updateSourceCatalog: true);
-            ControlThemeStatus = $"Loaded {loadedFileCount} theme file(s) from folder.";
+            LoadControlThemeSource(source);
+            ControlThemeStatus = $"Loaded {FluentControlThemeTemplates.Count} source template(s) from folder.";
         }
         catch (Exception exception)
         {
@@ -5435,7 +5507,7 @@ public partial class MainViewModel
 
     private void LoadBundledFluentThemeProject()
     {
-        if (ActiveProject is not { } project)
+        if (ActiveProject is null)
         {
             return;
         }
@@ -5443,12 +5515,8 @@ public partial class MainViewModel
         try
         {
             var source = ThemeProjectSourceLoader.LoadEmbeddedFluentThemeProject();
-            var loadedFileCount = ApplyControlThemeProject(
-                project,
-                source.Project,
-                source.Description,
-                updateSourceCatalog: true);
-            ControlThemeStatus = $"Loaded {loadedFileCount} bundled Fluent theme file(s).";
+            LoadControlThemeSource(source);
+            ControlThemeStatus = $"Loaded {FluentControlThemeTemplates.Count} bundled Fluent source template(s).";
         }
         catch (Exception exception)
         {
@@ -5463,7 +5531,7 @@ public partial class MainViewModel
 
     private async Task LoadControlThemeRepository()
     {
-        if (ActiveProject is not { } project || string.IsNullOrWhiteSpace(ControlThemeRepositoryUrl))
+        if (ActiveProject is null || string.IsNullOrWhiteSpace(ControlThemeRepositoryUrl))
         {
             return;
         }
@@ -5474,17 +5542,20 @@ public partial class MainViewModel
         try
         {
             var source = await ThemeProjectSourceLoader.LoadFromRemoteGitRepositoryAsync(repositoryUrl);
-            var loadedFileCount = ApplyControlThemeProject(
-                project,
-                source.Project,
-                source.Description,
-                updateSourceCatalog: true);
-            ControlThemeStatus = $"Loaded {loadedFileCount} theme file(s) from repository.";
+            LoadControlThemeSource(source);
+            ControlThemeStatus = $"Loaded {FluentControlThemeTemplates.Count} source template(s) from repository.";
         }
         catch (Exception exception)
         {
             ControlThemeStatus = $"Failed to load theme repository: {exception.Message}";
         }
+    }
+
+    private void LoadControlThemeSource(ThemeProjectSource source)
+    {
+        _controlThemeCatalog = new FluentControlThemeCatalog(source);
+        LoadFluentControlThemeTemplates();
+        NotifyControlThemeCommandsChanged();
     }
 
     private int ApplyControlThemeProject(

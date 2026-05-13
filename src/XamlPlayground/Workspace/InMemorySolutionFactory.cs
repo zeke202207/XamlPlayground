@@ -82,7 +82,8 @@ public sealed class InMemorySolutionFactory
     public InMemoryProjectFile AddControlThemeResource(
         InMemoryProject project,
         string themeKey,
-        string xaml)
+        string xaml,
+        bool includeInRuntimePreview = true)
     {
         var path = $"Themes/{themeKey}.axaml";
         if (project.FindFile(path) is not null)
@@ -100,7 +101,8 @@ public sealed class InMemorySolutionFactory
             path,
             xaml,
             ProjectFileKind.Resource,
-            _fileChanged));
+            _fileChanged,
+            includeInRuntimePreview: includeInRuntimePreview));
     }
 
     public InMemoryProjectFile AddOrUpdateResource(

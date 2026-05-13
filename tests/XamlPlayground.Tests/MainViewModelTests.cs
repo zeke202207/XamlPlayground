@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Reflection;
+using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Diagnostics;
 using Avalonia.Controls;
@@ -1239,6 +1240,71 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void FluentControlThemeCatalog_PrefersConcreteTemplateOverBasedOnAlias()
+    {
+        var source = CreateMaterialLikeThemeSource();
+        var catalog = new FluentControlThemeCatalog(source);
+
+        var template = catalog.FindDefaultTemplate("CheckBox");
+
+        Assert.NotNull(template);
+        Assert.Equal("MaterialCheckBox", template.Key);
+    }
+
+    [Fact]
+    public void FluentControlThemeCatalog_PreservesRootNamespacesUsedInMemberValues()
+    {
+        var source = CreateMaterialLikeThemeSource();
+        var catalog = new FluentControlThemeCatalog(source);
+        var template = Assert.Single(catalog.Templates, template => template.Key == "MaterialCheckBox");
+
+        var xaml = ControlThemeResourceBuilder.CreateResourceDictionary(template, "MyCheckBoxTheme1");
+
+        Assert.Contains("xmlns:assists=\"clr-namespace:Material.Styles.Assists\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Property=\"assists:SelectionControlAssist.Size\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("xmlns:ripple=\"clr-namespace:Material.Ripple;assembly=Material.Ripple\"", xaml, StringComparison.Ordinal);
+        XDocument.Parse(xaml);
+    }
+
+    [Fact]
+    public void CreateCustomControlThemeCommand_IsolatesExternalSourceTemplatesFromRuntimePreview()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            EnableAutoRun = true
+        };
+        var source = CreateMaterialLikeThemeSource();
+        var catalog = new FluentControlThemeCatalog(source);
+        var catalogField = typeof(MainViewModel).GetField(
+            "_controlThemeCatalog",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(catalogField);
+        catalogField.SetValue(viewModel, catalog);
+        var loadTemplates = typeof(MainViewModel).GetMethod(
+            "LoadFluentControlThemeTemplates",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(loadTemplates);
+        loadTemplates.Invoke(viewModel, null);
+        viewModel.SelectedFluentControlThemeTemplate = Assert.Single(
+            viewModel.FluentControlThemeTemplates,
+            template => template.Key == "MaterialCheckBox");
+
+        Assert.True(viewModel.CreateCustomControlThemeCommand.CanExecute(null));
+        viewModel.CreateCustomControlThemeCommand.Execute(null);
+
+        var themeFile = viewModel.ActiveProject!.FindFile("Themes/MyCheckBoxTheme1.axaml");
+        Assert.NotNull(themeFile);
+        Assert.False(themeFile.IncludeInRuntimePreview);
+        Assert.Contains("xmlns:assists=\"clr-namespace:Material.Styles.Assists\"", themeFile.Text, StringComparison.Ordinal);
+        Assert.Contains("xmlns:ripple=\"clr-namespace:Material.Ripple;assembly=Material.Ripple\"", themeFile.Text, StringComparison.Ordinal);
+        Assert.Same(themeFile, viewModel.ActiveXamlFile);
+        Assert.Contains(viewModel.ControlThemes, theme => theme.Key == "MyCheckBoxTheme1");
+        Assert.Contains("isolated", viewModel.ControlThemeStatus, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ThemeProjectSourceLoader_RejectsNonHttpsRepositoryUrls()
     {
         await Assert.ThrowsAsync<InvalidDataException>(
@@ -2233,6 +2299,36 @@ public sealed class MainViewModelTests
             </ResourceDictionary>
             """);
         return root;
+    }
+
+    private static ThemeProjectSource CreateMaterialLikeThemeSource()
+    {
+        var project = ThemeProjectStorage.CreateDocument(
+            "MaterialLike",
+            new[]
+            {
+                (
+                    "Material.Styles/Resources/Themes/CheckBox.axaml",
+                    """
+                    <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                        xmlns:assists="clr-namespace:Material.Styles.Assists"
+                                        xmlns:ripple="clr-namespace:Material.Ripple;assembly=Material.Ripple">
+                      <ControlTheme x:Key="MaterialCheckBox" TargetType="CheckBox">
+                        <Setter Property="assists:SelectionControlAssist.Size" Value="24" />
+                        <Setter Property="Template">
+                          <ControlTemplate>
+                            <ripple:RippleEffect />
+                          </ControlTemplate>
+                        </Setter>
+                      </ControlTheme>
+                      <ControlTheme x:Key="{x:Type CheckBox}" TargetType="CheckBox"
+                                    BasedOn="{StaticResource MaterialCheckBox}" />
+                    </ResourceDictionary>
+                    """)
+            });
+
+        return new ThemeProjectSource(project, "Material-like source", SourceRoot: null);
     }
 
     private static void PumpLayout(Window window)

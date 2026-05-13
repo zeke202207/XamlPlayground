@@ -53,11 +53,17 @@ public sealed class FluentControlThemeCatalog
     public FluentControlThemeTemplate? FindDefaultTemplate(string targetType)
     {
         var localTargetType = GetLocalName(targetType);
-        return Templates.FirstOrDefault(template =>
-                   string.Equals(GetLocalName(template.TargetType), localTargetType, StringComparison.Ordinal) &&
-                   string.Equals(template.Key, $"{{x:Type {localTargetType}}}", StringComparison.Ordinal)) ??
-               Templates.FirstOrDefault(template =>
-                   string.Equals(GetLocalName(template.TargetType), localTargetType, StringComparison.Ordinal));
+        var targetTemplates = Templates
+            .Where(template => string.Equals(GetLocalName(template.TargetType), localTargetType, StringComparison.Ordinal))
+            .ToArray();
+        var defaultKey = $"{{x:Type {localTargetType}}}";
+
+        return targetTemplates.FirstOrDefault(template =>
+                   string.Equals(template.Key, defaultKey, StringComparison.Ordinal) &&
+                   DefinesControlTemplate(template.Xaml)) ??
+               targetTemplates.FirstOrDefault(template => DefinesControlTemplate(template.Xaml)) ??
+               targetTemplates.FirstOrDefault(template => string.Equals(template.Key, defaultKey, StringComparison.Ordinal)) ??
+               targetTemplates.FirstOrDefault();
     }
 
     private IReadOnlyList<FluentControlThemeTemplate> LoadTemplates()
@@ -94,7 +100,7 @@ public sealed class FluentControlThemeCatalog
                 key,
                 targetType,
                 file.Path,
-                theme.ToString(SaveOptions.DisableFormatting));
+                SerializeThemeWithNamespaces(theme));
         }
     }
 
@@ -102,6 +108,40 @@ public sealed class FluentControlThemeCatalog
     {
         return path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) ||
                path.EndsWith(".axaml", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool DefinesControlTemplate(string xaml)
+    {
+        try
+        {
+            var document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace);
+            return document
+                .Descendants()
+                .Any(static element =>
+                    element.Name.LocalName == "Setter" &&
+                    string.Equals(element.Attribute("Property")?.Value, "Template", StringComparison.Ordinal));
+        }
+        catch
+        {
+            return xaml.Contains("Property=\"Template\"", StringComparison.Ordinal) ||
+                   xaml.Contains("Property='Template'", StringComparison.Ordinal);
+        }
+    }
+
+    private static string SerializeThemeWithNamespaces(XElement theme)
+    {
+        var clone = new XElement(theme);
+        foreach (var declaration in theme
+                     .AncestorsAndSelf()
+                     .Reverse()
+                     .SelectMany(static element => element
+                         .Attributes()
+                         .Where(static attribute => attribute.IsNamespaceDeclaration)))
+        {
+            clone.SetAttributeValue(declaration.Name, declaration.Value);
+        }
+
+        return clone.ToString(SaveOptions.DisableFormatting);
     }
 
     internal static string GetLocalName(string typeName)
