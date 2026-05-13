@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Reflection.PortableExecutable;
 using System.Runtime.Loader;
@@ -125,47 +123,6 @@ public sealed class WorkspaceAssemblyReference
         {
             return null;
         }
-    }
-
-    public static IReadOnlyList<Assembly> LoadRuntimeAssemblies(
-        IEnumerable<WorkspaceAssemblyReference> references,
-        string? skipAssemblyName = null)
-    {
-        var loadedAssemblies = new List<Assembly>();
-        foreach (var reference in references
-                     .Where(static reference => reference.IsRuntimeAssembly)
-                     .DistinctBy(static reference => reference.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            if (!string.IsNullOrWhiteSpace(skipAssemblyName) &&
-                string.Equals(reference.Name, skipAssemblyName, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (reference.LoadAssembly(AssemblyLoadContext.Default) is { } assembly)
-            {
-                loadedAssemblies.Add(assembly);
-            }
-        }
-
-        return loadedAssemblies;
-    }
-
-    public static Assembly? ResolveAssembly(
-        IEnumerable<WorkspaceAssemblyReference> references,
-        AssemblyLoadContext context,
-        AssemblyName assemblyName)
-    {
-        var name = assemblyName.Name;
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return null;
-        }
-
-        return references
-            .Where(static reference => reference.IsRuntimeAssembly)
-            .FirstOrDefault(reference => string.Equals(reference.Name, name, StringComparison.OrdinalIgnoreCase))
-            ?.LoadAssembly(context);
     }
 
     public static bool IsReferenceAssemblyPath(string assemblyPath)

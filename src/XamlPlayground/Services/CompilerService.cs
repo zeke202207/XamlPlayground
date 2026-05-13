@@ -271,11 +271,12 @@ public static class CompilerService
 
         ms.Seek(0, SeekOrigin.Begin);
 
-        var context = new AssemblyLoadContext(name: Path.GetRandomFileName(), isCollectible: true);
-        context.Resolving += (_, name) => WorkspaceAssemblyReference.ResolveAssembly(workspaceReferenceList, context, name);
-        var assembly = context.LoadFromStream(ms);
-        var loadedAssemblies = WorkspaceAssemblyReference.LoadRuntimeAssemblies(
+        var context = new WorkspaceAssemblyLoadContext(
+            Path.GetRandomFileName(),
             workspaceReferenceList,
+            privateAssemblyNames: string.IsNullOrWhiteSpace(assemblyName) ? null : new[] { assemblyName });
+        var assembly = context.LoadFromStream(ms);
+        var loadedAssemblies = context.LoadRuntimeAssemblies(
             string.IsNullOrWhiteSpace(assemblyName) ? null : assemblyName);
 
         return new ScriptCompilationResult(assembly, context, result.Diagnostics, loadedAssemblies);

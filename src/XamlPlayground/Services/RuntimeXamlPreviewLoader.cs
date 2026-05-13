@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Avalonia;
@@ -14,13 +15,16 @@ namespace XamlPlayground.Services;
 
 public static class RuntimeXamlPreviewLoader
 {
+    private const string PreviewAssemblyName = "XamlPlayground.Preview";
     private static readonly object s_resourceLock = new();
     private static readonly List<IResourceProvider> s_projectPreviewResources = new();
 
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "The playground runtime preview intentionally loads user XAML and dynamically compiled user code.")]
     public static void ApplyProjectResources(
         IEnumerable<(string Path, string Text)> resourceFiles,
         Assembly? localAssembly,
-        ICollection<RuntimeXamlDiagnostic> diagnostics)
+        ICollection<RuntimeXamlDiagnostic> diagnostics,
+        string? documentAssemblyName = null)
     {
         lock (s_resourceLock)
         {
@@ -31,23 +35,17 @@ public static class RuntimeXamlPreviewLoader
                 return;
             }
 
-            foreach (var resourceFile in OrderResourceFilesForLoading(resourceFiles))
+            var documents = CreateResourceDocuments(resourceFiles, localAssembly, documentAssemblyName);
+            if (documents.Count == 0)
             {
-                if (string.IsNullOrWhiteSpace(resourceFile.Text))
-                {
-                    continue;
-                }
+                return;
+            }
 
-                var document = new RuntimeXamlLoaderDocument(RemoveDesignPreviewContent(resourceFile.Text))
-                {
-                    Document = resourceFile.Path
-                };
-                var configuration = CreateConfiguration(localAssembly, diagnostics);
-                if (AvaloniaRuntimeXamlLoader.Load(document, configuration) is not IResourceProvider resourceProvider)
-                {
-                    continue;
-                }
-
+            var configuration = CreateConfiguration(localAssembly, diagnostics);
+            using var contextualReflection = EnterContextualReflection(localAssembly);
+            foreach (var resourceProvider in AvaloniaRuntimeXamlLoader.LoadGroup(documents, configuration)
+                         .OfType<IResourceProvider>())
+            {
                 resources.MergedDictionaries.Add(resourceProvider);
                 s_projectPreviewResources.Add(resourceProvider);
             }
@@ -149,7 +147,9 @@ public static class RuntimeXamlPreviewLoader
         Assembly? localAssembly,
         string? fallbackRootTypeName,
         string documentName,
-        ICollection<RuntimeXamlDiagnostic> diagnostics)
+        ICollection<RuntimeXamlDiagnostic> diagnostics,
+        IEnumerable<(string Path, string Text)>? resourceFiles = null,
+        string? documentAssemblyName = null)
     {
         object? rootInstance = null;
 
@@ -162,12 +162,19 @@ public static class RuntimeXamlPreviewLoader
             }
         }
 
-        var document = new RuntimeXamlLoaderDocument(rootInstance, xaml)
-        {
-            Document = string.IsNullOrWhiteSpace(documentName) ? "Main.axaml" : documentName
-        };
+        var document = CreateDocument(xaml, documentName, localAssembly, documentAssemblyName, rootInstance);
 
         var configuration = CreateConfiguration(localAssembly, diagnostics);
+        using var contextualReflection = EnterContextualReflection(localAssembly);
+        if (resourceFiles is not null)
+        {
+            var documents = CreateResourceDocuments(resourceFiles, localAssembly, documentAssemblyName, document.Document);
+            if (documents.Count > 0)
+            {
+                documents.Add(document);
+                return AvaloniaRuntimeXamlLoader.LoadGroup(documents, configuration).LastOrDefault() as Control;
+            }
+        }
 
         return AvaloniaRuntimeXamlLoader.Load(document, configuration) as Control;
     }
@@ -177,7 +184,9 @@ public static class RuntimeXamlPreviewLoader
         string xaml,
         Assembly? localAssembly,
         string documentName,
-        ICollection<RuntimeXamlDiagnostic> diagnostics)
+        ICollection<RuntimeXamlDiagnostic> diagnostics,
+        IEnumerable<(string Path, string Text)>? resourceFiles = null,
+        string? documentAssemblyName = null)
     {
         var previewContent = ExtractDesignPreviewContent(xaml);
         var previewXaml = string.IsNullOrWhiteSpace(previewContent)
@@ -188,8 +197,10 @@ public static class RuntimeXamlPreviewLoader
             previewXaml,
             localAssembly,
             fallbackRootTypeName: null,
-            documentName: documentName,
-            diagnostics: diagnostics);
+            documentName: CreatePreviewDocumentName(documentName),
+            diagnostics: diagnostics,
+            resourceFiles: resourceFiles,
+            documentAssemblyName: documentAssemblyName);
     }
 
     private static RuntimeXamlLoaderConfiguration CreateConfiguration(
@@ -206,6 +217,100 @@ public static class RuntimeXamlPreviewLoader
                 return diagnostic.Severity;
             }
         };
+    }
+
+    private static IDisposable? EnterContextualReflection(Assembly? localAssembly)
+    {
+        if (localAssembly is null)
+        {
+            return null;
+        }
+
+        var context = AssemblyLoadContext.GetLoadContext(localAssembly);
+        return context is null || ReferenceEquals(context, AssemblyLoadContext.Default)
+            ? null
+            : context.EnterContextualReflection();
+    }
+
+    private static List<RuntimeXamlLoaderDocument> CreateResourceDocuments(
+        IEnumerable<(string Path, string Text)> resourceFiles,
+        Assembly? localAssembly,
+        string? documentAssemblyName,
+        string? excludeDocumentName = null)
+    {
+        var excludePath = string.IsNullOrWhiteSpace(excludeDocumentName)
+            ? null
+            : NormalizeDocumentPath(excludeDocumentName);
+        return OrderResourceFilesForLoading(resourceFiles)
+            .Where(static file => !string.IsNullOrWhiteSpace(file.Text))
+            .Where(file => excludePath is null ||
+                           !string.Equals(NormalizeDocumentPath(file.Path), excludePath, StringComparison.OrdinalIgnoreCase))
+            .Select(file => CreateDocument(
+                RemoveDesignPreviewContent(file.Text),
+                file.Path,
+                localAssembly,
+                documentAssemblyName))
+            .ToList();
+    }
+
+    private static RuntimeXamlLoaderDocument CreateDocument(
+        string xaml,
+        string documentName,
+        Assembly? localAssembly,
+        string? documentAssemblyName,
+        object? rootInstance = null)
+    {
+        var normalizedDocumentName = NormalizeDocumentPath(documentName);
+        var document = new RuntimeXamlLoaderDocument(
+            CreateDocumentUri(normalizedDocumentName, localAssembly, documentAssemblyName),
+            rootInstance,
+            xaml)
+        {
+            Document = normalizedDocumentName
+        };
+        return document;
+    }
+
+    private static Uri CreateDocumentUri(
+        string documentName,
+        Assembly? localAssembly,
+        string? documentAssemblyName)
+    {
+        var assemblyName = string.IsNullOrWhiteSpace(documentAssemblyName)
+            ? localAssembly?.GetName().Name
+            : documentAssemblyName;
+        if (string.IsNullOrWhiteSpace(assemblyName))
+        {
+            assemblyName = PreviewAssemblyName;
+        }
+
+        return new Uri(
+            $"avares://{Uri.EscapeDataString(assemblyName)}/{EscapeDocumentPath(documentName)}",
+            UriKind.Absolute);
+    }
+
+    private static string NormalizeDocumentPath(string documentName)
+    {
+        var path = documentName.Replace('\\', '/').Trim('/');
+        return string.IsNullOrWhiteSpace(path) ? "Main.axaml" : path;
+    }
+
+    private static string EscapeDocumentPath(string documentName)
+    {
+        return string.Join(
+            "/",
+            NormalizeDocumentPath(documentName)
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Select(Uri.EscapeDataString));
+    }
+
+    private static string CreatePreviewDocumentName(string documentName)
+    {
+        var path = NormalizeDocumentPath(documentName);
+        var separator = path.LastIndexOf('/');
+        var folder = separator >= 0 ? path[..(separator + 1)] : string.Empty;
+        var name = separator >= 0 ? path[(separator + 1)..] : path;
+        return folder + name + ".preview.axaml";
     }
 
     private static void ClearProjectResources()

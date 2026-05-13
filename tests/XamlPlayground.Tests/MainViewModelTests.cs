@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Diagnostics;
@@ -653,6 +654,64 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void MsBuildWorkspaceLoader_ExcludesSiblingProjectFoldersFromRootStorageProject()
+    {
+        var excludeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "GetExcludedStorageProjectFolders",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        var scopeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsStorageProjectFileInScope",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(excludeMethod);
+        Assert.NotNull(scopeMethod);
+
+        var excludedFolders = Assert.IsAssignableFrom<IEnumerable<string>>(excludeMethod.Invoke(
+            null,
+            new object[] { string.Empty, new[] { string.Empty, "Lib", "Samples/Controls" } }));
+        var excluded = excludedFolders.ToArray();
+
+        Assert.Contains("Lib", excluded);
+        Assert.Contains("Samples/Controls", excluded);
+        Assert.True((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "App.axaml", excluded })!);
+        Assert.True((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "ViewModels/AppViewModel.cs", excluded })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "Lib/LibView.axaml", excluded })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "Samples/Controls/Demo.cs", excluded })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "Lib/bin/Debug/net10.0/Lib.dll", excluded })!);
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_AllowsNestedProjectToExcludeItsChildProjectsOnly()
+    {
+        var excludeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "GetExcludedStorageProjectFolders",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        var scopeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsStorageProjectFileInScope",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(excludeMethod);
+        Assert.NotNull(scopeMethod);
+
+        var parentExcluded = Assert.IsAssignableFrom<IEnumerable<string>>(excludeMethod.Invoke(
+            null,
+            new object[] { "src/App", new[] { string.Empty, "src/App", "src/App/Plugin", "src/Lib" } }));
+        var parentExcludedArray = parentExcluded.ToArray();
+        var childExcluded = Assert.IsAssignableFrom<IEnumerable<string>>(excludeMethod.Invoke(
+            null,
+            new object[] { "src/App/Plugin", new[] { string.Empty, "src/App", "src/App/Plugin", "src/Lib" } }));
+        var childExcludedArray = childExcluded.ToArray();
+
+        Assert.Contains("src/App/Plugin", parentExcludedArray);
+        Assert.Contains("src/Lib", parentExcludedArray);
+        Assert.True((bool)scopeMethod.Invoke(null, new object[] { "src/App", "src/App/MainView.axaml", parentExcludedArray })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { "src/App", "src/App/Plugin/PluginView.axaml", parentExcludedArray })!);
+
+        Assert.DoesNotContain("src/App", childExcludedArray);
+        Assert.Contains("src/Lib", childExcludedArray);
+        Assert.True((bool)scopeMethod.Invoke(null, new object[] { "src/App/Plugin", "src/App/Plugin/PluginView.axaml", childExcludedArray })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { "src/App/Plugin", "src/App/MainView.axaml", childExcludedArray })!);
+    }
+
+    [Fact]
     public void MsBuildWorkspaceLoader_ResolvesNestedStorageSolutionProjectPaths()
     {
         var method = typeof(MsBuildWorkspaceLoader).GetMethod(
@@ -778,6 +837,45 @@ public sealed class MainViewModelTests
 
         Assert.Same(appProject, viewModel.ActiveProject);
         Assert.Same(xamlFile, viewModel.ActiveXamlFile);
+    }
+
+    [Fact]
+    public void LoadSolution_CollapsesSolutionExplorerBelowRootChildren()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var appProject = new InMemoryProject("App", "App", "msbuild");
+        appProject.AddFile(new InMemoryProjectFile(
+            "App.axaml",
+            "<Application xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        appProject.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        appProject.AddFile(new InMemoryProjectFile(
+            "Views/Nested/DetailsView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        solution.Projects.Add(appProject);
+        var viewModel = new MainViewModel(null);
+        var method = typeof(MainViewModel).GetMethod(
+            "LoadSolution",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        method.Invoke(viewModel, new object[] { solution });
+
+        var solutionNode = Assert.Single(viewModel.SolutionExplorerNodes);
+        var projectNode = Assert.Single(solutionNode.Children);
+        var viewsNode = Assert.Single(projectNode.Children, static node => node.Title == "Views");
+        var nestedNode = Assert.Single(viewsNode.Children, static node => node.Title == "Nested");
+
+        Assert.True(solutionNode.IsExpanded);
+        Assert.True(projectNode.IsExpanded);
+        Assert.False(viewsNode.IsExpanded);
+        Assert.False(nestedNode.IsExpanded);
     }
 
     [Fact]
@@ -949,6 +1047,172 @@ public sealed class MainViewModelTests
         Assert.True(
             result.Success,
             string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+    }
+
+    [Fact]
+    public async Task CompilerService_LoadsWorkspaceRuntimeReferencesInIsolatedContext()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var dependencyName = "WorkspaceDependency" + Guid.NewGuid().ToString("N");
+        var consumerName = "WorkspaceConsumer" + Guid.NewGuid().ToString("N");
+        var dependencyImage = CompileTestAssemblyImage(
+            dependencyName,
+            """
+            namespace WorkspaceDependency;
+
+            public sealed class WorkspaceDependencyType
+            {
+                public string Value { get; } = "Isolated";
+            }
+            """);
+        var dependencyReference = WorkspaceAssemblyReference.FromImage(
+            dependencyName + ".dll",
+            dependencyImage,
+            isRuntimeAssembly: true);
+        Assert.NotNull(dependencyReference);
+
+        var result = await CompilerService.GetProjectAssembly(
+            consumerName,
+            new[]
+            {
+                (Path: "Consumer.cs", Text: """
+                    using WorkspaceDependency;
+
+                    public sealed class WorkspaceConsumerType
+                    {
+                        public WorkspaceDependencyType Dependency { get; } = new();
+                    }
+                    """)
+            },
+            new[] { dependencyReference },
+            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp12),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+        Assert.NotNull(result.Context);
+        Assert.NotSame(AssemblyLoadContext.Default, result.Context);
+
+        var dependencyAssembly = Assert.Single(
+            result.LoadedAssemblies,
+            assembly => string.Equals(assembly.GetName().Name, dependencyName, StringComparison.Ordinal));
+        Assert.Same(result.Context, AssemblyLoadContext.GetLoadContext(dependencyAssembly));
+        Assert.DoesNotContain(AssemblyLoadContext.Default.Assemblies, assembly =>
+            string.Equals(assembly.GetName().Name, dependencyName, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WorkspaceAssemblyLoadContext_SharesAvaloniaAssembliesWithHost()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var avaloniaControlsReference = WorkspaceAssemblyReference.FromPath(
+            typeof(Control).Assembly.Location,
+            isRuntimeAssembly: true);
+        Assert.NotNull(avaloniaControlsReference);
+        var context = new WorkspaceAssemblyLoadContext(
+            "WorkspaceIsolationTest",
+            new[] { avaloniaControlsReference });
+
+        var loadedAssembly = context.LoadAssemblyReference(avaloniaControlsReference);
+
+        Assert.Same(typeof(Control).Assembly, loadedAssembly);
+        context.Unload();
+    }
+
+    [Fact]
+    public void WorkspaceAssemblyLoadContext_DoesNotShareAvaloniaNamedPrivateAssembliesWithHost()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var hostDataGridAssembly = typeof(DataGrid).Assembly;
+        Assert.Equal("Avalonia.Controls.DataGrid", hostDataGridAssembly.GetName().Name);
+        Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(hostDataGridAssembly));
+
+        var workspaceImage = CompileVersionedPreviewDependencyImage(
+            "Avalonia.Controls.DataGrid",
+            "42.0.0.0",
+            "Workspace private DataGrid dependency");
+        var workspaceReference = WorkspaceAssemblyReference.FromImage(
+            "Avalonia.Controls.DataGrid.dll",
+            workspaceImage,
+            isRuntimeAssembly: true);
+        Assert.NotNull(workspaceReference);
+        var context = new WorkspaceAssemblyLoadContext(
+            "WorkspaceIsolationTest",
+            new[] { workspaceReference });
+
+        var loadedAssembly = context.LoadAssemblyReference(workspaceReference);
+
+        Assert.NotNull(loadedAssembly);
+        Assert.NotSame(hostDataGridAssembly, loadedAssembly);
+        Assert.Equal("Avalonia.Controls.DataGrid", loadedAssembly.GetName().Name);
+        Assert.Equal(new Version(42, 0, 0, 0), loadedAssembly.GetName().Version);
+        Assert.Same(context, AssemblyLoadContext.GetLoadContext(loadedAssembly));
+        context.Unload();
+    }
+
+    [Fact]
+    public async Task RuntimePreview_LoadsDifferentAvaloniaNamedDependencyVersionsPerProjectAndUpdatesDevToolsRoot()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var hostDataGridAssembly = typeof(DataGrid).Assembly;
+        Assert.Equal("Avalonia.Controls.DataGrid", hostDataGridAssembly.GetName().Name);
+        Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(hostDataGridAssembly));
+
+        var firstProject = CreateVersionedPreviewProject(
+            "WorkspacePreviewOne",
+            "Project one dependency",
+            "10.0.0.0");
+        var secondProject = CreateVersionedPreviewProject(
+            "WorkspacePreviewTwo",
+            "Project two dependency",
+            "20.0.0.0");
+        var firstResult = await CompileVersionedPreviewProjectAsync(firstProject);
+        var secondResult = await CompileVersionedPreviewProjectAsync(secondProject);
+
+        try
+        {
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                var solution = new InMemorySolution("WorkspaceIsolationIntegration");
+                solution.Projects.Add(firstProject.Project);
+                solution.Projects.Add(secondProject.Project);
+                var viewModel = new MainViewModel(null)
+                {
+                    EnableAutoRun = false
+                };
+                LoadSolutionIntoViewModel(viewModel, solution);
+
+                ActivateWorkspaceFile(viewModel, firstProject.XamlFile);
+                ShowPreviewForDevTools(viewModel, LoadVersionedPreviewControl(firstProject, firstResult));
+                var firstAssembly = AssertPreviewAndDevToolsAccess(
+                    viewModel,
+                    firstProject.ExpectedText,
+                    firstProject.ExpectedVersion);
+
+                ActivateWorkspaceFile(viewModel, secondProject.XamlFile);
+                ShowPreviewForDevTools(viewModel, LoadVersionedPreviewControl(secondProject, secondResult));
+                var secondAssembly = AssertPreviewAndDevToolsAccess(
+                    viewModel,
+                    secondProject.ExpectedText,
+                    secondProject.ExpectedVersion);
+
+                Assert.NotSame(firstAssembly, secondAssembly);
+                Assert.NotSame(
+                    AssemblyLoadContext.GetLoadContext(firstAssembly),
+                    AssemblyLoadContext.GetLoadContext(secondAssembly));
+                Assert.Same(hostDataGridAssembly, typeof(DataGrid).Assembly);
+            });
+        }
+        finally
+        {
+            firstResult.Context?.Unload();
+            secondResult.Context?.Unload();
+        }
     }
 
     [Fact]
@@ -2410,6 +2674,95 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ProjectResources_LoadRelativeMergeResourceIncludesWithDocumentUri()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            const string paletteXaml = """
+                                       <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                           xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                         <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+                                       </ResourceDictionary>
+                                       """;
+            const string resourcesXaml = """
+                                         <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                           <ResourceDictionary.MergedDictionaries>
+                                             <MergeResourceInclude Source="Palette.axaml" />
+                                           </ResourceDictionary.MergedDictionaries>
+                                         </ResourceDictionary>
+                                         """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+            try
+            {
+                RuntimeXamlPreviewLoader.ApplyProjectResources(
+                    new[]
+                    {
+                        ("Themes/Resources.axaml", resourcesXaml),
+                        ("Themes/Palette.axaml", paletteXaml)
+                    },
+                    localAssembly: null,
+                    diagnostics,
+                    documentAssemblyName: "DemoApp");
+
+                Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+            }
+            finally
+            {
+                RuntimeXamlPreviewLoader.ApplyProjectResources(
+                    Array.Empty<(string Path, string Text)>(),
+                    localAssembly: null,
+                    new List<RuntimeXamlDiagnostic>());
+            }
+        });
+    }
+
+    [Fact]
+    public void RuntimePreview_LoadsControlWithRelativeResourceIncludeFromWorkspaceResources()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            const string colorsXaml = """
+                                      <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                        <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+                                      </ResourceDictionary>
+                                      """;
+            const string viewXaml = """
+                                    <UserControl xmlns="https://github.com/avaloniaui"
+                                                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                      <UserControl.Resources>
+                                        <ResourceDictionary>
+                                          <ResourceDictionary.MergedDictionaries>
+                                            <ResourceInclude Source="Resources/Colors.axaml" />
+                                          </ResourceDictionary.MergedDictionaries>
+                                        </ResourceDictionary>
+                                      </UserControl.Resources>
+                                      <Border Name="RootBorder" Background="{StaticResource AccentBrush}" />
+                                    </UserControl>
+                                    """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+            var preview = RuntimeXamlPreviewLoader.LoadControl(
+                viewXaml,
+                localAssembly: null,
+                fallbackRootTypeName: null,
+                documentName: "Views/MainView.axaml",
+                diagnostics,
+                resourceFiles: new[] { ("Views/Resources/Colors.axaml", colorsXaml) },
+                documentAssemblyName: "DemoApp");
+
+            Assert.NotNull(preview);
+            Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+        });
+    }
+
+    [Fact]
     public void CreateCustomControlThemeCommand_CreatesThemeFromSelectedFluentTemplateWithoutPreviewSelection()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -3148,6 +3501,193 @@ public sealed class MainViewModelTests
         return new ThemeProjectSource(project, "Material-like source", SourceRoot: null);
     }
 
+    private static VersionedPreviewProject CreateVersionedPreviewProject(
+        string projectName,
+        string expectedText,
+        string dependencyVersion)
+    {
+        var dependencyImage = CompileVersionedPreviewDependencyImage(
+            "Avalonia.Controls.DataGrid",
+            dependencyVersion,
+            expectedText);
+        var dependencyReference = WorkspaceAssemblyReference.FromImage(
+            "Avalonia.Controls.DataGrid.dll",
+            dependencyImage,
+            isRuntimeAssembly: true);
+        Assert.NotNull(dependencyReference);
+
+        var project = new InMemoryProject(projectName, projectName, "integration")
+        {
+            AssemblyName = projectName,
+            CSharpParseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp12),
+            CSharpCompilationOptions = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        };
+        project.AssemblyReferences.Add(dependencyReference);
+        var xamlFile = project.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            """
+            <UserControl xmlns="https://github.com/avaloniaui"
+                         xmlns:collision="clr-namespace:WorkspaceCollisionControls;assembly=Avalonia.Controls.DataGrid">
+              <collision:VersionedTextBlock />
+            </UserControl>
+            """,
+            ProjectFileKind.Xaml));
+        project.AddFile(new InMemoryProjectFile(
+            "PreviewReference.cs",
+            """
+            using WorkspaceCollisionControls;
+
+            namespace WorkspacePreview;
+
+            public static class PreviewReference
+            {
+                public static string Text => VersionedTextBlock.VersionText;
+            }
+            """,
+            ProjectFileKind.CSharp));
+
+        return new VersionedPreviewProject(
+            project,
+            xamlFile,
+            expectedText,
+            Version.Parse(dependencyVersion));
+    }
+
+    private static byte[] CompileVersionedPreviewDependencyImage(
+        string assemblyName,
+        string version,
+        string text)
+    {
+        var escapedText = text.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+        return CompileTestAssemblyImage(
+            assemblyName,
+            $$"""
+            using System.Reflection;
+            using Avalonia.Controls;
+
+            [assembly: AssemblyVersion("{{version}}")]
+
+            namespace WorkspaceCollisionControls;
+
+            public sealed class VersionedTextBlock : TextBlock
+            {
+                public VersionedTextBlock()
+                {
+                    Text = VersionText;
+                }
+
+                public static string VersionText => "{{escapedText}}";
+            }
+            """,
+            new[]
+            {
+                MetadataReference.CreateFromFile(typeof(Control).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(AvaloniaObject).Assembly.Location)
+            });
+    }
+
+    private static void LoadSolutionIntoViewModel(MainViewModel viewModel, InMemorySolution solution)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "LoadSolution",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method.Invoke(viewModel, new object[] { solution });
+    }
+
+    private static void ActivateWorkspaceFile(MainViewModel viewModel, InMemoryProjectFile file)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "ActivateWorkspaceFileFromDocument",
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(method);
+        method.Invoke(viewModel, new object[] { file });
+    }
+
+    private static async Task<ScriptCompilationResult> CompileVersionedPreviewProjectAsync(
+        VersionedPreviewProject project)
+    {
+        var result = await CompilerService.GetProjectAssembly(
+            project.Project.AssemblyName,
+            project.Project.GetCSharpFileSnapshot(),
+            project.Project.AssemblyReferences,
+            project.Project.CSharpParseOptions,
+            project.Project.CSharpCompilationOptions);
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+        Assert.NotNull(result.Assembly);
+        Assert.Contains(result.LoadedAssemblies, assembly =>
+            string.Equals(assembly.GetName().Name, "Avalonia.Controls.DataGrid", StringComparison.Ordinal) &&
+            assembly.GetName().Version == project.ExpectedVersion);
+        return result;
+    }
+
+    private static Control LoadVersionedPreviewControl(
+        VersionedPreviewProject project,
+        ScriptCompilationResult compilation)
+    {
+        var diagnostics = new List<RuntimeXamlDiagnostic>();
+        var control = RuntimeXamlPreviewLoader.LoadControl(
+            project.XamlFile.Text,
+            compilation.Assembly,
+            fallbackRootTypeName: null,
+            documentName: project.XamlFile.Path,
+            diagnostics: diagnostics,
+            documentAssemblyName: project.Project.AssemblyName);
+
+        Assert.NotNull(control);
+        Assert.DoesNotContain(diagnostics, static diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+        return control;
+    }
+
+    private static void ShowPreviewForDevTools(MainViewModel viewModel, Control control)
+    {
+        var root = new Border
+        {
+            Name = "GeneratedSampleScope",
+            Child = control
+        };
+        viewModel.Control = root;
+        viewModel.DiagnosticsRoot = root;
+    }
+
+    private static Assembly AssertPreviewAndDevToolsAccess(
+        MainViewModel viewModel,
+        string expectedText,
+        Version expectedVersion)
+    {
+        var root = Assert.IsType<Border>(viewModel.DiagnosticsRoot);
+        Assert.Same(root, viewModel.Control);
+        var preview = Assert.IsType<UserControl>(root.Child);
+        var versionedTextBlock = Assert.IsAssignableFrom<TextBlock>(preview.Content);
+        Assert.Equal(expectedText, versionedTextBlock.Text);
+
+        var previewAssembly = versionedTextBlock.GetType().Assembly;
+        Assert.Equal("Avalonia.Controls.DataGrid", previewAssembly.GetName().Name);
+        Assert.Equal(expectedVersion, previewAssembly.GetName().Version);
+        var previewContext = AssemblyLoadContext.GetLoadContext(previewAssembly);
+        Assert.NotNull(previewContext);
+        Assert.NotSame(AssemblyLoadContext.Default, previewContext);
+
+        var rootDock = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        var diagnosticTreeTools = Enumerate(rootDock).OfType<DiagnosticTreeDockViewModel>().ToArray();
+        Assert.NotEmpty(diagnosticTreeTools);
+        Assert.All(diagnosticTreeTools, tool =>
+        {
+            Assert.Same(root, tool.Session.Root);
+            Assert.All(
+                Enumerate(tool.DockLayout).OfType<DiagnosticSegmentDockViewModel>(),
+                segment => Assert.Same(root, segment.Session.Root));
+        });
+
+        var diagnosticTools = Enumerate(rootDock).OfType<DiagnosticToolDockViewModel>().ToArray();
+        Assert.NotEmpty(diagnosticTools);
+        Assert.All(diagnosticTools, tool => Assert.Same(root, tool.Shell.DiagnosticsRoot));
+
+        return previewAssembly;
+    }
+
     private static void PumpLayout(Window window)
     {
         Dispatcher.UIThread.RunJobs(DispatcherPriority.Loaded);
@@ -3339,6 +3879,44 @@ public sealed class MainViewModelTests
         Assert.NotNull(path);
         return path;
     }
+
+    private static byte[] CompileTestAssemblyImage(
+        string assemblyName,
+        string code,
+        IEnumerable<MetadataReference>? additionalReferences = null)
+    {
+        var syntaxTree = SyntaxFactory.ParseSyntaxTree(
+            code,
+            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp12),
+            assemblyName + ".cs");
+        var references = new List<MetadataReference>
+        {
+            MetadataReference.CreateFromFile(GetNetCoreReferenceAssemblyPath("System.Runtime"))
+        };
+        if (additionalReferences is not null)
+        {
+            references.AddRange(additionalReferences);
+        }
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName,
+            new[] { syntaxTree },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        using var stream = new MemoryStream();
+        var result = compilation.Emit(stream);
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+        return stream.ToArray();
+    }
+
+    private sealed record VersionedPreviewProject(
+        InMemoryProject Project,
+        InMemoryProjectFile XamlFile,
+        string ExpectedText,
+        Version ExpectedVersion);
 }
 
 public static class RuntimePreviewDesignData

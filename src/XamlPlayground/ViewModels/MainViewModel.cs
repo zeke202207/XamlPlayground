@@ -69,7 +69,7 @@ public partial class MainViewModel : ViewModelBase
     private bool _update;
     private bool _rerunRequested;
     private bool _openingSample;
-    private (Assembly? Assembly, AssemblyLoadContext? Context)? _previous;
+    private WorkspacePreviewAssemblyScope? _previous;
     private IStorageFile? _openXamlFile;
     private IStorageFile? _openCodeFile;
     private ObservableCollection<SolutionExplorerNodeViewModel> _allSolutionExplorerNodes = new();
@@ -872,7 +872,23 @@ public partial class MainViewModel : ViewModelBase
             }
         }
 
+        ApplyInitialSolutionExplorerExpansion(solutionNode);
         return new ObservableCollection<SolutionExplorerNodeViewModel> { solutionNode };
+    }
+
+    private static void ApplyInitialSolutionExplorerExpansion(SolutionExplorerNodeViewModel rootNode)
+    {
+        ApplyInitialSolutionExplorerExpansion(rootNode, 0);
+    }
+
+    private static void ApplyInitialSolutionExplorerExpansion(SolutionExplorerNodeViewModel node, int depth)
+    {
+        node.IsExpanded = node.Children.Count > 0 && depth <= 1;
+
+        foreach (var child in node.Children)
+        {
+            ApplyInitialSolutionExplorerExpansion(child, depth + 1);
+        }
     }
 
     private static SolutionExplorerNodeViewModel GetProjectParentNode(
@@ -1449,6 +1465,7 @@ public partial class MainViewModel : ViewModelBase
         _update = true;
         var diagnosticsMessage = default(string);
         var xamlDiagnostics = new List<RuntimeXamlDiagnostic>();
+        WorkspacePreviewAssemblyScope? previewAssemblyScope = null;
         var xamlFile = ActiveXamlFile;
         var project = ActiveProject;
 
@@ -1498,13 +1515,6 @@ public partial class MainViewModel : ViewModelBase
 
             var codeFiles = project?.GetCSharpFileSnapshot() ?? Array.Empty<(string Path, string Text)>();
             var workspaceReferences = project?.AssemblyReferences.ToArray() ?? Array.Empty<WorkspaceAssemblyReference>();
-            var loadedRuntimeAssemblies = project is { }
-                ? WorkspaceAssemblyReference.LoadRuntimeAssemblies(workspaceReferences, project.AssemblyName)
-                : Array.Empty<Assembly>();
-            if (loadedRuntimeAssemblies.Count > 0)
-            {
-                XamlIntelliSenseService.RegisterWorkspaceAssemblies(loadedRuntimeAssemblies);
-            }
 
             if (project is { } && codeFiles.Length > 0)
             {
@@ -1520,10 +1530,13 @@ public partial class MainViewModel : ViewModelBase
 
                     if (scriptResult.Success && scriptResult.Assembly is { })
                     {
-                        _previous = new ValueTuple<Assembly?, AssemblyLoadContext?>(scriptResult.Assembly, scriptResult.Context);
                         scriptAssembly = scriptResult.Assembly;
+                        previewAssemblyScope = new WorkspacePreviewAssemblyScope(
+                            scriptResult.Assembly,
+                            scriptResult.Context,
+                            scriptResult.LoadedAssemblies);
                         XamlIntelliSenseService.RegisterWorkspaceAssemblies(
-                            scriptResult.LoadedAssemblies.Concat(new[] { scriptAssembly }).Concat(loadedRuntimeAssemblies));
+                            scriptResult.LoadedAssemblies.Concat(new[] { scriptAssembly }));
                         Console.WriteLine($"Compiled assembly: {scriptAssembly?.GetName().Name}");
                     }
                     else
@@ -1531,11 +1544,11 @@ public partial class MainViewModel : ViewModelBase
                         var fallback = await TryUseWorkspaceOutputAssemblyFallbackAsync(
                             project,
                             workspaceReferences,
-                            loadedRuntimeAssemblies,
                             diagnosticsMessage);
                         if (fallback.Success)
                         {
                             scriptAssembly = fallback.Assembly;
+                            previewAssemblyScope = fallback.AssemblyScope;
                             diagnosticsMessage = fallback.DiagnosticsMessage;
                         }
                         else
@@ -1552,11 +1565,11 @@ public partial class MainViewModel : ViewModelBase
                     var fallback = await TryUseWorkspaceOutputAssemblyFallbackAsync(
                         project,
                         workspaceReferences,
-                        loadedRuntimeAssemblies,
                         exceptionMessage);
                     if (fallback.Success)
                     {
                         scriptAssembly = fallback.Assembly;
+                        previewAssemblyScope = fallback.AssemblyScope;
                         diagnosticsMessage = fallback.DiagnosticsMessage;
                     }
                     else
@@ -1567,21 +1580,27 @@ public partial class MainViewModel : ViewModelBase
                 }
             }
             else if (project is { IsMsBuildWorkspace: true } &&
-                     TryLoadWorkspaceOutputAssembly(project, workspaceReferences, out var outputAssembly, out var outputContext))
+                     TryLoadWorkspaceOutputAssembly(project, workspaceReferences, out var outputAssembly, out var outputContext, out var loadedAssemblies))
             {
-                _previous = new ValueTuple<Assembly?, AssemblyLoadContext?>(outputAssembly, outputContext);
                 scriptAssembly = outputAssembly;
-                XamlIntelliSenseService.RegisterWorkspaceAssemblies(new[] { outputAssembly }.Concat(loadedRuntimeAssemblies));
+                previewAssemblyScope = new WorkspacePreviewAssemblyScope(outputAssembly, outputContext, loadedAssemblies);
+                XamlIntelliSenseService.RegisterWorkspaceAssemblies(new[] { outputAssembly }.Concat(loadedAssemblies));
                 Console.WriteLine($"Loaded workspace output assembly: {outputAssembly.GetName().Name}");
             }
 
+            var projectResourceFiles = project?.GetXamlFiles()
+                .Where(static file => file.Kind == ProjectFileKind.Resource && file.IncludeInRuntimePreview)
+                .Select(static file => (file.Path, file.Text))
+                .ToArray() ?? Array.Empty<(string Path, string Text)>();
+            var documentAssemblyName = project is { } && !string.IsNullOrWhiteSpace(project.AssemblyName)
+                ? project.AssemblyName
+                : null;
+
             RuntimeXamlPreviewLoader.ApplyProjectResources(
-                project?.GetXamlFiles()
-                    .Where(static file => file.Kind == ProjectFileKind.Resource && file.IncludeInRuntimePreview)
-                    .Select(static file => (file.Path, file.Text)) ??
-                Array.Empty<(string Path, string Text)>(),
+                projectResourceFiles,
                 scriptAssembly,
-                xamlDiagnostics);
+                xamlDiagnostics,
+                documentAssemblyName);
 
             if (scriptAssembly is { })
             {
@@ -1590,16 +1609,21 @@ public partial class MainViewModel : ViewModelBase
                         xamlText,
                         scriptAssembly,
                         xamlFile.Path,
-                        xamlDiagnostics)
+                        xamlDiagnostics,
+                        projectResourceFiles,
+                        documentAssemblyName)
                     : RuntimeXamlPreviewLoader.LoadControl(
                         xamlText,
                         scriptAssembly,
                         Path.GetFileNameWithoutExtension(xamlFile.Name),
                         xamlFile.Path,
-                        xamlDiagnostics);
+                        xamlDiagnostics,
+                        projectResourceFiles,
+                        documentAssemblyName);
                 if (control is { })
                 {
-                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
+                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
+                    previewAssemblyScope = null;
                 }
             }
             else
@@ -1609,16 +1633,21 @@ public partial class MainViewModel : ViewModelBase
                         xamlText,
                         null,
                         xamlFile.Path,
-                        xamlDiagnostics)
+                        xamlDiagnostics,
+                        projectResourceFiles,
+                        documentAssemblyName)
                     : RuntimeXamlPreviewLoader.LoadControl(
                         xamlText,
                         null,
                         null,
                         xamlFile.Path,
-                        xamlDiagnostics);
+                        xamlDiagnostics,
+                        projectResourceFiles,
+                        documentAssemblyName);
                 if (control is { })
                 {
-                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)));
+                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
+                    previewAssemblyScope = null;
                 }
             }
         }
@@ -1632,6 +1661,7 @@ public partial class MainViewModel : ViewModelBase
         }
         finally
         {
+            previewAssemblyScope?.Unload();
             _update = false;
             if (_rerunRequested)
             {
@@ -1644,23 +1674,21 @@ public partial class MainViewModel : ViewModelBase
     private bool TryUseWorkspaceOutputAssemblyFallback(
         InMemoryProject project,
         IReadOnlyList<WorkspaceAssemblyReference> workspaceReferences,
-        IReadOnlyList<Assembly> loadedRuntimeAssemblies,
         string? failureMessage,
-        out Assembly? assembly,
+        out WorkspacePreviewAssemblyScope? assemblyScope,
         out string? diagnosticsMessage)
     {
-        assembly = null;
+        assemblyScope = null;
         diagnosticsMessage = failureMessage;
         if (!project.IsMsBuildWorkspace ||
-            !TryLoadWorkspaceOutputAssembly(project, workspaceReferences, out var outputAssembly, out var outputContext))
+            !TryLoadWorkspaceOutputAssembly(project, workspaceReferences, out var outputAssembly, out var outputContext, out var loadedAssemblies))
         {
             return false;
         }
 
-        _previous = new ValueTuple<Assembly?, AssemblyLoadContext?>(outputAssembly, outputContext);
-        assembly = outputAssembly;
+        assemblyScope = new WorkspacePreviewAssemblyScope(outputAssembly, outputContext, loadedAssemblies);
         diagnosticsMessage = "Using built workspace assembly for MSBuild project references and generated code.";
-        XamlIntelliSenseService.RegisterWorkspaceAssemblies(new[] { outputAssembly }.Concat(loadedRuntimeAssemblies));
+        XamlIntelliSenseService.RegisterWorkspaceAssemblies(new[] { outputAssembly }.Concat(loadedAssemblies));
         Console.WriteLine($"Loaded workspace output assembly after live compile failure: {outputAssembly.GetName().Name}");
         return true;
     }
@@ -1668,18 +1696,16 @@ public partial class MainViewModel : ViewModelBase
     private async Task<WorkspaceOutputFallbackResult> TryUseWorkspaceOutputAssemblyFallbackAsync(
         InMemoryProject project,
         IReadOnlyList<WorkspaceAssemblyReference> workspaceReferences,
-        IReadOnlyList<Assembly> loadedRuntimeAssemblies,
         string? failureMessage)
     {
         if (TryUseWorkspaceOutputAssemblyFallback(
                 project,
                 workspaceReferences,
-                loadedRuntimeAssemblies,
                 failureMessage,
-                out var assembly,
+                out var assemblyScope,
                 out var diagnosticsMessage))
         {
-            return new WorkspaceOutputFallbackResult(true, assembly, diagnosticsMessage);
+            return new WorkspaceOutputFallbackResult(true, assemblyScope, diagnosticsMessage);
         }
 
         if (!await TryBuildWorkspaceProjectAsync(project))
@@ -1688,18 +1714,14 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var refreshedWorkspaceReferences = project.AssemblyReferences.ToArray();
-        var refreshedRuntimeAssemblies = WorkspaceAssemblyReference.LoadRuntimeAssemblies(
-            refreshedWorkspaceReferences,
-            project.AssemblyName);
 
         return TryUseWorkspaceOutputAssemblyFallback(
             project,
             refreshedWorkspaceReferences,
-            refreshedRuntimeAssemblies,
             failureMessage,
-            out assembly,
+            out assemblyScope,
             out diagnosticsMessage)
-            ? new WorkspaceOutputFallbackResult(true, assembly, diagnosticsMessage)
+            ? new WorkspaceOutputFallbackResult(true, assemblyScope, diagnosticsMessage)
             : new WorkspaceOutputFallbackResult(false, null, failureMessage);
     }
 
@@ -1762,17 +1784,22 @@ public partial class MainViewModel : ViewModelBase
         InMemoryProject project,
         IReadOnlyList<WorkspaceAssemblyReference> workspaceReferences,
         out Assembly assembly,
-        out AssemblyLoadContext context)
+        out WorkspaceAssemblyLoadContext context,
+        out IReadOnlyList<Assembly> loadedAssemblies)
     {
         foreach (var reference in GetWorkspaceOutputAssemblyCandidates(project, workspaceReferences))
         {
-            var candidateContext = new AssemblyLoadContext(name: Path.GetRandomFileName(), isCollectible: true);
-            candidateContext.Resolving += (_, name) => ResolveWorkspaceAssembly(project, workspaceReferences, candidateContext, name);
+            var candidateContext = new WorkspaceAssemblyLoadContext(
+                Path.GetRandomFileName(),
+                workspaceReferences,
+                Path.GetDirectoryName(project.OutputAssemblyPath),
+                new[] { project.AssemblyName, project.Name, reference.Name });
 
-            if (reference.LoadAssembly(candidateContext) is { } loadedAssembly)
+            if (candidateContext.LoadAssemblyReference(reference) is { } loadedAssembly)
             {
                 assembly = loadedAssembly;
                 context = candidateContext;
+                loadedAssemblies = candidateContext.LoadRuntimeAssemblies(loadedAssembly.GetName().Name);
                 return true;
             }
 
@@ -1781,54 +1808,8 @@ public partial class MainViewModel : ViewModelBase
 
         assembly = null!;
         context = null!;
+        loadedAssemblies = Array.Empty<Assembly>();
         return false;
-    }
-
-    private static Assembly? ResolveWorkspaceAssembly(
-        InMemoryProject project,
-        IReadOnlyList<WorkspaceAssemblyReference> workspaceReferences,
-        AssemblyLoadContext context,
-        AssemblyName assemblyName)
-    {
-        if (WorkspaceAssemblyReference.ResolveAssembly(workspaceReferences, context, assemblyName) is { } assembly)
-        {
-            return assembly;
-        }
-
-        var name = assemblyName.Name;
-        var outputDirectory = Path.GetDirectoryName(project.OutputAssemblyPath);
-        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(outputDirectory))
-        {
-            return null;
-        }
-
-        foreach (var loaded in context.Assemblies)
-        {
-            if (string.Equals(loaded.GetName().Name, name, StringComparison.OrdinalIgnoreCase))
-            {
-                return loaded;
-            }
-        }
-
-        foreach (var extension in new[] { ".dll", ".exe" })
-        {
-            var candidate = Path.Combine(outputDirectory, name + extension);
-            if (!File.Exists(candidate))
-            {
-                continue;
-            }
-
-            try
-            {
-                return context.LoadFromAssemblyPath(candidate);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        return null;
     }
 
     private static IEnumerable<WorkspaceAssemblyReference> GetWorkspaceOutputAssemblyCandidates(
@@ -2007,8 +1988,12 @@ public partial class MainViewModel : ViewModelBase
         return exception.Message;
     }
 
-    private void ShowControl(Control control, string? diagnosticsMessage)
+    private void ShowControl(
+        Control control,
+        string? diagnosticsMessage,
+        WorkspacePreviewAssemblyScope? assemblyScope = null)
     {
+        var previousScope = _previous;
         var scope = new Border
         {
             Name = "GeneratedSampleScope",
@@ -2018,6 +2003,8 @@ public partial class MainViewModel : ViewModelBase
         Control = scope;
         DiagnosticsRoot = scope;
         LastErrorMessage = diagnosticsMessage;
+        _previous = assemblyScope;
+        previousScope?.Unload();
     }
 
     private async Task OpenXamlFile()
@@ -2202,8 +2189,22 @@ public partial class MainViewModel : ViewModelBase
 
     private sealed record WorkspaceOutputFallbackResult(
         bool Success,
+        WorkspacePreviewAssemblyScope? AssemblyScope,
+        string? DiagnosticsMessage)
+    {
+        public Assembly? Assembly => AssemblyScope?.Assembly;
+    }
+
+    private sealed record WorkspacePreviewAssemblyScope(
         Assembly? Assembly,
-        string? DiagnosticsMessage);
+        AssemblyLoadContext? Context,
+        IReadOnlyList<Assembly> LoadedAssemblies)
+    {
+        public void Unload()
+        {
+            Context?.Unload();
+        }
+    }
 
     private sealed record DotNetProcessResult(int ExitCode, IReadOnlyList<string> OutputLines);
 }

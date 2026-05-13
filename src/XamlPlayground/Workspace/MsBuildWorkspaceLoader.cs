@@ -158,19 +158,30 @@ public static class MsBuildWorkspaceLoader
         var solution = new InMemorySolution(string.IsNullOrWhiteSpace(solutionName) ? "Workspace" : solutionName);
         var fileByPath = files.ToDictionary(static file => file.RelativePath, StringComparer.OrdinalIgnoreCase);
 
-        foreach (var entry in entries)
+        var projectEntries = entries
+            .Select(entry => new
+            {
+                Entry = entry,
+                Path = solutionFile is null
+                    ? NormalizePath(entry.Path)
+                    : ResolveStorageSolutionProjectPath(solutionFile.RelativePath, entry.Path)
+            })
+            .ToArray();
+        var projectFolders = projectEntries
+            .Select(static entry => GetDirectoryName(entry.Path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var projectEntry in projectEntries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var projectPath = solutionFile is null
-                ? NormalizePath(entry.Path)
-                : ResolveStorageSolutionProjectPath(solutionFile.RelativePath, entry.Path);
-            if (!fileByPath.TryGetValue(projectPath, out var projectFile))
+            if (!fileByPath.TryGetValue(projectEntry.Path, out var projectFile))
             {
-                progress?.Report($"Skipped missing project {projectPath}.");
+                progress?.Report($"Skipped missing project {projectEntry.Path}.");
                 continue;
             }
 
-            var project = CreateStorageProject(projectFile, entry, files, assemblies, fileChanged);
+            var project = CreateStorageProject(projectFile, projectEntry.Entry, files, assemblies, projectFolders, fileChanged);
             solution.Projects.Add(project);
         }
 
@@ -321,9 +332,11 @@ public static class MsBuildWorkspaceLoader
         StandardSolutionProjectEntry entry,
         IReadOnlyList<StorageTextFile> files,
         IReadOnlyList<StorageAssemblyFile> assemblies,
+        IReadOnlyList<string> projectFolders,
         Action<InMemoryProjectFile>? fileChanged)
     {
         var projectFolder = GetDirectoryName(projectFile.RelativePath);
+        var excludedProjectFolders = GetExcludedStorageProjectFolders(projectFolder, projectFolders);
         var projectName = string.IsNullOrWhiteSpace(entry.Name)
             ? Path.GetFileNameWithoutExtension(projectFile.RelativePath)
             : entry.Name;
@@ -351,7 +364,7 @@ public static class MsBuildWorkspaceLoader
             sourceStorageFile: projectFile.File));
 
         foreach (var file in files
-                     .Where(file => IsUnderProjectFolder(projectFolder, file.RelativePath) &&
+                     .Where(file => IsStorageProjectFileInScope(projectFolder, file.RelativePath, excludedProjectFolders) &&
                                     !IsIgnoredProjectPath(file.RelativePath) &&
                                     !string.Equals(file.RelativePath, projectFile.RelativePath, StringComparison.OrdinalIgnoreCase))
                      .OrderBy(static file => file.RelativePath, StringComparer.OrdinalIgnoreCase))
@@ -371,7 +384,7 @@ public static class MsBuildWorkspaceLoader
         }
 
         foreach (var assembly in assemblies
-                     .Where(assembly => IsUnderProjectFolder(projectFolder, assembly.RelativePath) &&
+                     .Where(assembly => IsStorageProjectFileInScope(projectFolder, assembly.RelativePath, excludedProjectFolders) &&
                                         assembly.RelativePath.Contains("/bin/", StringComparison.OrdinalIgnoreCase))
                      .OrderBy(static assembly => assembly.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
@@ -1244,6 +1257,40 @@ public static class MsBuildWorkspaceLoader
     {
         return string.IsNullOrWhiteSpace(projectFolder) ||
                filePath.StartsWith(projectFolder.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> GetExcludedStorageProjectFolders(
+        string projectFolder,
+        IEnumerable<string> projectFolders)
+    {
+        var normalizedProjectFolder = NormalizePath(projectFolder);
+        return projectFolders
+            .Select(NormalizePath)
+            .Where(static folder => !string.IsNullOrWhiteSpace(folder))
+            .Where(folder => !IsSameOrUnderProjectFolder(normalizedProjectFolder, folder))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool IsStorageProjectFileInScope(
+        string projectFolder,
+        string filePath,
+        IEnumerable<string> excludedProjectFolders)
+    {
+        if (!IsUnderProjectFolder(projectFolder, filePath))
+        {
+            return false;
+        }
+
+        return !excludedProjectFolders.Any(folder => IsUnderProjectFolder(folder, filePath));
+    }
+
+    private static bool IsSameOrUnderProjectFolder(string path, string projectFolder)
+    {
+        var normalizedPath = NormalizePath(path).TrimEnd('/');
+        var normalizedProjectFolder = NormalizePath(projectFolder).TrimEnd('/');
+        return string.Equals(normalizedPath, normalizedProjectFolder, StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.StartsWith(normalizedProjectFolder + "/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetProjectRelativePath(string projectFolder, string filePath)
