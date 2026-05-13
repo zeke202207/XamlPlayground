@@ -70,7 +70,7 @@ public static class MsBuildWorkspaceLoader
             EnsureMSBuildRegistered();
             using var workspace = MSBuildWorkspace.Create();
             using var workspaceFailed = workspace.RegisterWorkspaceFailedHandler(
-                e => progress?.Report($"Workspace diagnostic: {e.Diagnostic.Message}"));
+                e => ReportWorkspaceDiagnostic(e.Diagnostic, progress));
             var loadProgress = new Progress<ProjectLoadProgress>(p => progress?.Report(FormatProgress(p)));
             var solution = await workspace.OpenSolutionAsync(solutionPath, loadProgress, cancellationToken);
             return await CreateSolutionFromRoslynAsync(
@@ -106,7 +106,7 @@ public static class MsBuildWorkspaceLoader
             EnsureMSBuildRegistered();
             using var workspace = MSBuildWorkspace.Create();
             using var workspaceFailed = workspace.RegisterWorkspaceFailedHandler(
-                e => progress?.Report($"Workspace diagnostic: {e.Diagnostic.Message}"));
+                e => ReportWorkspaceDiagnostic(e.Diagnostic, progress));
             var loadProgress = new Progress<ProjectLoadProgress>(p => progress?.Report(FormatProgress(p)));
             var project = await workspace.OpenProjectAsync(projectPath, loadProgress, cancellationToken);
             return await CreateSolutionFromRoslynAsync(
@@ -694,9 +694,10 @@ public static class MsBuildWorkspaceLoader
                 continue;
             }
 
-            if (ShouldEmitProjectReferenceFromSource(referencedProject))
+            var outputReference = GetProjectOutputReference(referencedProject);
+            if (ShouldEmitProjectReferenceFromSourceDuringLoad(referencedProject, outputReference))
             {
-                var sourceReference = await CreateProjectReferenceAssemblyAsync(referencedProject, progress, cancellationToken);
+                var sourceReference = await CreateProjectReferenceAssemblyAsync(referencedProject, null, cancellationToken);
                 if (sourceReference is { })
                 {
                     AddReference(inMemoryProject, sourceReference);
@@ -704,9 +705,7 @@ public static class MsBuildWorkspaceLoader
                 }
             }
 
-            AddReference(inMemoryProject, WorkspaceAssemblyReference.FromPath(
-                referencedProject.OutputFilePath,
-                isRuntimeAssembly: true));
+            AddReference(inMemoryProject, outputReference);
         }
 
         AddReference(inMemoryProject, WorkspaceAssemblyReference.FromPath(
@@ -754,6 +753,82 @@ public static class MsBuildWorkspaceLoader
         }
 
         return false;
+    }
+
+    private static bool ShouldEmitProjectReferenceFromSourceDuringLoad(
+        Project referencedProject,
+        WorkspaceAssemblyReference? outputReference)
+    {
+        return outputReference is null && ShouldEmitProjectReferenceFromSource(referencedProject);
+    }
+
+    private static WorkspaceAssemblyReference? GetProjectOutputReference(Project project)
+    {
+        return WorkspaceAssemblyReference.FromPath(project.OutputFilePath, isRuntimeAssembly: true) ??
+               FindExistingProjectOutputReference(project);
+    }
+
+    private static WorkspaceAssemblyReference? FindExistingProjectOutputReference(Project project)
+    {
+        var outputFileName = Path.GetFileName(project.OutputFilePath);
+        if (string.IsNullOrWhiteSpace(outputFileName))
+        {
+            outputFileName = (string.IsNullOrWhiteSpace(project.AssemblyName) ? project.Name : project.AssemblyName) + ".dll";
+        }
+
+        if (!WorkspaceAssemblyReference.IsAssemblyFile(outputFileName))
+        {
+            return null;
+        }
+
+        var projectDirectory = Path.GetDirectoryName(project.FilePath);
+        if (string.IsNullOrWhiteSpace(projectDirectory))
+        {
+            return null;
+        }
+
+        var binDirectory = Path.Combine(projectDirectory, "bin");
+        if (!Directory.Exists(binDirectory))
+        {
+            return null;
+        }
+
+        var targetFramework = TryGetTargetFrameworkFromOutputPath(project.OutputFilePath);
+        IEnumerable<string> candidates;
+        try
+        {
+            candidates = Directory.EnumerateFiles(binDirectory, outputFileName, SearchOption.AllDirectories)
+                .Where(static path => WorkspaceAssemblyReference.IsAssemblyFile(path))
+                .OrderByDescending(path => IsTargetFrameworkMatch(path, targetFramework))
+                .ThenByDescending(GetLastWriteTimeUtcOrMin)
+                .ToArray();
+        }
+        catch
+        {
+            return null;
+        }
+
+        foreach (var candidate in candidates)
+        {
+            if (WorkspaceAssemblyReference.FromPath(candidate, isRuntimeAssembly: true) is { } reference)
+            {
+                return reference;
+            }
+        }
+
+        return null;
+    }
+
+    private static DateTime GetLastWriteTimeUtcOrMin(string path)
+    {
+        try
+        {
+            return File.GetLastWriteTimeUtc(path);
+        }
+        catch
+        {
+            return DateTime.MinValue;
+        }
     }
 
     private static async Task<WorkspaceAssemblyReference?> CreateProjectReferenceAssemblyAsync(
@@ -1012,6 +1087,32 @@ public static class MsBuildWorkspaceLoader
             throw new InvalidDataException(
                 $"dotnet restore failed for {workspacePath}.{Environment.NewLine}{string.Join(Environment.NewLine, result.OutputLines)}");
         }
+    }
+
+    private static void ReportWorkspaceDiagnostic(WorkspaceDiagnostic diagnostic, IProgress<string>? progress)
+    {
+        if (progress is null || !ShouldReportWorkspaceDiagnosticMessage(diagnostic.Message))
+        {
+            return;
+        }
+
+        progress.Report($"Workspace diagnostic: {diagnostic.Message}");
+    }
+
+    private static bool ShouldReportWorkspaceDiagnosticMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return !IsNuGetAuditVulnerabilityMessage(message);
+    }
+
+    private static bool IsNuGetAuditVulnerabilityMessage(string message)
+    {
+        return message.Contains("has a known", StringComparison.OrdinalIgnoreCase) &&
+               message.Contains("severity vulnerability", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LocalWorkspaceNeedsRestore(string workspacePath)

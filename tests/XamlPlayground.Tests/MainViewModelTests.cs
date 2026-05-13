@@ -1459,6 +1459,128 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void MsBuildWorkspaceLoader_EagerSourceEmitRequiresMissingOutputReference()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var workspace = new AdhocWorkspace();
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundProjectReference-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "Referenced");
+        var sourcePath = Path.Combine(projectDirectory, "ReferencedType.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "Referenced.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(sourcePath, "public sealed class ReferencedType { }");
+            File.WriteAllText(outputPath, "not a real assembly");
+            File.SetLastWriteTimeUtc(sourcePath, DateTime.UtcNow.AddMinutes(10));
+
+            var referencedId = ProjectId.CreateNewId("Referenced");
+            var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
+                referencedId,
+                VersionStamp.Create(),
+                "Referenced",
+                "Referenced",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(projectDirectory, "Referenced.csproj"),
+                outputFilePath: outputPath));
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(referencedId),
+                "ReferencedType.cs",
+                Microsoft.CodeAnalysis.Text.SourceText.From("public sealed class ReferencedType { }"),
+                filePath: sourcePath);
+            Assert.True(workspace.TryApplyChanges(solution));
+            var referencedProject = workspace.CurrentSolution.GetProject(referencedId);
+            Assert.NotNull(referencedProject);
+            var runtimeReference = WorkspaceAssemblyReference.FromPath(typeof(object).Assembly.Location, isRuntimeAssembly: true);
+            Assert.NotNull(runtimeReference);
+            var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "ShouldEmitProjectReferenceFromSourceDuringLoad",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object?[] { referencedProject, null })!);
+            Assert.False((bool)method.Invoke(null, new object?[] { referencedProject, runtimeReference })!);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_FindsExistingSiblingOutputWhenExactTargetOutputIsMissing()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var workspace = new AdhocWorkspace();
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundProjectReference-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "Referenced");
+        var requestedOutputPath = Path.Combine(projectDirectory, "bin", "Debug", "net8.0", "Referenced.dll");
+        var existingOutputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "Referenced.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(existingOutputPath)!);
+            File.WriteAllBytes(
+                existingOutputPath,
+                CompileTestAssemblyImage(
+                    "Referenced",
+                    "public sealed class ReferencedType { }"));
+
+            var referencedId = ProjectId.CreateNewId("Referenced");
+            var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
+                referencedId,
+                VersionStamp.Create(),
+                "Referenced",
+                "Referenced",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(projectDirectory, "Referenced.csproj"),
+                outputFilePath: requestedOutputPath));
+            Assert.True(workspace.TryApplyChanges(solution));
+            var referencedProject = workspace.CurrentSolution.GetProject(referencedId);
+            Assert.NotNull(referencedProject);
+            var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "GetProjectOutputReference",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var reference = Assert.IsType<WorkspaceAssemblyReference>(method.Invoke(null, new object[] { referencedProject }));
+
+            Assert.Equal(existingOutputPath, reference.FilePath);
+            Assert.Equal("Referenced", reference.Name);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_SuppressesNuGetAuditVulnerabilityWorkspaceDiagnostics()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "ShouldReportWorkspaceDiagnosticMessage",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.False((bool)method.Invoke(
+            null,
+            new object?[]
+            {
+                "Msbuild failed when processing the file 'App.csproj' with message: Package 'Tmds.DBus.Protocol' 0.90.3 has a known high severity vulnerability, https://github.com/advisories/GHSA-xrw6-gwf8-vvr9"
+            })!);
+        Assert.True((bool)method.Invoke(
+            null,
+            new object?[] { "Msbuild failed when processing the file 'App.csproj' with message: The SDK 'Missing.Sdk' specified could not be found." })!);
+    }
+
+    [Fact]
     public void DockLayout_CreatesExpectedWorkspacePanes()
     {
         TestApplication.EnsureAvaloniaInitialized();
