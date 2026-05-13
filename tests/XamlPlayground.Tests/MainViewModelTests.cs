@@ -637,6 +637,42 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void MsBuildWorkspaceLoader_IgnoresRootBuildAndSourceControlPaths()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsIgnoredProjectPath",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.True((bool)method.Invoke(null, new object[] { "bin/Debug/Generated.cs" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { "obj/project.assets.json" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { ".git/config" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { ".vs/config/applicationhost.config" })!);
+        Assert.False((bool)method.Invoke(null, new object[] { "src/Bindable/View.cs" })!);
+    }
+
+    [Fact]
+    public void InMemoryProject_GetCSharpFiles_ExcludesEditableNonCompilationFiles()
+    {
+        var project = new InMemoryProject("ImportedApp", "ImportedApp", "msbuild");
+        var compileFile = project.AddFile(new InMemoryProjectFile(
+            "Main.cs",
+            "namespace ImportedApp; public sealed class Main { }",
+            ProjectFileKind.CSharp));
+        project.AddFile(new InMemoryProjectFile(
+            "Extra.cs",
+            "namespace ImportedApp; public sealed class Extra { }",
+            ProjectFileKind.CSharp,
+            includeInCompilation: false));
+        project.AddFile(new InMemoryProjectFile(
+            "Main.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+
+        Assert.Same(compileFile, Assert.Single(project.GetCSharpFiles()));
+    }
+
+    [Fact]
     public void StandardSolutionStorage_ResolvesStorageExplicitIncludesInsideSolutionRoot()
     {
         var method = typeof(StandardSolutionStorage).GetMethod(
@@ -804,7 +840,8 @@ public sealed class MainViewModelTests
 
         var dockables = Enumerate(root).ToList();
         var documents = dockables.OfType<WorkspaceFileDocumentDockViewModel>().ToList();
-        var solutionExplorer = Assert.Single(dockables.OfType<SolutionExplorerDockViewModel>());
+        var solutionExplorer = Assert.Single(dockables.Where(static dockable => dockable.GetType() == typeof(SolutionExplorerDockViewModel)).Cast<SolutionExplorerDockViewModel>());
+        var msBuildWorkspace = Assert.Single(dockables.OfType<MsBuildWorkspaceDockViewModel>());
         var visualStructure = Assert.Single(dockables.OfType<VisualStructureDockViewModel>());
         var visualProperties = Assert.Single(dockables.OfType<VisualPropertiesDockViewModel>());
         var visualToolbox = Assert.Single(dockables.OfType<VisualToolboxDockViewModel>());
@@ -829,6 +866,7 @@ public sealed class MainViewModelTests
                 Assert.Equal("Main.axaml.cs", document.File.Path);
             });
         Assert.Same(viewModel, solutionExplorer.Shell);
+        Assert.Same(viewModel, msBuildWorkspace.Shell);
         Assert.Same(viewModel, visualStructure.Shell);
         Assert.Same(viewModel, visualProperties.Shell);
         Assert.Same(viewModel, visualToolbox.Shell);
@@ -856,6 +894,7 @@ public sealed class MainViewModelTests
         Assert.NotNull(factory.ContextLocator);
         var contextLocator = factory.ContextLocator;
         Assert.Same(solutionExplorer, contextLocator["SolutionExplorer"]());
+        Assert.Same(msBuildWorkspace, contextLocator["MsBuildWorkspace"]());
         Assert.Same(visualStructure, contextLocator["VisualStructure"]());
         Assert.Same(visualProperties, contextLocator["VisualProperties"]());
         Assert.Same(visualToolbox, contextLocator["VisualToolbox"]());
