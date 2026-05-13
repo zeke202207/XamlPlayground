@@ -109,18 +109,31 @@ public sealed class PreviewDockViewModel : Tool
     public MainViewModel Shell { get; }
 }
 
-public sealed class SolutionExplorerDockViewModel : Tool
+public class SolutionExplorerDockViewModel : Tool
 {
     public SolutionExplorerDockViewModel(MainViewModel shell)
+        : this(shell, "SolutionExplorer", "Solution Explorer")
+    {
+    }
+
+    protected SolutionExplorerDockViewModel(MainViewModel shell, string id, string title)
     {
         Shell = shell;
-        Id = "SolutionExplorer";
-        Title = "Solution Explorer";
+        Id = id;
+        Title = title;
         CanClose = false;
         KeepPinnedDockableVisible = true;
     }
 
     public MainViewModel Shell { get; }
+}
+
+public sealed class MsBuildWorkspaceDockViewModel : SolutionExplorerDockViewModel
+{
+    public MsBuildWorkspaceDockViewModel(MainViewModel shell)
+        : base(shell, "MsBuildWorkspace", "MSBuild Workspace")
+    {
+    }
 }
 
 public sealed class VisualStructureDockViewModel : Tool
