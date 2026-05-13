@@ -16,6 +16,7 @@ namespace XamlPlayground.Services;
 public static class RuntimeXamlPreviewLoader
 {
     private const string PreviewAssemblyName = "XamlPlayground.Preview";
+    private const string XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
     private static readonly object s_resourceLock = new();
     private static readonly List<IResourceProvider> s_projectPreviewResources = new();
 
@@ -149,11 +150,16 @@ public static class RuntimeXamlPreviewLoader
         string documentName,
         ICollection<RuntimeXamlDiagnostic> diagnostics,
         IEnumerable<(string Path, string Text)>? resourceFiles = null,
-        string? documentAssemblyName = null)
+        string? documentAssemblyName = null,
+        bool usePreviewRootForXClass = false)
     {
+        var hasXamlClass = HasXamlClass(xaml);
+        var previewDocumentXaml = usePreviewRootForXClass && hasXamlClass
+            ? RemoveXamlClass(xaml)
+            : xaml;
         object? rootInstance = null;
 
-        if (localAssembly is { } && !HasXamlClass(xaml))
+        if (localAssembly is { } && !hasXamlClass)
         {
             var rootType = ResolveFallbackRootType(localAssembly, fallbackRootTypeName);
             if (rootType is { })
@@ -162,21 +168,26 @@ public static class RuntimeXamlPreviewLoader
             }
         }
 
-        var document = CreateDocument(xaml, documentName, localAssembly, documentAssemblyName, rootInstance);
+        var document = CreateDocument(previewDocumentXaml, documentName, localAssembly, documentAssemblyName, rootInstance);
 
         var configuration = CreateConfiguration(localAssembly, diagnostics);
         using var contextualReflection = EnterContextualReflection(localAssembly);
+        Control? control;
         if (resourceFiles is not null)
         {
             var documents = CreateResourceDocuments(resourceFiles, localAssembly, documentAssemblyName, document.Document);
             if (documents.Count > 0)
             {
                 documents.Add(document);
-                return AvaloniaRuntimeXamlLoader.LoadGroup(documents, configuration).LastOrDefault() as Control;
+                control = AvaloniaRuntimeXamlLoader.LoadGroup(documents, configuration).LastOrDefault() as Control;
+                ApplyPreviewDataContext(control, previewDocumentXaml, localAssembly, usePreviewRootForXClass && hasXamlClass);
+                return control;
             }
         }
 
-        return AvaloniaRuntimeXamlLoader.Load(document, configuration) as Control;
+        control = AvaloniaRuntimeXamlLoader.Load(document, configuration) as Control;
+        ApplyPreviewDataContext(control, previewDocumentXaml, localAssembly, usePreviewRootForXClass && hasXamlClass);
+        return control;
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "The playground runtime preview intentionally loads user XAML and dynamically compiled user code.")]
@@ -371,6 +382,165 @@ public static class RuntimeXamlPreviewLoader
         }
     }
 
+    private static string RemoveXamlClass(string xaml)
+    {
+        try
+        {
+            var document = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace);
+            document.Root?
+                .Attribute(XName.Get("Class", XamlNamespace))
+                ?.Remove();
+            return document.ToString(SaveOptions.DisableFormatting);
+        }
+        catch
+        {
+            return xaml;
+        }
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Preview data contexts are discovered from dynamically loaded workspace assemblies.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2072", Justification = "Preview data contexts are created from dynamically loaded workspace assemblies.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "Preview data contexts are created from dynamically loaded workspace assemblies.")]
+    private static void ApplyPreviewDataContext(
+        Control? control,
+        string xaml,
+        Assembly? localAssembly,
+        bool enabled)
+    {
+        if (!enabled ||
+            control is null ||
+            control.DataContext is not null ||
+            localAssembly is null)
+        {
+            return;
+        }
+
+        var dataContextType = ResolveRootDataType(xaml, localAssembly);
+        if (dataContextType is null ||
+            dataContextType.IsAbstract ||
+            dataContextType.GetConstructor(Type.EmptyTypes) is null)
+        {
+            return;
+        }
+
+        try
+        {
+            control.DataContext = Activator.CreateInstance(dataContextType);
+        }
+        catch
+        {
+            // Design data is best-effort; preview loading should not fail because a view model constructor failed.
+        }
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Preview data context types are discovered from dynamically loaded workspace assemblies.")]
+    private static Type? ResolveRootDataType(string xaml, Assembly localAssembly)
+    {
+        try
+        {
+            var document = XDocument.Parse(xaml, LoadOptions.None);
+            var root = document.Root;
+            var dataTypeValue = root?
+                .Attribute(XName.Get("DataType", XamlNamespace))
+                ?.Value;
+            if (root is null || string.IsNullOrWhiteSpace(dataTypeValue))
+            {
+                return null;
+            }
+
+            dataTypeValue = NormalizeDataTypeValue(dataTypeValue);
+            var separator = dataTypeValue.IndexOf(':');
+            if (separator <= 0 || separator == dataTypeValue.Length - 1)
+            {
+                return null;
+            }
+
+            var prefix = dataTypeValue[..separator];
+            var typeName = dataTypeValue[(separator + 1)..];
+            var xamlNamespace = root.GetNamespaceOfPrefix(prefix);
+            if (xamlNamespace is null)
+            {
+                return null;
+            }
+
+            var namespaceUri = xamlNamespace.NamespaceName;
+            if (!TryParseClrNamespace(namespaceUri, out var clrNamespace, out var assemblyName))
+            {
+                return null;
+            }
+
+            var assembly = ResolveAssembly(localAssembly, assemblyName);
+            return assembly?.GetType(clrNamespace + "." + typeName, throwOnError: false, ignoreCase: false);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string NormalizeDataTypeValue(string value)
+    {
+        value = value.Trim();
+        const string xTypePrefix = "{x:Type ";
+        if (value.StartsWith(xTypePrefix, StringComparison.Ordinal) &&
+            value.EndsWith("}", StringComparison.Ordinal))
+        {
+            return value[xTypePrefix.Length..^1].Trim();
+        }
+
+        return value;
+    }
+
+    private static bool TryParseClrNamespace(
+        string namespaceUri,
+        [NotNullWhen(true)] out string? clrNamespace,
+        out string? assemblyName)
+    {
+        clrNamespace = null;
+        assemblyName = null;
+        foreach (var part in namespaceUri.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (part.StartsWith("clr-namespace:", StringComparison.Ordinal))
+            {
+                clrNamespace = part["clr-namespace:".Length..];
+            }
+            else if (part.StartsWith("assembly=", StringComparison.Ordinal))
+            {
+                assemblyName = part["assembly=".Length..];
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(clrNamespace);
+    }
+
+    private static Assembly? ResolveAssembly(Assembly localAssembly, string? assemblyName)
+    {
+        if (string.IsNullOrWhiteSpace(assemblyName) ||
+            string.Equals(localAssembly.GetName().Name, assemblyName, StringComparison.Ordinal))
+        {
+            return localAssembly;
+        }
+
+        var context = AssemblyLoadContext.GetLoadContext(localAssembly);
+        var assembly = (context?.Assemblies ?? AppDomain.CurrentDomain.GetAssemblies())
+            .FirstOrDefault(candidate =>
+                string.Equals(candidate.GetName().Name, assemblyName, StringComparison.Ordinal));
+        if (assembly is { })
+        {
+            return assembly;
+        }
+
+        try
+        {
+            return context?.LoadFromAssemblyName(new AssemblyName(assemblyName))
+                   ?? AssemblyLoadContext.Default.LoadFromAssemblyName(new AssemblyName(assemblyName));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string WrapPreviewContent(string previewContent)
     {
         var namespaces = CreateNamespaceDeclarations(ExtractNamespaceDeclarations(previewContent));
@@ -472,7 +642,7 @@ public static class RuntimeXamlPreviewLoader
             return document.Root?.Attributes()
                 .Any(static attribute =>
                     attribute.Name.LocalName == "Class" &&
-                    attribute.Name.NamespaceName == "http://schemas.microsoft.com/winfx/2006/xaml") == true;
+                    attribute.Name.NamespaceName == XamlNamespace) == true;
         }
         catch
         {

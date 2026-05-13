@@ -1487,6 +1487,7 @@ public partial class MainViewModel : ViewModelBase
             }
 #endif
             Assembly? scriptAssembly = null;
+            var usePreviewRootForXClass = false;
             if (xamlFile is null)
             {
                 LastErrorMessage = "No XAML document is active.";
@@ -1550,6 +1551,7 @@ public partial class MainViewModel : ViewModelBase
                             scriptAssembly = fallback.Assembly;
                             previewAssemblyScope = fallback.AssemblyScope;
                             diagnosticsMessage = fallback.DiagnosticsMessage;
+                            usePreviewRootForXClass = true;
                         }
                         else
                         {
@@ -1571,6 +1573,7 @@ public partial class MainViewModel : ViewModelBase
                         scriptAssembly = fallback.Assembly;
                         previewAssemblyScope = fallback.AssemblyScope;
                         diagnosticsMessage = fallback.DiagnosticsMessage;
+                        usePreviewRootForXClass = true;
                     }
                     else
                     {
@@ -1584,6 +1587,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 scriptAssembly = outputAssembly;
                 previewAssemblyScope = new WorkspacePreviewAssemblyScope(outputAssembly, outputContext, loadedAssemblies);
+                usePreviewRootForXClass = true;
                 XamlIntelliSenseService.RegisterWorkspaceAssemblies(new[] { outputAssembly }.Concat(loadedAssemblies));
                 Console.WriteLine($"Loaded workspace output assembly: {outputAssembly.GetName().Name}");
             }
@@ -1619,7 +1623,8 @@ public partial class MainViewModel : ViewModelBase
                         xamlFile.Path,
                         xamlDiagnostics,
                         projectResourceFiles,
-                        documentAssemblyName);
+                        documentAssemblyName,
+                        usePreviewRootForXClass);
                 if (control is { })
                 {
                     ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
@@ -1974,7 +1979,7 @@ public partial class MainViewModel : ViewModelBase
         {
             var messages = aggregateException.Flatten()
                 .InnerExceptions
-                .Select(static innerException => innerException.Message)
+                .Select(static innerException => UnwrapException(innerException).Message)
                 .Where(static message => !string.IsNullOrWhiteSpace(message))
                 .Distinct()
                 .ToArray();
@@ -1985,7 +1990,28 @@ public partial class MainViewModel : ViewModelBase
             }
         }
 
+        exception = UnwrapException(exception);
         return exception.Message;
+    }
+
+    private static Exception UnwrapException(Exception exception)
+    {
+        while (true)
+        {
+            if (exception is TargetInvocationException { InnerException: { } targetInvocationInnerException })
+            {
+                exception = targetInvocationInnerException;
+                continue;
+            }
+
+            if (exception is TypeInitializationException { InnerException: { } typeInitializationInnerException })
+            {
+                exception = typeInitializationInnerException;
+                continue;
+            }
+
+            return exception;
+        }
     }
 
     private void ShowControl(

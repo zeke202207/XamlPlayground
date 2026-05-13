@@ -406,6 +406,73 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void RuntimePreviewLoader_UsesEditableDocumentRootForBuiltWorkspaceXClass()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var assemblyName = "PreviewWorkspace" + Guid.NewGuid().ToString("N");
+        var assemblyImage = CompileTestAssemblyImage(
+            assemblyName,
+            $$"""
+            using System;
+            using Avalonia.Controls;
+
+            namespace {{assemblyName}}
+            {
+                public sealed class AddDeleteRowsPage : UserControl
+                {
+                    public AddDeleteRowsPage()
+                    {
+                        throw new InvalidOperationException("Code-behind constructor should not run for editable previews.");
+                    }
+                }
+            }
+
+            namespace {{assemblyName}}.ViewModels
+            {
+                public sealed class AddDeleteRowsViewModel
+                {
+                    public string Title { get; } = "Editable workspace preview";
+                }
+            }
+            """,
+            new[]
+            {
+                MetadataReference.CreateFromFile(typeof(Control).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(AvaloniaObject).Assembly.Location)
+            });
+        var assembly = Assembly.Load(assemblyImage);
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var xaml = $$"""
+                         <UserControl xmlns="https://github.com/avaloniaui"
+                                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                      xmlns:viewModels="clr-namespace:{{assemblyName}}.ViewModels;assembly={{assemblyName}}"
+                                      x:Class="{{assemblyName}}.AddDeleteRowsPage"
+                                      x:DataType="viewModels:AddDeleteRowsViewModel">
+                           <TextBlock Text="{Binding Title}" />
+                         </UserControl>
+                         """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+            var control = RuntimeXamlPreviewLoader.LoadControl(
+                xaml,
+                assembly,
+                fallbackRootTypeName: "AddDeleteRowsPage",
+                documentName: "Pages/AddDeleteRowsPage.axaml",
+                diagnostics: diagnostics,
+                documentAssemblyName: assemblyName,
+                usePreviewRootForXClass: true);
+
+            var userControl = Assert.IsType<UserControl>(control);
+            Assert.NotEqual(assembly.GetType(assemblyName + ".AddDeleteRowsPage"), userControl.GetType());
+            Assert.Equal(assemblyName + ".ViewModels.AddDeleteRowsViewModel", userControl.DataContext?.GetType().FullName);
+            Assert.DoesNotContain(diagnostics, static diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+        });
+    }
+
+    [Fact]
     public void SolutionStorage_RoundTripsFullSolution()
     {
         var changedFiles = new List<string>();
