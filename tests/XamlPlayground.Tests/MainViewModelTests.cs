@@ -1628,6 +1628,32 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void LoadSolution_ResetsEditorDocumentsForCodeOnlyWorkspace()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var buildProject = new InMemoryProject("_build", "_build", "msbuild");
+        var buildFile = buildProject.AddFile(new InMemoryProjectFile(
+            "Build.cs",
+            "using Nuke.Common; class Build : NukeBuild { }",
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(buildProject);
+        var viewModel = new MainViewModel(null);
+
+        LoadSolutionIntoViewModel(viewModel, solution);
+
+        var root = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        var editorDock = Assert.Single(Enumerate(root).OfType<IDocumentDock>(), static dock => dock.Id == "Editors");
+        var document = Assert.Single(editorDock.VisibleDockables!.OfType<WorkspaceFileDocumentDockViewModel>());
+        Assert.Same(buildFile, document.File);
+        Assert.Same(buildProject, viewModel.ActiveProject);
+        Assert.Same(buildFile, viewModel.ActiveWorkspaceFile);
+        Assert.Same(buildFile, viewModel.ActiveCodeFile);
+        Assert.Null(viewModel.ActiveXamlFile);
+    }
+
+    [Fact]
     public void LoadSolution_CollapsesSolutionExplorerBelowRootChildren()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -1768,6 +1794,45 @@ public sealed class MainViewModelTests
 
             Assert.Equal(oldOutput, cached);
             Assert.Equal(newOutput, refreshed);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void RemotePreviewDecision_UsesWorkspaceRuntimeReferencesWhenOutputIsMissing()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundRemoteReferenceDecision-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        var workspaceControlsPath = Path.Combine(root, "packages", "Avalonia.Controls.dll");
+        try
+        {
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(Path.GetDirectoryName(workspaceControlsPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllBytes(
+                workspaceControlsPath,
+                CompileTestAssemblyImage("Avalonia.Controls", "public sealed class WorkspaceAvaloniaControlsMarker { }"));
+
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                IsMsBuildWorkspace = true
+            };
+            var reference = WorkspaceAssemblyReference.FromPath(workspaceControlsPath, isRuntimeAssembly: true);
+            Assert.NotNull(reference);
+            project.AssemblyReferences.Add(reference);
+            var method = typeof(MainViewModel).GetMethod(
+                "ShouldUseRemoteWorkspacePreview",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object?[] { project })!);
         }
         finally
         {

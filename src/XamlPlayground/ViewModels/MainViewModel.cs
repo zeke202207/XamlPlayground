@@ -494,11 +494,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ActiveWorkspaceFile = firstXaml ?? firstCode;
         _visualEditorSelectedSelector = null;
 
-        if (DockFactory is PlaygroundDockFactory factory && firstXaml is { })
+        if (DockFactory is PlaygroundDockFactory factory)
         {
-            var files = firstCode is { }
-                ? new[] { firstXaml, firstCode }
-                : new[] { firstXaml };
+            var files = firstXaml is { }
+                ? firstCode is { }
+                    ? new[] { firstXaml, firstCode }
+                    : new[] { firstXaml }
+                : firstCode is { }
+                    ? new[] { firstCode }
+                    : Array.Empty<InMemoryProjectFile>();
             factory.ResetDocuments(files);
         }
 
@@ -1830,25 +1834,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         var targetAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project);
-        if (string.IsNullOrWhiteSpace(targetAssemblyPath))
-        {
-            return false;
-        }
-
-        var outputDirectory = Path.GetDirectoryName(targetAssemblyPath);
-        if (string.IsNullOrWhiteSpace(outputDirectory) ||
-            !Directory.Exists(outputDirectory))
-        {
-            return false;
-        }
-
-        return WorkspaceAssemblyDiffersFromHost(outputDirectory, "Avalonia.Base", typeof(AvaloniaObject).Assembly.Location) ||
-               WorkspaceAssemblyDiffersFromHost(outputDirectory, "Avalonia.Controls", typeof(Control).Assembly.Location) ||
-               WorkspaceAssemblyDiffersFromHost(outputDirectory, "Avalonia.Markup.Xaml", typeof(AvaloniaXamlLoader).Assembly.Location);
+        var outputDirectory = string.IsNullOrWhiteSpace(targetAssemblyPath)
+            ? null
+            : Path.GetDirectoryName(targetAssemblyPath);
+        return WorkspaceAssemblyDiffersFromHost(project, outputDirectory, "Avalonia.Base", typeof(AvaloniaObject).Assembly.Location) ||
+               WorkspaceAssemblyDiffersFromHost(project, outputDirectory, "Avalonia.Controls", typeof(Control).Assembly.Location) ||
+               WorkspaceAssemblyDiffersFromHost(project, outputDirectory, "Avalonia.Markup.Xaml", typeof(AvaloniaXamlLoader).Assembly.Location);
     }
 
     private static bool WorkspaceAssemblyDiffersFromHost(
-        string outputDirectory,
+        InMemoryProject project,
+        string? outputDirectory,
         string assemblyName,
         string hostAssemblyPath)
     {
@@ -1858,8 +1854,22 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        var candidate = Path.Combine(outputDirectory, assemblyName + ".dll");
-        return File.Exists(candidate) && !FilesHaveSameContent(candidate, hostAssemblyPath);
+        if (!string.IsNullOrWhiteSpace(outputDirectory) && Directory.Exists(outputDirectory))
+        {
+            var candidate = Path.Combine(outputDirectory, assemblyName + ".dll");
+            if (File.Exists(candidate) && !FilesHaveSameContent(candidate, hostAssemblyPath))
+            {
+                return true;
+            }
+        }
+
+        return project.AssemblyReferences
+            .Where(reference =>
+                reference.IsRuntimeAssembly &&
+                string.Equals(reference.Name, assemblyName, StringComparison.OrdinalIgnoreCase) &&
+                reference.FilePath is { } &&
+                File.Exists(reference.FilePath))
+            .Any(reference => !FilesHaveSameContent(reference.FilePath!, hostAssemblyPath));
     }
 
     private static bool FilesHaveSameContent(string firstPath, string secondPath)
