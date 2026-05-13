@@ -146,10 +146,12 @@ public static class Program
 
 internal static class RuntimeXamlLoaderRegistrar
 {
+    private static string? s_targetAssemblyPath;
     private static string? s_targetDirectory;
 
     public static void Configure(string targetAssemblyPath)
     {
+        s_targetAssemblyPath = targetAssemblyPath;
         s_targetDirectory = Path.GetDirectoryName(targetAssemblyPath);
     }
 
@@ -260,6 +262,9 @@ internal static class RuntimeXamlLoaderRegistrar
                 case "OpenAndGetAssembly":
                     result = CreateOpenAndGetAssemblyResult(targetMethod.ReturnType, localPath);
                     return true;
+                case "GetAssembly":
+                    result = GetTargetAssembly() ?? typeof(RuntimeXamlLoaderRegistrar).Assembly;
+                    return true;
                 case "GetAssets":
                     result = Array.Empty<Uri>();
                     return true;
@@ -272,7 +277,7 @@ internal static class RuntimeXamlLoaderRegistrar
         private static object? CreateOpenAndGetAssemblyResult(Type returnType, string localPath)
         {
             Stream stream = File.OpenRead(localPath);
-            Assembly assembly = typeof(RuntimeXamlLoaderRegistrar).Assembly;
+            Assembly assembly = GetTargetAssembly() ?? typeof(RuntimeXamlLoaderRegistrar).Assembly;
             try
             {
                 return Activator.CreateInstance(returnType, stream, assembly);
@@ -507,6 +512,7 @@ internal static class RuntimeXamlLoaderRegistrar
         string tempPath = CreateTempXamlFile(xaml);
         Uri sourceUri = new(tempPath);
         Uri effectiveBaseUri = baseUri ?? sourceUri;
+        RegisterFileAssetLoaderFallback();
         IServiceProvider? serviceProvider = CreateAssetLoaderServiceProvider();
 
         object? result = TryInvokeAvaloniaXamlLoaderWithUris(
@@ -588,6 +594,21 @@ internal static class RuntimeXamlLoaderRegistrar
         return null;
     }
 
+    private static bool IsGeneratedTempAssetLoadFailure(Exception exception, Uri sourceUri)
+    {
+        Exception root = exception is TargetInvocationException targetInvocationException &&
+                         targetInvocationException.InnerException is { } innerException
+            ? innerException
+            : exception;
+        if (root is not FileNotFoundException)
+        {
+            return false;
+        }
+
+        return root.Message.Contains(sourceUri.ToString(), StringComparison.OrdinalIgnoreCase) ||
+               root.Message.Contains(sourceUri.LocalPath, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static object? TryInvokeAvaloniaXamlLoaderWithUris(
         Type loaderType,
         Uri sourceUri,
@@ -646,7 +667,20 @@ internal static class RuntimeXamlLoaderRegistrar
                 }
             }
 
-            object? result = method.Invoke(target, args);
+            object? result;
+            try
+            {
+                result = method.Invoke(target, args);
+            }
+            catch (TargetInvocationException exception) when (IsGeneratedTempAssetLoadFailure(exception, sourceUri))
+            {
+                continue;
+            }
+            catch (FileNotFoundException exception) when (IsGeneratedTempAssetLoadFailure(exception, sourceUri))
+            {
+                continue;
+            }
+
             if (result != null)
             {
                 return result;
@@ -1070,6 +1104,43 @@ internal static class RuntimeXamlLoaderRegistrar
         catch
         {
             return localAssembly;
+        }
+    }
+
+    private static Assembly? GetTargetAssembly()
+    {
+        if (string.IsNullOrWhiteSpace(s_targetAssemblyPath))
+        {
+            return null;
+        }
+
+        AssemblyLoadContext? context =
+            AssemblyLoadContext.GetLoadContext(typeof(RuntimeXamlLoaderRegistrar).Assembly);
+        if (context == null)
+        {
+            return null;
+        }
+
+        foreach (Assembly assembly in context.Assemblies)
+        {
+            if (assembly.IsDynamic)
+            {
+                continue;
+            }
+
+            if (string.Equals(assembly.Location, s_targetAssemblyPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return assembly;
+            }
+        }
+
+        try
+        {
+            return context.LoadFromAssemblyPath(s_targetAssemblyPath);
+        }
+        catch
+        {
+            return null;
         }
     }
 

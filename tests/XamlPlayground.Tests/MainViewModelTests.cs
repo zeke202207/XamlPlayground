@@ -770,6 +770,46 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void PreviewerHost_FileAssetLoaderReturnsTargetAssemblyForTemporaryXaml()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewerAsset-{Guid.NewGuid():N}");
+        var targetPath = Path.Combine(root, "PreviewTarget.dll");
+        var xamlPath = Path.Combine(root, "Preview.axaml");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllBytes(targetPath, CompileTestAssemblyImage("PreviewTarget", "public sealed class PreviewTargetType { }"));
+            File.WriteAllText(xamlPath, "<UserControl />");
+            var targetAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(targetPath);
+            var registrarType = typeof(XamlPlayground.PreviewerHost.Program).Assembly.GetType(
+                "XamlPlayground.PreviewerHost.RuntimeXamlLoaderRegistrar",
+                throwOnError: true);
+            Assert.NotNull(registrarType);
+            registrarType.GetMethod("Configure", BindingFlags.Static | BindingFlags.Public)
+                ?.Invoke(null, new object[] { targetPath });
+            var proxyType = registrarType.GetNestedType("AssetLoaderProxy", BindingFlags.NonPublic);
+            Assert.NotNull(proxyType);
+            var method = proxyType.GetMethod(
+                "CreateOpenAndGetAssemblyResult",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var result = method.Invoke(null, new object[] { typeof(ValueTuple<Stream, Assembly>), xamlPath });
+            var tuple = Assert.IsType<ValueTuple<Stream, Assembly>>(result);
+
+            tuple.Item1.Dispose();
+            Assert.Same(targetAssembly, tuple.Item2);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void StandardSolutionStorage_PreservesImportedProjectPathOnExport()
     {
         var solution = new InMemorySolution("StandardApp");

@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\XamlPlayground\XamlPlayground.csproj" />
+    <ProjectReference Include="..\..\src\XamlPlayground.PreviewerHost\XamlPlayground.PreviewerHost.csproj" />
   </ItemGroup>
 
   <ItemGroup>
