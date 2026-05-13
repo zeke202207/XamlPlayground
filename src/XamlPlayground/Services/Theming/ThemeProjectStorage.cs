@@ -44,6 +44,14 @@ public static class ThemeProjectStorage
         string name,
         IEnumerable<(string Path, string Text)> files)
     {
+        var document = CreateDocument(name, files);
+        return JsonSerializer.Serialize(document, ThemeProjectJsonContext.Default.ThemeProjectDocument);
+    }
+
+    public static ThemeProjectDocument CreateDocument(
+        string name,
+        IEnumerable<(string Path, string Text)> files)
+    {
         var document = new ThemeProjectDocument
         {
             Version = CurrentVersion,
@@ -68,7 +76,7 @@ public static class ThemeProjectStorage
             .OrderBy(static variant => variant, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return JsonSerializer.Serialize(document, ThemeProjectJsonContext.Default.ThemeProjectDocument);
+        return document;
     }
 
     public static ThemeProjectDocument Load(string json)

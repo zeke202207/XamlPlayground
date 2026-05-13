@@ -1,4 +1,6 @@
+using System;
 using System.Collections.ObjectModel;
+using System.Text;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -21,7 +23,13 @@ public sealed partial class SolutionExplorerNodeViewModel : ViewModelBase
         Kind = kind;
         Project = project;
         File = file;
-        OpenCommand = openCommand ?? new RelayCommand(() => { });
+        OpenCommand = openCommand ?? new RelayCommand(static () => { }, static () => false);
+        ExpandCommand = new RelayCommand(() => IsExpanded = true);
+        CollapseCommand = new RelayCommand(() => IsExpanded = false);
+        ExpandRecursiveCommand = new RelayCommand(() => SetExpandedRecursive(true));
+        CollapseRecursiveCommand = new RelayCommand(() => SetExpandedRecursive(false));
+        SearchText = CreateSearchText(title, project, file);
+        NormalizedSearchText = SearchText.ToLowerInvariant();
         _isExpanded = kind is ProjectFileKind.Solution or ProjectFileKind.Project or ProjectFileKind.Folder;
     }
 
@@ -37,6 +45,18 @@ public sealed partial class SolutionExplorerNodeViewModel : ViewModelBase
 
     public ICommand OpenCommand { get; }
 
+    public ICommand ExpandCommand { get; }
+
+    public ICommand CollapseCommand { get; }
+
+    public ICommand ExpandRecursiveCommand { get; }
+
+    public ICommand CollapseRecursiveCommand { get; }
+
+    public string SearchText { get; }
+
+    public string NormalizedSearchText { get; }
+
     public string Icon => Kind switch
     {
         ProjectFileKind.Solution => "\u25c7",
@@ -48,4 +68,55 @@ public sealed partial class SolutionExplorerNodeViewModel : ViewModelBase
         ProjectFileKind.ProjectFile => "{}",
         _ => "\u2022"
     };
+
+    public bool MatchesLiteralSearch(string normalizedSearchText)
+    {
+        return NormalizedSearchText.Contains(normalizedSearchText, StringComparison.Ordinal);
+    }
+
+    public SolutionExplorerNodeViewModel CloneShallow()
+    {
+        return new SolutionExplorerNodeViewModel(Title, Kind, OpenCommand, Project, File)
+        {
+            IsExpanded = IsExpanded
+        };
+    }
+
+    public void SetExpandedRecursive(bool isExpanded)
+    {
+        IsExpanded = isExpanded;
+
+        foreach (var child in Children)
+        {
+            child.SetExpandedRecursive(isExpanded);
+        }
+    }
+
+    private static string CreateSearchText(
+        string title,
+        InMemoryProject? project,
+        InMemoryProjectFile? file)
+    {
+        var builder = new StringBuilder(title);
+
+        if (project is { })
+        {
+            builder.Append(' ');
+            builder.Append(project.Name);
+            builder.Append(' ');
+            builder.Append(project.RootNamespace);
+            builder.Append(' ');
+            builder.Append(project.TemplateShortName);
+        }
+
+        if (file is { })
+        {
+            builder.Append(' ');
+            builder.Append(file.Path);
+            builder.Append(' ');
+            builder.Append(file.Kind);
+        }
+
+        return builder.ToString();
+    }
 }

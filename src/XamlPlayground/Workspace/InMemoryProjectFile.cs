@@ -17,16 +17,20 @@ public sealed partial class InMemoryProjectFile : ObservableObject
         string text,
         ProjectFileKind kind,
         Action<InMemoryProjectFile>? changed = null,
-        TextDocument? document = null)
+        TextDocument? document = null,
+        bool includeInRuntimePreview = true)
     {
         _path = NormalizePath(path);
         _document = document ?? new TextDocument { Text = text };
         Kind = kind;
+        IncludeInRuntimePreview = includeInRuntimePreview;
         _changed = changed;
         _document.TextChanged += DocumentOnTextChanged;
     }
 
     public ProjectFileKind Kind { get; }
+
+    public bool IncludeInRuntimePreview { get; }
 
     public string Name => GetFileName(Path);
 

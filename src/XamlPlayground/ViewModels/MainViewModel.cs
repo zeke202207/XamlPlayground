@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia;
@@ -34,6 +35,8 @@ namespace XamlPlayground.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private static readonly TimeSpan AutoRunDelay = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan SolutionExplorerSearchDelay = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan SolutionExplorerRegexTimeout = TimeSpan.FromMilliseconds(50);
     private const string PlaygroundXamlDocument = "Main.axaml";
 
     [ObservableProperty] private ObservableCollection<SampleViewModel> _samples;
@@ -48,6 +51,9 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private int _editorFontSize;
     [ObservableProperty] private InMemorySolution? _solution;
     [ObservableProperty] private ObservableCollection<SolutionExplorerNodeViewModel> _solutionExplorerNodes = new();
+    [ObservableProperty] private string _solutionExplorerSearchText = string.Empty;
+    [ObservableProperty] private bool _solutionExplorerSearchUseRegex;
+    [ObservableProperty] private string? _solutionExplorerSearchError;
     [ObservableProperty] private SolutionExplorerNodeViewModel? _selectedSolutionExplorerNode;
     [ObservableProperty] private NewProjectWizardViewModel _newProjectWizard = new();
     [ObservableProperty] private InMemoryProject? _activeProject;
@@ -62,6 +68,9 @@ public partial class MainViewModel : ViewModelBase
     private (Assembly? Assembly, AssemblyLoadContext? Context)? _previous;
     private IStorageFile? _openXamlFile;
     private IStorageFile? _openCodeFile;
+    private ObservableCollection<SolutionExplorerNodeViewModel> _allSolutionExplorerNodes = new();
+    private IDisposable? _solutionExplorerSearchThrottle;
+    private int _solutionExplorerSearchRevision;
     private IDisposable? _timer;
 
     public MainViewModel(string? initialGist)
@@ -79,6 +88,9 @@ public partial class MainViewModel : ViewModelBase
         CancelNewProjectCommand = new RelayCommand(() => NewProjectWizard.IsOpen = false);
         AddUserControlCommand = new RelayCommand(AddUserControl, () => ActiveProject is not null);
         AddResourceDictionaryCommand = new RelayCommand(AddResourceDictionary, () => ActiveProject is not null);
+        ImportSolutionCommand = new AsyncRelayCommand(ImportSolution);
+        ExportSolutionCommand = new AsyncRelayCommand(ExportSolution, CanExportSolution);
+        ExportStandardSolutionFolderCommand = new AsyncRelayCommand(ExportStandardSolutionFolder, CanExportSolution);
         BuildSolutionCommand = new RelayCommand(RunActiveDocument);
         OpenXamlFileCommand = new AsyncRelayCommand(async () => await OpenXamlFile());
         SaveXamlFileCommand = new AsyncRelayCommand(async () => await SaveXamlFile());
@@ -120,6 +132,12 @@ public partial class MainViewModel : ViewModelBase
 
     public ICommand AddResourceDictionaryCommand { get; }
 
+    public ICommand ImportSolutionCommand { get; }
+
+    public ICommand ExportSolutionCommand { get; }
+
+    public ICommand ExportStandardSolutionFolderCommand { get; }
+
     public ICommand BuildSolutionCommand { get; }
 
     public ICommand OpenXamlFileCommand { get; }
@@ -133,6 +151,14 @@ public partial class MainViewModel : ViewModelBase
     public bool IsLightTheme => !IsDarkTheme;
 
     public string ThemeToggleToolTip => IsDarkTheme ? "Switch to light theme" : "Switch to dark theme";
+
+    public bool HasSolutionExplorerSearchError => !string.IsNullOrWhiteSpace(SolutionExplorerSearchError);
+
+    public void ApplySolutionExplorerSearchNow()
+    {
+        CancelPendingSolutionExplorerSearch();
+        ApplySolutionExplorerSearch();
+    }
 
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
@@ -150,6 +176,12 @@ public partial class MainViewModel : ViewModelBase
             (AddUserControlCommand as RelayCommand)?.NotifyCanExecuteChanged();
             (AddResourceDictionaryCommand as RelayCommand)?.NotifyCanExecuteChanged();
             NotifyControlThemeCommandsChanged();
+        }
+
+        if (e.PropertyName == nameof(Solution))
+        {
+            (ExportSolutionCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+            (ExportStandardSolutionFolderCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         }
     }
 
@@ -179,6 +211,21 @@ public partial class MainViewModel : ViewModelBase
         }
 
         factory.ActivateErrors();
+    }
+
+    partial void OnSolutionExplorerSearchTextChanged(string value)
+    {
+        ScheduleSolutionExplorerSearch();
+    }
+
+    partial void OnSolutionExplorerSearchUseRegexChanged(bool value)
+    {
+        ScheduleSolutionExplorerSearch();
+    }
+
+    partial void OnSolutionExplorerSearchErrorChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasSolutionExplorerSearchError));
     }
 
     private void ToggleTheme()
@@ -357,7 +404,7 @@ public partial class MainViewModel : ViewModelBase
     {
         Solution = solution;
         ActiveProject = solution.Projects.FirstOrDefault();
-        SolutionExplorerNodes = BuildSolutionExplorer(solution);
+        SetSolutionExplorerNodes(solution);
         WorkspaceStatus = $"{solution.Name}: {solution.Projects.Count} project(s)";
 
         var firstXaml = ActiveProject?.GetXamlFiles()
@@ -381,6 +428,201 @@ public partial class MainViewModel : ViewModelBase
         RefreshControlThemes();
     }
 
+    private bool CanExportSolution()
+    {
+        return Solution is not null;
+    }
+
+    private async Task ExportSolution()
+    {
+        if (Solution is not { } solution || StorageProvider is null)
+        {
+            return;
+        }
+
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export solution",
+            FileTypeChoices = GetSolutionFileTypes(),
+            SuggestedFileName = $"{solution.Name}.xamlsln",
+            DefaultExtension = "xamlsln",
+            ShowOverwritePrompt = true
+        });
+
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var extension = Path.GetExtension(file.Name);
+            var isStandardSolutionMetadataExport = IsStandardSolutionMetadataExtension(extension);
+            var text = extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)
+                ? StandardSolutionStorage.SaveSlnx(solution)
+                : extension.Equals(".sln", StringComparison.OrdinalIgnoreCase)
+                    ? StandardSolutionStorage.SaveSln(solution)
+                    : SolutionStorage.Save(solution);
+            await WriteStorageFileTextAsync(file, text);
+            if (!isStandardSolutionMetadataExport)
+            {
+                MarkSolutionClean(solution);
+            }
+
+            WorkspaceStatus = isStandardSolutionMetadataExport
+                ? $"Exported {extension} solution metadata for {solution.Name}. Use folder export for project files."
+                : $"Exported solution {solution.Name}.";
+        }
+        catch (Exception exception)
+        {
+            WorkspaceStatus = $"Failed to export solution: {exception.Message}";
+        }
+    }
+
+    private async Task ExportStandardSolutionFolder()
+    {
+        if (Solution is not { } solution || StorageProvider is null || !StorageProvider.CanPickFolder)
+        {
+            return;
+        }
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Export standard solution folder",
+            AllowMultiple = false
+        });
+
+        var folder = folders.FirstOrDefault();
+        if (folder is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await StandardSolutionStorage.ExportStandardSolutionFolderAsync(solution, folder);
+            MarkSolutionClean(solution);
+            WorkspaceStatus = $"Exported {solution.Name}.sln, {solution.Name}.slnx, and project files.";
+        }
+        catch (Exception exception)
+        {
+            WorkspaceStatus = $"Failed to export standard solution folder: {exception.Message}";
+        }
+    }
+
+    private async Task ImportSolution()
+    {
+        if (StorageProvider is null)
+        {
+            return;
+        }
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import solution",
+            FileTypeFilter = GetSolutionFileTypes(),
+            AllowMultiple = false
+        });
+
+        var file = files.FirstOrDefault();
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var stream = await file.OpenReadAsync();
+            using var reader = new StreamReader(stream);
+            var text = await reader.ReadToEndAsync();
+            var solution = await LoadSolutionFileAsync(file, text);
+            _openXamlFile = null;
+            _openCodeFile = null;
+            CurrentSample = null;
+            Control = null;
+            DiagnosticsRoot = null;
+            LastErrorMessage = null;
+            LoadSolution(solution);
+            WorkspaceStatus = $"Imported solution {solution.Name}.";
+
+            if (EnableAutoRun && CanPreviewXamlFile(ActiveXamlFile))
+            {
+                RunActiveDocument();
+            }
+        }
+        catch (Exception exception)
+        {
+            WorkspaceStatus = $"Failed to import solution: {exception.Message}";
+        }
+    }
+
+    private async Task<InMemorySolution> LoadSolutionFileAsync(
+        IStorageFile file,
+        string text)
+    {
+        var extension = Path.GetExtension(file.Name);
+        if (extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase))
+        {
+            return await LoadStandardSolutionFileAsync(file, text);
+        }
+
+        return SolutionStorage.Load(text, OnProjectFileChanged);
+    }
+
+    private async Task<InMemorySolution> LoadStandardSolutionFileAsync(
+        IStorageFile file,
+        string text)
+    {
+        if (!OperatingSystem.IsBrowser() &&
+            file.Path.IsFile &&
+            File.Exists(file.Path.LocalPath))
+        {
+            try
+            {
+                return StandardSolutionStorage.LoadFromLocalPath(file.Path.LocalPath, text, OnProjectFileChanged);
+            }
+            catch
+            {
+                // Fall back to an explicit root-folder picker below. Some storage providers expose
+                // a path URI that cannot be used to read sibling project files.
+            }
+        }
+
+        if (StorageProvider is null || !StorageProvider.CanPickFolder)
+        {
+            throw new InvalidDataException("Standard .sln/.slnx import needs access to the solution root folder.");
+        }
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select solution root folder",
+            AllowMultiple = false
+        });
+
+        var folder = folders.FirstOrDefault();
+        if (folder is null)
+        {
+            throw new InvalidDataException("Standard solution import was canceled before selecting a solution root folder.");
+        }
+
+        return await StandardSolutionStorage.LoadFromStorageFolderAsync(file.Name, text, folder, OnProjectFileChanged);
+    }
+
+    private static void MarkSolutionClean(InMemorySolution solution)
+    {
+        foreach (var file in solution.Projects.SelectMany(static project => project.Files))
+        {
+            file.MarkClean();
+        }
+    }
+
+    private static bool IsStandardSolutionMetadataExtension(string extension)
+    {
+        return extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase);
+    }
+
     private ObservableCollection<SolutionExplorerNodeViewModel> BuildSolutionExplorer(InMemorySolution solution)
     {
         var solutionNode = new SolutionExplorerNodeViewModel($"Solution '{solution.Name}'", ProjectFileKind.Solution);
@@ -396,6 +638,158 @@ public partial class MainViewModel : ViewModelBase
         }
 
         return new ObservableCollection<SolutionExplorerNodeViewModel> { solutionNode };
+    }
+
+    private void SetSolutionExplorerNodes(InMemorySolution? solution)
+    {
+        CancelPendingSolutionExplorerSearch();
+        _allSolutionExplorerNodes = solution is { }
+            ? BuildSolutionExplorer(solution)
+            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        ApplySolutionExplorerSearch();
+    }
+
+    private void ScheduleSolutionExplorerSearch()
+    {
+        var revision = ++_solutionExplorerSearchRevision;
+        _solutionExplorerSearchThrottle?.Dispose();
+        _solutionExplorerSearchThrottle = null;
+
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            _ = ApplySolutionExplorerSearchAfterDelayAsync(revision);
+            return;
+        }
+
+        StartSolutionExplorerSearchTimer(revision);
+    }
+
+    private async Task ApplySolutionExplorerSearchAfterDelayAsync(int revision)
+    {
+        await Task.Delay(SolutionExplorerSearchDelay);
+        if (revision == _solutionExplorerSearchRevision)
+        {
+            ApplySolutionExplorerSearch();
+        }
+    }
+
+    private void StartSolutionExplorerSearchTimer(int revision)
+    {
+        if (revision != _solutionExplorerSearchRevision)
+        {
+            return;
+        }
+
+        _solutionExplorerSearchThrottle?.Dispose();
+        _solutionExplorerSearchThrottle = DispatcherTimer.RunOnce(() =>
+        {
+            _solutionExplorerSearchThrottle = null;
+            if (revision == _solutionExplorerSearchRevision)
+            {
+                ApplySolutionExplorerSearch();
+            }
+        }, SolutionExplorerSearchDelay);
+    }
+
+    private void CancelPendingSolutionExplorerSearch()
+    {
+        _solutionExplorerSearchRevision++;
+        _solutionExplorerSearchThrottle?.Dispose();
+        _solutionExplorerSearchThrottle = null;
+    }
+
+    private void ApplySolutionExplorerSearch()
+    {
+        SelectedSolutionExplorerNode = null;
+        SolutionExplorerSearchError = null;
+
+        var searchText = SolutionExplorerSearchText.Trim();
+        if (searchText.Length == 0)
+        {
+            SolutionExplorerNodes = _allSolutionExplorerNodes;
+            return;
+        }
+
+        Func<SolutionExplorerNodeViewModel, bool> isMatch;
+        if (SolutionExplorerSearchUseRegex)
+        {
+            Regex regex;
+            try
+            {
+                regex = new Regex(
+                    searchText,
+                    RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
+                    SolutionExplorerRegexTimeout);
+            }
+            catch (Exception exception) when (exception is ArgumentException or RegexParseException)
+            {
+                SolutionExplorerSearchError = $"Invalid regex: {exception.Message}";
+                SolutionExplorerNodes = _allSolutionExplorerNodes;
+                return;
+            }
+
+            isMatch = node => regex.IsMatch(node.SearchText);
+        }
+        else
+        {
+            var normalizedSearchText = searchText.ToLowerInvariant();
+            isMatch = node => node.MatchesLiteralSearch(normalizedSearchText);
+        }
+
+        var filteredNodes = new ObservableCollection<SolutionExplorerNodeViewModel>();
+        try
+        {
+            foreach (var node in _allSolutionExplorerNodes)
+            {
+                if (FilterSolutionExplorerNode(node, isMatch) is { } filteredNode)
+                {
+                    filteredNodes.Add(filteredNode);
+                }
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            SolutionExplorerSearchError = "Regex search timed out.";
+            SolutionExplorerNodes = _allSolutionExplorerNodes;
+            return;
+        }
+
+        SolutionExplorerNodes = filteredNodes;
+    }
+
+    private static SolutionExplorerNodeViewModel? FilterSolutionExplorerNode(
+        SolutionExplorerNodeViewModel node,
+        Func<SolutionExplorerNodeViewModel, bool> isMatch)
+    {
+        if (isMatch(node))
+        {
+            node.IsExpanded = true;
+            return node;
+        }
+
+        List<SolutionExplorerNodeViewModel>? filteredChildren = null;
+        foreach (var child in node.Children)
+        {
+            if (FilterSolutionExplorerNode(child, isMatch) is { } filteredChild)
+            {
+                filteredChildren ??= new List<SolutionExplorerNodeViewModel>();
+                filteredChildren.Add(filteredChild);
+            }
+        }
+
+        if (filteredChildren is null)
+        {
+            return null;
+        }
+
+        var clone = node.CloneShallow();
+        foreach (var filteredChild in filteredChildren)
+        {
+            clone.Children.Add(filteredChild);
+        }
+
+        clone.IsExpanded = true;
+        return clone;
     }
 
     private void AddFileNode(SolutionExplorerNodeViewModel projectNode, InMemoryProject project, InMemoryProjectFile file)
@@ -550,9 +944,7 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var file = _solutionFactory.AddUserControl(project);
-        SolutionExplorerNodes = Solution is { } solution
-            ? BuildSolutionExplorer(solution)
-            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        SetSolutionExplorerNodes(Solution);
         RefreshControlThemes();
         OpenWorkspaceFile(file);
     }
@@ -565,9 +957,7 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var file = _solutionFactory.AddResourceDictionary(project);
-        SolutionExplorerNodes = Solution is { } solution
-            ? BuildSolutionExplorer(solution)
-            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        SetSolutionExplorerNodes(Solution);
         RefreshControlThemes();
         OpenWorkspaceFile(file);
     }
@@ -657,6 +1047,18 @@ public partial class MainViewModel : ViewModelBase
         };
     }
 
+    private static List<FilePickerFileType> GetSolutionFileTypes()
+    {
+        return new List<FilePickerFileType>
+        {
+            StorageService.SolutionProject,
+            StorageService.VisualStudioXmlSolution,
+            StorageService.VisualStudioSolution,
+            StorageService.Json,
+            StorageService.All
+        };
+    }
+
     private static List<FilePickerFileType> GetCodeFileTypes()
     {
         return new List<FilePickerFileType>
@@ -703,7 +1105,15 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        if (resourceChanged && !ReferenceEquals(file, ActiveXamlFile) && CanPreviewXamlFile(ActiveXamlFile))
+        if (ReferenceEquals(file, ActiveXamlFile) && !CanPreviewXamlFile(ActiveXamlFile))
+        {
+            return;
+        }
+
+        if (resourceChanged &&
+            file.IncludeInRuntimePreview &&
+            !ReferenceEquals(file, ActiveXamlFile) &&
+            CanPreviewXamlFile(ActiveXamlFile))
         {
             RunActiveDocument();
             return;
@@ -807,7 +1217,7 @@ public partial class MainViewModel : ViewModelBase
 
             RuntimeXamlPreviewLoader.ApplyProjectResources(
                 project?.GetXamlFiles()
-                    .Where(static file => file.Kind == ProjectFileKind.Resource)
+                    .Where(static file => file.Kind == ProjectFileKind.Resource && file.IncludeInRuntimePreview)
                     .Select(static file => (file.Path, file.Text)) ??
                 Array.Empty<(string Path, string Text)>(),
                 scriptAssembly,
@@ -873,8 +1283,13 @@ public partial class MainViewModel : ViewModelBase
 
     private static bool CanPreviewXamlFile(InMemoryProjectFile? file)
     {
-        return file?.Kind is ProjectFileKind.Xaml or ProjectFileKind.Resource &&
-               !file.Path.Equals("App.axaml", StringComparison.OrdinalIgnoreCase);
+        if (file is null || file.Path.Equals("App.axaml", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return file.Kind == ProjectFileKind.Xaml ||
+               file.Kind == ProjectFileKind.Resource && file.IncludeInRuntimePreview;
     }
 
     private static bool TryValidateXml(string? xaml, out string? errorMessage)
@@ -1054,9 +1469,7 @@ public partial class MainViewModel : ViewModelBase
                 try
                 {
                     _openXamlFile = file;
-                    await using var stream = await _openXamlFile.OpenWriteAsync();
-                    await using var writer = new StreamWriter(stream);
-                    await writer.WriteAsync(ActiveXamlFile.Text);
+                    await WriteStorageFileTextAsync(_openXamlFile, ActiveXamlFile.Text);
                     ActiveXamlFile.MarkClean();
                 }
                 catch (Exception exception)
@@ -1067,9 +1480,7 @@ public partial class MainViewModel : ViewModelBase
         }
         else
         {
-            await using var stream = await _openXamlFile.OpenWriteAsync();
-            await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(ActiveXamlFile.Text);
+            await WriteStorageFileTextAsync(_openXamlFile, ActiveXamlFile.Text);
             ActiveXamlFile.MarkClean();
         }
     }
@@ -1140,9 +1551,7 @@ public partial class MainViewModel : ViewModelBase
                 try
                 {
                     _openCodeFile = file;
-                    await using var stream = await _openCodeFile.OpenWriteAsync();
-                    await using var writer = new StreamWriter(stream);
-                    await writer.WriteAsync(ActiveCodeFile.Text);
+                    await WriteStorageFileTextAsync(_openCodeFile, ActiveCodeFile.Text);
                     ActiveCodeFile.MarkClean();
                 }
                 catch (Exception exception)
@@ -1153,10 +1562,23 @@ public partial class MainViewModel : ViewModelBase
         }
         else
         {
-            await using var stream = await _openCodeFile.OpenWriteAsync();
-            await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(ActiveCodeFile.Text);
+            await WriteStorageFileTextAsync(_openCodeFile, ActiveCodeFile.Text);
             ActiveCodeFile.MarkClean();
         }
+    }
+
+    private static async Task WriteStorageFileTextAsync(IStorageFile file, string text)
+    {
+        await using var stream = await file.OpenWriteAsync();
+        try
+        {
+            stream.SetLength(0);
+        }
+        catch (NotSupportedException)
+        {
+        }
+
+        await using var writer = new StreamWriter(stream);
+        await writer.WriteAsync(text);
     }
 }
