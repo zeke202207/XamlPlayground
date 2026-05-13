@@ -7,11 +7,16 @@ namespace XamlPlayground.Workspace;
 
 public sealed class InMemoryProject
 {
-    public InMemoryProject(string name, string rootNamespace, string templateShortName)
+    public InMemoryProject(
+        string name,
+        string rootNamespace,
+        string templateShortName,
+        string? projectFilePath = null)
     {
         Name = name;
         RootNamespace = rootNamespace;
         TemplateShortName = templateShortName;
+        ProjectFilePath = NormalizeProjectFilePath(projectFilePath);
     }
 
     public string Name { get; }
@@ -19,6 +24,8 @@ public sealed class InMemoryProject
     public string RootNamespace { get; }
 
     public string TemplateShortName { get; }
+
+    public string? ProjectFilePath { get; }
 
     public ObservableCollection<InMemoryProjectFile> Files { get; } = new();
 
@@ -66,5 +73,11 @@ public sealed class InMemoryProject
         }
 
         return FindFile(codeFile.Path[..^".cs".Length]);
+    }
+
+    private static string? NormalizeProjectFilePath(string? path)
+    {
+        var normalizedPath = path?.Replace('\\', '/').Trim('/');
+        return string.IsNullOrWhiteSpace(normalizedPath) ? null : normalizedPath;
     }
 }

@@ -28,6 +28,8 @@ public sealed class SolutionProjectDocument
 
     public string TemplateShortName { get; set; } = string.Empty;
 
+    public string? ProjectFilePath { get; set; }
+
     public List<SolutionProjectFileDocument> Files { get; set; } = new();
 }
 
@@ -68,6 +70,7 @@ public static class SolutionStorage
                     Name = project.Name,
                     RootNamespace = string.IsNullOrWhiteSpace(project.RootNamespace) ? project.Name : project.RootNamespace,
                     TemplateShortName = project.TemplateShortName,
+                    ProjectFilePath = project.ProjectFilePath,
                     Files = project.Files
                         .Where(static file => !string.IsNullOrWhiteSpace(file.Path))
                         .OrderBy(static file => file.Path, StringComparer.OrdinalIgnoreCase)
@@ -119,7 +122,8 @@ public static class SolutionStorage
             var project = new InMemoryProject(
                 projectName,
                 rootNamespace,
-                projectDocument.TemplateShortName ?? string.Empty);
+                projectDocument.TemplateShortName ?? string.Empty,
+                projectDocument.ProjectFilePath);
             solution.Projects.Add(project);
 
             foreach (var fileDocument in projectDocument.Files ?? new List<SolutionProjectFileDocument>())

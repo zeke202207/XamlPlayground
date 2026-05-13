@@ -464,6 +464,47 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void SolutionStorage_RoundTripsProjectFilePath()
+    {
+        var solution = new InMemorySolution("StandardApp");
+        var project = new InMemoryProject(
+            "StandardApp",
+            "StandardApp",
+            "standard.csproj",
+            "src/StandardApp/StandardApp.csproj");
+        project.AddFile(new InMemoryProjectFile("StandardApp.csproj", "<Project />", ProjectFileKind.ProjectFile));
+        solution.Projects.Add(project);
+
+        var loaded = SolutionStorage.Load(SolutionStorage.Save(solution));
+        var loadedProject = Assert.Single(loaded.Projects);
+
+        Assert.Equal("src/StandardApp/StandardApp.csproj", loadedProject.ProjectFilePath);
+    }
+
+    [Fact]
+    public void StandardSolutionStorage_PreservesImportedProjectPathOnExport()
+    {
+        var solution = new InMemorySolution("StandardApp");
+        var project = new InMemoryProject(
+            "StandardApp",
+            "StandardApp",
+            "standard.csproj",
+            "src/StandardApp/StandardApp.csproj");
+        project.AddFile(new InMemoryProjectFile("StandardApp.csproj", "<Project />", ProjectFileKind.ProjectFile));
+        solution.Projects.Add(project);
+
+        var slnEntry = Assert.Single(StandardSolutionStorage.ParseSolutionEntries(
+            "StandardApp.sln",
+            StandardSolutionStorage.SaveSln(solution)));
+        var slnxEntry = Assert.Single(StandardSolutionStorage.ParseSolutionEntries(
+            "StandardApp.slnx",
+            StandardSolutionStorage.SaveSlnx(solution)));
+
+        Assert.Equal("src/StandardApp/StandardApp.csproj", slnEntry.Path);
+        Assert.Equal("src/StandardApp/StandardApp.csproj", slnxEntry.Path);
+    }
+
+    [Fact]
     public void StandardSolutionStorage_WritesSlnProjectTypeGuidForProjectExtension()
     {
         var solution = new InMemorySolution("Mixed");
@@ -591,6 +632,11 @@ public sealed class MainViewModelTests
 
         Assert.Equal("Shared/Foo.cs", paths["Linked/Shared/Foo.cs"]);
         Assert.Equal("Shared/Bar.cs", paths["Linked/Bar.cs"]);
+
+        var nestedPaths = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            method.Invoke(null, new object[] { "src/ImportedApp", projectText }));
+        Assert.Equal("src/Shared/Foo.cs", nestedPaths["Linked/Shared/Foo.cs"]);
+        Assert.Equal("src/Shared/Bar.cs", nestedPaths["Linked/Bar.cs"]);
     }
 
     [Fact]

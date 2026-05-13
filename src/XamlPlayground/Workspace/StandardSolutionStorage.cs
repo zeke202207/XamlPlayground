@@ -67,7 +67,7 @@ public static class StandardSolutionStorage
         foreach (var project in solution.Projects)
         {
             var projectFileName = GetProjectFileName(project);
-            var projectPath = $"{EscapeSlnValue(project.Name)}/{EscapeSlnValue(projectFileName)}";
+            var projectPath = EscapeSlnValue(GetProjectSolutionPath(project, projectFileName));
             var projectTypeGuid = GetProjectTypeGuid(projectFileName);
             var projectGuid = CreateStableGuid($"{solution.Name}/{project.Name}");
             builder.AppendLine(
@@ -105,7 +105,7 @@ public static class StandardSolutionStorage
             new XElement("Solution",
                 solution.Projects.Select(project =>
                     new XElement("Project",
-                        new XAttribute("Path", $"{project.Name}/{GetProjectFileName(project)}")))));
+                        new XAttribute("Path", GetProjectSolutionPath(project, GetProjectFileName(project)))))));
         return document.ToString(SaveOptions.None) + Environment.NewLine;
     }
 
@@ -118,7 +118,7 @@ public static class StandardSolutionStorage
 
         foreach (var project in solution.Projects)
         {
-            var projectFolderPath = SolutionStorage.NormalizeProjectPath(project.Name);
+            var projectFolderPath = GetProjectFolderPath(project);
             var projectFile = GetProjectFile(project);
             var explicitExportPaths = projectFile is null
                 ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -359,7 +359,8 @@ public static class StandardSolutionStorage
         return new InMemoryProject(
             projectName,
             string.IsNullOrWhiteSpace(rootNamespace) ? CreateIdentifier(projectName) : rootNamespace,
-            $"standard.{Path.GetExtension(entry.Path).TrimStart('.')}");
+            $"standard.{Path.GetExtension(entry.Path).TrimStart('.')}",
+            entry.Path);
     }
 
     private static IEnumerable<LocalProjectFile> EnumerateLocalProjectFiles(
@@ -690,6 +691,31 @@ public static class StandardSolutionStorage
         return project.Files.FirstOrDefault(static file =>
             file.Kind == ProjectFileKind.ProjectFile &&
             IsSupportedProjectPath(file.Path));
+    }
+
+    private static string GetProjectSolutionPath(InMemoryProject project, string projectFileName)
+    {
+        if (!string.IsNullOrWhiteSpace(project.ProjectFilePath) &&
+            IsSupportedProjectPath(project.ProjectFilePath))
+        {
+            return SolutionStorage.NormalizeProjectPath(project.ProjectFilePath);
+        }
+
+        return $"{SolutionStorage.NormalizeProjectPath(project.Name)}/{SolutionStorage.NormalizeProjectPath(projectFileName)}";
+    }
+
+    private static string GetProjectFolderPath(InMemoryProject project)
+    {
+        if (!string.IsNullOrWhiteSpace(project.ProjectFilePath))
+        {
+            var folder = Path.GetDirectoryName(project.ProjectFilePath)?.Replace('\\', '/');
+            if (!string.IsNullOrWhiteSpace(folder))
+            {
+                return SolutionStorage.NormalizeProjectPath(folder);
+            }
+        }
+
+        return SolutionStorage.NormalizeProjectPath(project.Name);
     }
 
     private static string GetProjectTypeGuid(string projectFileName)
