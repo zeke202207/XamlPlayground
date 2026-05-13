@@ -104,11 +104,24 @@ internal static class XamlBindingMarkup
         var builder = new StringBuilder();
         var braceDepth = 0;
         char? quote = null;
+        var escaped = false;
         foreach (var character in value)
         {
             if (quote is { } currentQuote)
             {
                 builder.Append(character);
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (character == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
                 if (character == currentQuote)
                 {
                     quote = null;
@@ -177,11 +190,24 @@ internal static class XamlBindingMarkup
     {
         var braceDepth = 0;
         char? quote = null;
+        var escaped = false;
         for (var i = 0; i < value.Length; i++)
         {
             var character = value[i];
             if (quote is { } currentQuote)
             {
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (character == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
                 if (character == currentQuote)
                 {
                     quote = null;
@@ -223,7 +249,28 @@ internal static class XamlBindingMarkup
         return value.Length >= 2 &&
                ((value[0] == '\'' && value[^1] == '\'') ||
                 (value[0] == '"' && value[^1] == '"'))
-            ? value[1..^1]
+            ? UnescapeQuotedBindingValue(value[1..^1], value[0])
             : value;
+    }
+
+    private static string UnescapeQuotedBindingValue(string value, char quote)
+    {
+        var builder = new StringBuilder(value.Length);
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            if (character == '\\' &&
+                index + 1 < value.Length &&
+                (value[index + 1] == quote || value[index + 1] == '\\'))
+            {
+                builder.Append(value[index + 1]);
+                index++;
+                continue;
+            }
+
+            builder.Append(character);
+        }
+
+        return builder.ToString();
     }
 }

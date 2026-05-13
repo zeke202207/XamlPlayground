@@ -364,4 +364,42 @@ public sealed class XamlDesignInspectorTests
         Assert.Equal("{}{0}, {1}", binding.StringFormat);
         Assert.Equal("N/A, unknown", binding.FallbackValue);
     }
+
+    [Fact]
+    public void Editor_QuotesBindingMarkupValuesWithBothQuoteCharacters()
+    {
+        var fallback = "Bob's \"unknown\", N/A";
+        var markup = XamlDesignEditor.BuildBindingMarkup(
+            "Binding",
+            "Title",
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            fallback,
+            string.Empty);
+        var inspector = new XamlDesignInspector();
+        var editor = new XamlDesignEditor();
+        var xaml = "<TextBlock xmlns=\"https://github.com/avaloniaui\" Text=\"{Binding Title}\" />";
+        var binding = inspector.Analyze(new[]
+            {
+                new XamlDesignDocument("Main.axaml", xaml, IsResourceDictionary: false)
+            })
+            .Bindings
+            .Single();
+
+        var edit = editor.ReplaceBinding(xaml, binding, markup);
+        var updatedBinding = inspector.Analyze(new[]
+            {
+                new XamlDesignDocument("Main.axaml", edit.Text, IsResourceDictionary: false)
+            })
+            .Bindings
+            .Single();
+
+        Assert.Contains("FallbackValue='Bob\\'s \"unknown\", N/A'", markup);
+        Assert.DoesNotContain("&amp;apos;", edit.Text);
+        Assert.Equal(fallback, updatedBinding.FallbackValue);
+    }
 }

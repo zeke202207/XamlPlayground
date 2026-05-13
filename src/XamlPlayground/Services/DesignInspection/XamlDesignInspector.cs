@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using Microsoft.Language.Xml;
 using XamlPlayground.Services.Editing;
 
@@ -290,7 +291,7 @@ public sealed class XamlDesignInspector
             return false;
         }
 
-        var rawValue = attribute.Value;
+        var rawValue = DecodeXmlAttributeValue(attribute.Value);
         var parsed = XamlBindingMarkup.Parse(rawValue);
         var propertyName = attribute.Name;
         var ownerType = element.NameNode.FullName;
@@ -327,6 +328,11 @@ public sealed class XamlDesignInspector
             editLength,
             editText);
         return true;
+    }
+
+    private static string DecodeXmlAttributeValue(string value)
+    {
+        return WebUtility.HtmlDecode(value) ?? value;
     }
 
     private static XamlBindingDefinition CreateObjectElementBinding(

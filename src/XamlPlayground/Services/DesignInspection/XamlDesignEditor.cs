@@ -402,7 +402,14 @@ public sealed class XamlDesignEditor
             return $"\"{value}\"";
         }
 
-        return $"'{value.Replace("'", "&apos;", StringComparison.Ordinal)}'";
+        return $"'{EscapeBindingMarkupQuotedValue(value, '\'')}'";
+    }
+
+    private static string EscapeBindingMarkupQuotedValue(string value, char quote)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace(quote.ToString(), $"\\{quote}", StringComparison.Ordinal);
     }
 
     private static bool RequiresBindingMarkupQuote(string value)
