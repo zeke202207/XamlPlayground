@@ -72,12 +72,21 @@ public sealed class StyleSetterEditorViewModel : ViewModelBase
     private string _propertyName;
     private string _value;
 
-    public StyleSetterEditorViewModel(string propertyName, string value, bool isComplex, int? line = null)
+    public StyleSetterEditorViewModel(
+        string propertyName,
+        string value,
+        bool isComplex,
+        int? line = null,
+        int start = -1,
+        int length = 0)
     {
         _propertyName = propertyName;
         _value = value;
+        OriginalPropertyName = propertyName;
         IsComplex = isComplex;
         Line = line;
+        Start = start;
+        Length = length;
     }
 
     public string PropertyName
@@ -95,6 +104,12 @@ public sealed class StyleSetterEditorViewModel : ViewModelBase
     public bool IsComplex { get; }
 
     public int? Line { get; }
+
+    public string OriginalPropertyName { get; }
+
+    public int Start { get; }
+
+    public int Length { get; }
 
     public string Kind => IsComplex ? "Element" : "Attribute";
 }

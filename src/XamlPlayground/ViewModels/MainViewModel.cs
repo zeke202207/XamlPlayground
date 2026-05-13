@@ -675,7 +675,8 @@ public partial class MainViewModel : ViewModelBase
         {
             RefreshControlThemes();
         }
-        else if (file.IsXaml)
+
+        if (file.IsXaml)
         {
             RefreshThemeResourceAnalysis();
             RefreshDesignInspection();

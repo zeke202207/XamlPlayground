@@ -102,6 +102,58 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void StyleSetterGridPropertyRename_ReplacesSelectedSetter()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ActiveXamlFile!.Text = """
+                                         <UserControl xmlns="https://github.com/avaloniaui">
+                                           <UserControl.Styles>
+                                             <Style Selector="Button.primary">
+                                               <Setter Property="Background" Value="Blue" />
+                                             </Style>
+                                           </UserControl.Styles>
+                                           <Button Classes="primary" />
+                                         </UserControl>
+                                         """;
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+        var setter = Assert.IsType<StyleSetterEditorViewModel>(viewModel.SelectedStyleEditorSetter);
+
+        setter.PropertyName = "Foreground";
+        setter.Value = "Red";
+        viewModel.ApplyStyleEditorCommand.Execute(null);
+
+        Assert.Contains("Property=\"Foreground\" Value=\"Red\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Property=\"Background\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.Single(viewModel.StyleEditorSetters);
+    }
+
+    [Fact]
+    public void ResourceFileTextChange_RefreshesDesignInspection()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var resourceFile = Assert.Single(
+            viewModel.ActiveProject!.Files,
+            file => file.Path == "Styles/Resources.axaml");
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+
+        resourceFile.Text = """
+                            <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                              <SolidColorBrush x:Key="PanelBrush" Color="#112233" />
+                            </ResourceDictionary>
+                            """;
+
+        var resourceNodes = viewModel.ResourceInspectorNodes.SelectMany(static node => node.Children);
+        Assert.Contains(resourceNodes, static node => node.Title == "PanelBrush");
+        Assert.DoesNotContain(resourceNodes, static node => node.Title == "AccentBrush");
+        Assert.Contains("1 resource(s)", viewModel.DesignInspectionStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StyleSetterUnknownProperty_IsPreservedWhenStyleIsSelected()
     {
         TestApplication.EnsureAvaloniaInitialized();

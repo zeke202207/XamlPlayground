@@ -41,7 +41,8 @@ public sealed class XamlDesignEditor
         XamlStyleDefinition style,
         string selector,
         string propertyName,
-        string value)
+        string value,
+        XamlStyleSetterDefinition? selectedSetter = null)
     {
         if (string.IsNullOrWhiteSpace(propertyName))
         {
@@ -53,30 +54,31 @@ public sealed class XamlDesignEditor
             return new XamlDesignEditResult(false, xaml, error);
         }
 
-        var edited = xaml;
-        if (!string.Equals(XamlTextEditor.GetAttributeValue(element, "Selector"), selector, StringComparison.Ordinal) &&
-            !string.IsNullOrWhiteSpace(selector))
-        {
-            edited = XamlTextEditor.SetAttributeValue(edited, element, "Selector", selector.Trim());
-            if (!TryFindStyle(edited, style with { Selector = selector.Trim() }, out element, out error))
-            {
-                return new XamlDesignEditResult(false, xaml, error);
-            }
-        }
-
         var property = propertyName.Trim();
-        var setter = XamlTextEditor.DirectChildElements(element)
+        var setter = selectedSetter is null
+            ? null
+            : FindStyleSetter(xaml, element, selectedSetter);
+        setter ??= XamlTextEditor.DirectChildElements(element)
             .FirstOrDefault(child =>
                 string.Equals(child.NameNode.LocalName, "Setter", StringComparison.Ordinal) &&
                 string.Equals(XamlTextEditor.GetAttributeValue(child, "Property"), property, StringComparison.Ordinal));
         var setterText = CreateSetterText(property, value ?? string.Empty);
+        var edited = setter is null
+            ? XamlTextEditor.InsertChild(xaml, element, setterText)
+            : XamlTextEditor.ReplaceElement(xaml, setter, setterText);
 
-        if (setter is null)
+        if (!string.Equals(XamlTextEditor.GetAttributeValue(element, "Selector"), selector, StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(selector))
         {
-            return new XamlDesignEditResult(true, XamlTextEditor.InsertChild(edited, element, setterText));
+            if (!TryFindStyle(edited, style, out element, out error))
+            {
+                return new XamlDesignEditResult(false, xaml, error);
+            }
+
+            edited = XamlTextEditor.SetAttributeValue(edited, element, "Selector", selector.Trim());
         }
 
-        return new XamlDesignEditResult(true, XamlTextEditor.ReplaceElement(edited, setter, setterText));
+        return new XamlDesignEditResult(true, edited);
     }
 
     public XamlDesignEditResult AddStyleToDocument(
@@ -432,6 +434,25 @@ public sealed class XamlDesignEditor
 
         element = match;
         return true;
+    }
+
+    private static IXmlElementSyntax? FindStyleSetter(
+        string xaml,
+        IXmlElementSyntax style,
+        XamlStyleSetterDefinition setter)
+    {
+        var setters = XamlTextEditor.DirectChildElements(style)
+            .Where(static child => string.Equals(child.NameNode.LocalName, "Setter", StringComparison.Ordinal))
+            .ToArray();
+
+        return setters.FirstOrDefault(child =>
+                   child.AsNode.Span.Start == setter.Start &&
+                   child.AsNode.Span.Length == setter.Length) ??
+               setters.FirstOrDefault(child =>
+                   XamlTextEditor.GetLineNumber(xaml, child.AsNode.Span.Start) == setter.Line &&
+                   string.Equals(XamlTextEditor.GetAttributeValue(child, "Property"), setter.Property, StringComparison.Ordinal)) ??
+               setters.FirstOrDefault(child =>
+                   string.Equals(XamlTextEditor.GetAttributeValue(child, "Property"), setter.Property, StringComparison.Ordinal));
     }
 
     private static IXmlElementSyntax? FindRootMember(IXmlElementSyntax root, string memberName)

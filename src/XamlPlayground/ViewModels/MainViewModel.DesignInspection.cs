@@ -540,7 +540,9 @@ public partial class MainViewModel
                     setter.Property,
                     setter.Value,
                     setter.IsComplex,
-                    setter.Line)));
+                    setter.Line,
+                    setter.Start,
+                    setter.Length)));
             SelectedStyleEditorSetter = node?.StyleSetter is { } selectedSetter
                 ? StyleEditorSetters.FirstOrDefault(setter =>
                     string.Equals(setter.PropertyName, selectedSetter.Property, StringComparison.Ordinal))
@@ -766,7 +768,13 @@ public partial class MainViewModel
         {
             edit = string.IsNullOrWhiteSpace(StyleEditorPropertyName)
                 ? _designEditor.SetStyleSelector(targetFile.Text, style, StyleEditorSelector)
-                : _designEditor.SetStyleSetter(targetFile.Text, style, StyleEditorSelector, StyleEditorPropertyName, StyleEditorValue);
+                : _designEditor.SetStyleSetter(
+                    targetFile.Text,
+                    style,
+                    StyleEditorSelector,
+                    StyleEditorPropertyName,
+                    StyleEditorValue,
+                    CreateSelectedStyleSetterDefinition(style));
         }
         else
         {
@@ -778,6 +786,23 @@ public partial class MainViewModel
 
         ApplyDesignFileEdit(targetFile, edit, $"Updated style {StyleEditorSelector}.");
         SelectStyleBySelector(StyleEditorSelector);
+    }
+
+    private XamlStyleSetterDefinition? CreateSelectedStyleSetterDefinition(XamlStyleDefinition style)
+    {
+        if (SelectedStyleEditorSetter is not { } setter)
+        {
+            return null;
+        }
+
+        return new XamlStyleSetterDefinition(
+            setter.OriginalPropertyName,
+            setter.Value,
+            setter.IsComplex,
+            style.FilePath,
+            setter.Line ?? 0,
+            setter.Start,
+            setter.Length);
     }
 
     private bool CanCreateStyleFromSelectedElement()
