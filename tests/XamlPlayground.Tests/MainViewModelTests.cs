@@ -1639,16 +1639,57 @@ public sealed class MainViewModelTests
                 BindingFlags.Static | BindingFlags.NonPublic);
             Assert.NotNull(method);
 
-            var resolved = Assert.IsType<string>(method.Invoke(null, new object[] { project }));
+            var resolved = Assert.IsType<string>(method.Invoke(null, new object[] { project, true, false }));
 
             Assert.Equal(net10Output, resolved);
         }
         finally
         {
-            if (Directory.Exists(root))
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void WorkspacePreviewTargetAssemblyResolution_PrefersNewestOutputWhenCachedPathIsIgnored()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewTargetRefresh-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var oldOutput = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        var newOutput = Path.Combine(projectDirectory, "bin", "Debug", "net8.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(oldOutput)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(newOutput)!);
+            File.WriteAllBytes(oldOutput, CompileTestAssemblyImage("SampleApp", "public sealed class OldOutput { }"));
+            File.WriteAllBytes(newOutput, CompileTestAssemblyImage("SampleApp", "public sealed class NewOutput { }"));
+            var oldTime = DateTime.UtcNow.AddMinutes(-10);
+            var newTime = DateTime.UtcNow.AddMinutes(10);
+            File.SetLastWriteTimeUtc(oldOutput, oldTime);
+            File.SetLastWriteTimeUtc(newOutput, newTime);
+
+            var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
             {
-                Directory.Delete(root, recursive: true);
-            }
+                AssemblyName = "SampleApp",
+                OutputAssemblyPath = oldOutput,
+                TargetFramework = "net10.0",
+                IsMsBuildWorkspace = true
+            };
+            var method = typeof(MainViewModel).GetMethod(
+                "ResolveWorkspaceTargetAssemblyPath",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var cached = Assert.IsType<string>(method.Invoke(null, new object[] { project, true, false }));
+            var refreshed = Assert.IsType<string>(method.Invoke(null, new object[] { project, false, true }));
+
+            Assert.Equal(oldOutput, cached);
+            Assert.Equal(newOutput, refreshed);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
         }
     }
 

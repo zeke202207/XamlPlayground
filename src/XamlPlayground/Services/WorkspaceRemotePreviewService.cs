@@ -60,15 +60,29 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
                 workingDirectory);
             try
             {
-                _process = new Process
+                var process = new Process
                 {
                     StartInfo = startInfo,
                     EnableRaisingEvents = true
                 };
-                _process.Exited += (_, _) =>
+                _process = process;
+                process.Exited += (_, _) =>
                 {
-                    var exitCode = _process?.ExitCode;
-                    if (exitCode is not 0 and not null)
+                    int exitCode;
+                    try
+                    {
+                        exitCode = process.ExitCode;
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        return;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        return;
+                    }
+
+                    if (exitCode != 0)
                     {
                         ErrorReceived?.Invoke(new WorkspaceRemotePreviewError(
                             $"Workspace preview host exited with code {exitCode}.",
@@ -77,16 +91,16 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
                             null));
                     }
                 };
-                _process.ErrorDataReceived += (_, e) =>
+                process.ErrorDataReceived += (_, e) =>
                 {
                     if (!string.IsNullOrWhiteSpace(e.Data))
                     {
                         ErrorReceived?.Invoke(new WorkspaceRemotePreviewError(e.Data, null, null, null));
                     }
                 };
-                _process.Start();
-                _process.BeginOutputReadLine();
-                _process.BeginErrorReadLine();
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
             }
             catch (Exception exception)
             {

@@ -1988,7 +1988,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 noRestore: !ShouldRestoreWorkspaceProjectBeforeBuild(project));
             if (result.ExitCode == 0)
             {
-                project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
+                project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(
+                    project,
+                    preferCached: false,
+                    preferNewest: true) ?? project.OutputAssemblyPath;
                 AddWorkspaceOutputDirectoryReferences(project);
                 WorkspaceStatus = $"{project.Name}: build refreshed.";
                 return true;
@@ -2220,9 +2223,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             : ResolveWorkspaceFilePath(Path.Combine(projectDirectory, file.Path));
     }
 
-    private static string? ResolveWorkspaceTargetAssemblyPath(InMemoryProject project)
+    private static string? ResolveWorkspaceTargetAssemblyPath(
+        InMemoryProject project,
+        bool preferCached = true,
+        bool preferNewest = false)
     {
-        if (!string.IsNullOrWhiteSpace(project.OutputAssemblyPath) &&
+        if (preferCached &&
+            !string.IsNullOrWhiteSpace(project.OutputAssemblyPath) &&
             File.Exists(project.OutputAssemblyPath))
         {
             return project.OutputAssemblyPath;
@@ -2240,15 +2247,32 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         var targetName = (string.IsNullOrWhiteSpace(project.AssemblyName)
             ? project.Name
             : project.AssemblyName) + ".dll";
+        var candidates = EnumerateWorkspaceTargetAssemblyCandidates(projectDirectory, project.TargetFramework, targetName)
+            .Where(static candidate => File.Exists(candidate))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (!preferNewest)
+        {
+            return candidates.FirstOrDefault();
+        }
+
+        return candidates
+            .OrderByDescending(GetFileLastWriteTimeUtc)
+            .ThenBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private static IEnumerable<string> EnumerateWorkspaceTargetAssemblyCandidates(
+        string projectDirectory,
+        string? targetFramework,
+        string targetName)
+    {
         foreach (var configuration in new[] { "Debug", "Release" })
         {
-            if (!string.IsNullOrWhiteSpace(project.TargetFramework))
+            if (!string.IsNullOrWhiteSpace(targetFramework))
             {
-                var candidate = Path.Combine(projectDirectory, "bin", configuration, project.TargetFramework, targetName);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
+                yield return Path.Combine(projectDirectory, "bin", configuration, targetFramework, targetName);
             }
 
             var configurationRoot = Path.Combine(projectDirectory, "bin", configuration);
@@ -2259,11 +2283,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
             foreach (var framework in PreferredWorkspacePreviewFrameworks)
             {
-                var candidate = Path.Combine(configurationRoot, framework, targetName);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
+                yield return Path.Combine(configurationRoot, framework, targetName);
             }
         }
 
@@ -2275,23 +2295,36 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 continue;
             }
 
+            string[] discoveredCandidates;
             try
             {
-                var candidate = Directory
+                discoveredCandidates = Directory
                     .EnumerateFiles(configurationRoot, targetName, SearchOption.AllDirectories)
                     .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
-                    .FirstOrDefault();
-                if (!string.IsNullOrWhiteSpace(candidate))
-                {
-                    return candidate;
-                }
+                    .ToArray();
             }
             catch
             {
+                continue;
+            }
+
+            foreach (var candidate in discoveredCandidates)
+            {
+                yield return candidate;
             }
         }
+    }
 
-        return null;
+    private static DateTime GetFileLastWriteTimeUtc(string path)
+    {
+        try
+        {
+            return File.GetLastWriteTimeUtc(path);
+        }
+        catch
+        {
+            return DateTime.MinValue;
+        }
     }
 
     private static string? ResolveWorkspaceFilePath(string? path)
