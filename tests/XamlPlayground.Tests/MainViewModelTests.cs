@@ -554,6 +554,46 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void StandardSolutionStorage_ResolvesStorageExplicitIncludesInsideSolutionRoot()
+    {
+        var method = typeof(StandardSolutionStorage).GetMethod(
+            "TryResolveSolutionRelativePath",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.Equal(
+            "Shared/Foo.cs",
+            method.Invoke(null, new object[] { "ImportedApp", @"..\Shared\Foo.cs" }));
+        Assert.Equal(
+            "ImportedApp/Views/MainView.axaml",
+            method.Invoke(null, new object[] { "ImportedApp", @"Views\MainView.axaml" }));
+        Assert.Null(method.Invoke(null, new object[] { "ImportedApp", @"..\..\Outside\Foo.cs" }));
+    }
+
+    [Fact]
+    public void StandardSolutionStorage_MapsExplicitExportPathsToProjectIncludeLocations()
+    {
+        var method = typeof(StandardSolutionStorage).GetMethod(
+            "CreateExplicitExportPaths",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var projectText = """
+                          <Project Sdk="Microsoft.NET.Sdk">
+                            <ItemGroup>
+                              <Compile Include="..\Shared\Foo.cs" />
+                              <Compile Include="..\Shared\Bar.cs" Link="Linked\Bar.cs" />
+                            </ItemGroup>
+                          </Project>
+                          """;
+
+        var paths = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            method.Invoke(null, new object[] { "ImportedApp", projectText }));
+
+        Assert.Equal("Shared/Foo.cs", paths["Linked/Shared/Foo.cs"]);
+        Assert.Equal("Shared/Bar.cs", paths["Linked/Bar.cs"]);
+    }
+
+    [Fact]
     public void ExportSolution_DoesNotMarkCleanForStandardMetadataOnlyExtensions()
     {
         var method = typeof(MainViewModel).GetMethod(

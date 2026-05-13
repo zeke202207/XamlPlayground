@@ -118,10 +118,20 @@ public static class StandardSolutionStorage
 
         foreach (var project in solution.Projects)
         {
-            var projectFolder = await GetOrCreateFolderAsync(targetFolder, project.Name);
+            var projectFolderPath = SolutionStorage.NormalizeProjectPath(project.Name);
+            var projectFile = GetProjectFile(project);
+            var explicitExportPaths = projectFile is null
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : CreateExplicitExportPaths(projectFolderPath, projectFile.Text);
             foreach (var file in project.Files.OrderBy(static file => file.Path, StringComparer.OrdinalIgnoreCase))
             {
-                await WriteStorageFilePathAsync(projectFolder, file.Path, file.Text);
+                var targetPath = explicitExportPaths.TryGetValue(file.Path, out var explicitPath)
+                    ? explicitPath
+                    : CombineSolutionPath(projectFolderPath, file.Path);
+                if (targetPath is not null)
+                {
+                    await WriteStorageFilePathAsync(targetFolder, targetPath, file.Text);
+                }
             }
         }
     }
@@ -284,23 +294,54 @@ public static class StandardSolutionStorage
             ProjectFileKind.ProjectFile,
             fileChanged));
 
-        var projectFolderPath = Path.GetDirectoryName(entry.Path)?.Replace('\\', '/');
+        var projectFolderPath = Path.GetDirectoryName(entry.Path)?.Replace('\\', '/') ?? string.Empty;
         var projectFolder = string.IsNullOrWhiteSpace(projectFolderPath)
             ? solutionRoot
             : await GetStorageFolderByPathAsync(solutionRoot, projectFolderPath);
 
-        var files = await EnumerateStorageProjectFilesAsync(projectFolder, string.Empty);
-        foreach (var file in files.OrderBy(static file => file.Path, StringComparer.OrdinalIgnoreCase))
+        var files = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in await EnumerateStorageProjectFilesAsync(projectFolder, string.Empty))
         {
-            if (project.FindFile(file.Path) is not null)
+            files.TryAdd(file.Path, file.Text);
+        }
+
+        foreach (var include in ReadExplicitProjectIncludes(projectText))
+        {
+            if (HasGlobSyntax(include.Include) ||
+                TryResolveSolutionRelativePath(projectFolderPath, include.Include) is not { } includePath ||
+                HasIgnoredPathSegment(includePath) ||
+                !IsImportableFilePath(includePath))
+            {
+                continue;
+            }
+
+            var includeFile = await TryGetStorageFileByPathAsync(solutionRoot, includePath);
+            if (includeFile is null)
+            {
+                continue;
+            }
+
+            var projectFilePath = CreateStorageExplicitProjectFilePath(projectFolderPath, includePath, include);
+            if (!HasIgnoredPathSegment(projectFilePath) &&
+                !files.ContainsKey(projectFilePath))
+            {
+                files.TryAdd(
+                    projectFilePath,
+                    await ReadStorageFileTextAsync(includeFile));
+            }
+        }
+
+        foreach (var file in files.OrderBy(static file => file.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            if (project.FindFile(file.Key) is not null)
             {
                 continue;
             }
 
             project.AddFile(new InMemoryProjectFile(
-                file.Path,
-                file.Text,
-                ClassifyFile(file.Path, file.Text),
+                file.Key,
+                file.Value,
+                ClassifyFile(file.Key, file.Value),
                 fileChanged));
         }
 
@@ -355,7 +396,7 @@ public static class StandardSolutionStorage
                 !fullPath.Equals(projectPath, StringComparison.OrdinalIgnoreCase) &&
                 IsImportableFilePath(fullPath))
             {
-                var projectFilePath = CreateExplicitProjectFilePath(projectDirectory, fullPath, include);
+                var projectFilePath = CreateLocalExplicitProjectFilePath(projectDirectory, fullPath, include);
                 if (!HasIgnoredPathSegment(projectFilePath))
                 {
                     if (files.TryGetValue(projectFilePath, out var existingFullPath) &&
@@ -423,7 +464,7 @@ public static class StandardSolutionStorage
         }
     }
 
-    private static string CreateExplicitProjectFilePath(
+    private static string CreateLocalExplicitProjectFilePath(
         string projectDirectory,
         string fullPath,
         ProjectItemInclude include)
@@ -441,13 +482,63 @@ public static class StandardSolutionStorage
             return SolutionStorage.NormalizeProjectPath(normalizedRelativePath);
         }
 
-        var normalizedInclude = include.Include.Replace('\\', '/').Trim('/');
+        return CreateLinkedProjectPath(include.Include, Path.GetFileName(fullPath));
+    }
+
+    private static string CreateStorageExplicitProjectFilePath(
+        string projectFolderPath,
+        string solutionFilePath,
+        ProjectItemInclude include)
+    {
+        if (!string.IsNullOrWhiteSpace(include.Link))
+        {
+            return SolutionStorage.NormalizeProjectPath(include.Link);
+        }
+
+        if (TryGetProjectRelativePath(projectFolderPath, solutionFilePath, out var relativePath))
+        {
+            return SolutionStorage.NormalizeProjectPath(relativePath);
+        }
+
+        return CreateLinkedProjectPath(include.Include, Path.GetFileName(solutionFilePath));
+    }
+
+    private static Dictionary<string, string> CreateExplicitExportPaths(
+        string projectFolderPath,
+        string projectText)
+    {
+        var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var include in ReadExplicitProjectIncludes(projectText))
+        {
+            if (HasGlobSyntax(include.Include) ||
+                TryResolveSolutionRelativePath(projectFolderPath, include.Include) is not { } targetPath ||
+                HasIgnoredPathSegment(targetPath) ||
+                !IsImportableFilePath(targetPath))
+            {
+                continue;
+            }
+
+            var projectFilePath = CreateStorageExplicitProjectFilePath(projectFolderPath, targetPath, include);
+            if (!HasIgnoredPathSegment(projectFilePath))
+            {
+                paths.TryAdd(projectFilePath, targetPath);
+            }
+        }
+
+        return paths;
+    }
+
+    private static string CreateLinkedProjectPath(
+        string includePath,
+        string fallbackFileName)
+    {
+        var normalizedInclude = includePath.Replace('\\', '/').Trim('/');
         var segments = normalizedInclude
             .Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Where(static segment => segment is not "." and not "..")
             .ToArray();
         var linkedPath = segments.Length == 0
-            ? Path.GetFileName(fullPath)
+            ? fallbackFileName
             : string.Join('/', segments);
         return SolutionStorage.NormalizeProjectPath($"Linked/{linkedPath}");
     }
@@ -590,10 +681,15 @@ public static class StandardSolutionStorage
 
     private static string GetProjectFileName(InMemoryProject project)
     {
-        return project.Files.FirstOrDefault(static file =>
-                   file.Kind == ProjectFileKind.ProjectFile &&
-                   IsSupportedProjectPath(file.Path))?.Name ??
+        return GetProjectFile(project)?.Name ??
                $"{project.Name}.csproj";
+    }
+
+    private static InMemoryProjectFile? GetProjectFile(InMemoryProject project)
+    {
+        return project.Files.FirstOrDefault(static file =>
+            file.Kind == ProjectFileKind.ProjectFile &&
+            IsSupportedProjectPath(file.Path));
     }
 
     private static string GetProjectTypeGuid(string projectFileName)
@@ -628,6 +724,88 @@ public static class StandardSolutionStorage
         return normalized.Trim('/');
     }
 
+    private static string? CombineSolutionPath(string folderPath, string path)
+    {
+        return TryResolveSolutionRelativePath(folderPath, path);
+    }
+
+    private static string? TryResolveSolutionRelativePath(string baseFolderPath, string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath) ||
+            IsRootedProjectPath(relativePath))
+        {
+            return null;
+        }
+
+        var segments = new List<string>();
+        foreach (var segment in NormalizeRelativePath(baseFolderPath).Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment is not "." and not "..")
+            {
+                segments.Add(segment);
+            }
+        }
+
+        foreach (var segment in relativePath.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            switch (segment)
+            {
+                case ".":
+                    break;
+                case ".." when segments.Count > 0:
+                    segments.RemoveAt(segments.Count - 1);
+                    break;
+                case "..":
+                    return null;
+                default:
+                    segments.Add(segment);
+                    break;
+            }
+        }
+
+        return segments.Count == 0 ? null : string.Join('/', segments);
+    }
+
+    private static bool TryGetProjectRelativePath(
+        string projectFolderPath,
+        string solutionFilePath,
+        out string relativePath)
+    {
+        var normalizedProjectFolder = NormalizeRelativePath(projectFolderPath);
+        var normalizedFilePath = NormalizeRelativePath(solutionFilePath);
+        if (string.IsNullOrWhiteSpace(normalizedProjectFolder))
+        {
+            relativePath = normalizedFilePath;
+            return true;
+        }
+
+        if (normalizedFilePath.StartsWith($"{normalizedProjectFolder}/", StringComparison.OrdinalIgnoreCase))
+        {
+            relativePath = normalizedFilePath[(normalizedProjectFolder.Length + 1)..];
+            return true;
+        }
+
+        relativePath = string.Empty;
+        return false;
+    }
+
+    private static bool IsRootedProjectPath(string path)
+    {
+        return Path.IsPathRooted(path) ||
+               Regex.IsMatch(path, "^[A-Za-z]:[\\\\/]", RegexOptions.CultureInvariant);
+    }
+
+    private static string NormalizeRelativePath(string path)
+    {
+        var normalized = path.Replace('\\', '/').Trim('/');
+        while (normalized.Contains("//", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        return normalized;
+    }
+
     private static string CreateStableGuid(string value)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
@@ -657,6 +835,20 @@ public static class StandardSolutionStorage
 
         return await folder.GetFileAsync(segments[^1]) ??
                throw new FileNotFoundException($"File '{segments[^1]}' was not found.");
+    }
+
+    private static async Task<IStorageFile?> TryGetStorageFileByPathAsync(
+        IStorageFolder root,
+        string path)
+    {
+        try
+        {
+            return await GetStorageFileByPathAsync(root, path);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static async Task<IStorageFolder> GetStorageFolderByPathAsync(
