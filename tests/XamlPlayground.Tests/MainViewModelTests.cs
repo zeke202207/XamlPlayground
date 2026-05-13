@@ -75,6 +75,33 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void StyleSetterGridEdit_UpdatesAppliedSetterValue()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ActiveXamlFile!.Text = """
+                                         <UserControl xmlns="https://github.com/avaloniaui">
+                                           <UserControl.Styles>
+                                             <Style Selector="Button.primary">
+                                               <Setter Property="Background" Value="Blue" />
+                                             </Style>
+                                           </UserControl.Styles>
+                                           <Button Classes="primary" />
+                                         </UserControl>
+                                         """;
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+        var setter = Assert.IsType<StyleSetterEditorViewModel>(viewModel.SelectedStyleEditorSetter);
+
+        setter.Value = "Red";
+        viewModel.ApplyStyleEditorCommand.Execute(null);
+
+        Assert.Equal("Red", viewModel.StyleEditorValue);
+        Assert.Contains("Value=\"Red\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Value=\"Blue\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RuntimePreviewLoader_LoadsXClassUserControlWithCodeBehindRepeatedly()
     {
         TestApplication.EnsureAvaloniaInitialized();

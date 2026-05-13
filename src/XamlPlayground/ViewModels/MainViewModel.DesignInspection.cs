@@ -27,9 +27,11 @@ public partial class MainViewModel
     private XamlStyleDefinition? _selectedStyleDefinition;
     private XamlBindingDefinition? _selectedBindingDefinition;
     private XamlResourceDefinition? _selectedResourceDefinition;
+    private StyleSetterEditorViewModel? _observedStyleEditorSetter;
     private bool _isRefreshingDesignInspection;
     private bool _isUpdatingStyleEditor;
     private bool _isApplyingDesignInspectionEdit;
+    private bool _isSyncingStyleEditorSetter;
 
     [ObservableProperty] private ObservableCollection<DesignInspectorNodeViewModel> _styleInspectorNodes = new();
     [ObservableProperty] private HierarchicalModel<DesignInspectorNodeViewModel>? _styleInspectorModel;
@@ -168,14 +170,85 @@ public partial class MainViewModel
 
     partial void OnSelectedStyleEditorSetterChanged(StyleSetterEditorViewModel? value)
     {
+        ObserveStyleEditorSetter(value);
         if (value is null || _isUpdatingStyleEditor)
         {
             return;
         }
 
-        StyleEditorPropertyName = value.PropertyName;
-        StyleEditorValue = value.Value;
+        SyncStyleEditorFieldsFromSetter(value);
         RefreshStyleEditorPropertyOptions();
+    }
+
+    private void ObserveStyleEditorSetter(StyleSetterEditorViewModel? setter)
+    {
+        if (ReferenceEquals(_observedStyleEditorSetter, setter))
+        {
+            return;
+        }
+
+        if (_observedStyleEditorSetter is not null)
+        {
+            _observedStyleEditorSetter.PropertyChanged -= StyleEditorSetterOnPropertyChanged;
+        }
+
+        _observedStyleEditorSetter = setter;
+        if (_observedStyleEditorSetter is not null)
+        {
+            _observedStyleEditorSetter.PropertyChanged += StyleEditorSetterOnPropertyChanged;
+        }
+    }
+
+    private void StyleEditorSetterOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_isUpdatingStyleEditor ||
+            _isSyncingStyleEditorSetter ||
+            !ReferenceEquals(sender, SelectedStyleEditorSetter) ||
+            e.PropertyName is not (nameof(StyleSetterEditorViewModel.PropertyName) or nameof(StyleSetterEditorViewModel.Value)) ||
+            sender is not StyleSetterEditorViewModel setter)
+        {
+            return;
+        }
+
+        SyncStyleEditorFieldsFromSetter(setter);
+        RefreshStyleEditorPropertyOptions();
+        RefreshStylePreview();
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    private void SyncStyleEditorFieldsFromSetter(StyleSetterEditorViewModel setter)
+    {
+        _isSyncingStyleEditorSetter = true;
+        try
+        {
+            StyleEditorPropertyName = setter.PropertyName;
+            StyleEditorValue = setter.Value;
+        }
+        finally
+        {
+            _isSyncingStyleEditorSetter = false;
+        }
+    }
+
+    private void SyncSelectedStyleEditorSetterFromFields()
+    {
+        if (_isUpdatingStyleEditor ||
+            _isSyncingStyleEditorSetter ||
+            SelectedStyleEditorSetter is not { } setter)
+        {
+            return;
+        }
+
+        _isSyncingStyleEditorSetter = true;
+        try
+        {
+            setter.PropertyName = StyleEditorPropertyName;
+            setter.Value = StyleEditorValue;
+        }
+        finally
+        {
+            _isSyncingStyleEditorSetter = false;
+        }
     }
 
     partial void OnSelectedStyleEditorAvailablePropertyChanged(VisualEditorAvailablePropertyViewModel? value)
@@ -191,12 +264,14 @@ public partial class MainViewModel
 
     partial void OnStyleEditorPropertyNameChanged(string value)
     {
+        SyncSelectedStyleEditorSetterFromFields();
         RefreshStyleEditorPropertyOptions();
         NotifyDesignInspectionCommandsChanged();
     }
 
     partial void OnStyleEditorValueChanged(string value)
     {
+        SyncSelectedStyleEditorSetterFromFields();
         NotifyDesignInspectionCommandsChanged();
     }
 
