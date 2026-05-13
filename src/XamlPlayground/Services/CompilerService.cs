@@ -306,7 +306,9 @@ public static class CompilerService
                 continue;
             }
 
-            var key = GetReferenceKey(metadataReference) ?? workspaceReference.Name;
+            var key = workspaceReference.Image is { Length: > 0 }
+                ? workspaceReference.Name
+                : GetReferenceKey(metadataReference) ?? workspaceReference.Name;
             if (!keys.Add(key))
             {
                 continue;

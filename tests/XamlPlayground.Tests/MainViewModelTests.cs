@@ -712,6 +712,103 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task MsBuildWorkspaceLoader_WiresStorageProjectReferencesFromSiblingSource()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("StorageWorkspace");
+        var coreProject = new InMemoryProject("Core", "Core", "browser.storage", "Core/Core.csproj")
+        {
+            AssemblyName = "Core"
+        };
+        coreProject.AddFile(new InMemoryProjectFile(
+            "Core.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            ProjectFileKind.ProjectFile));
+        coreProject.AddFile(new InMemoryProjectFile(
+            "CoreValue.cs",
+            """
+            namespace Core;
+
+            public sealed class CoreValue
+            {
+                public string Name => "Core";
+            }
+            """,
+            ProjectFileKind.CSharp));
+        var libProject = new InMemoryProject("Lib", "Lib", "browser.storage", "Lib/Lib.csproj")
+        {
+            AssemblyName = "Lib"
+        };
+        libProject.AddFile(new InMemoryProjectFile(
+            "Lib.csproj",
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <ProjectReference Include="..\Core\Core.csproj" />
+              </ItemGroup>
+            </Project>
+            """,
+            ProjectFileKind.ProjectFile));
+        libProject.AddFile(new InMemoryProjectFile(
+            "LibValue.cs",
+            """
+            using Core;
+
+            namespace Lib;
+
+            public sealed class LibValue
+            {
+                public CoreValue Value { get; } = new();
+            }
+            """,
+            ProjectFileKind.CSharp));
+        var appProject = new InMemoryProject("App", "App", "browser.storage", "App/App.csproj")
+        {
+            AssemblyName = "App"
+        };
+        appProject.AddFile(new InMemoryProjectFile(
+            "App.csproj",
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <ProjectReference Include="..\Lib\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """,
+            ProjectFileKind.ProjectFile));
+        appProject.AddFile(new InMemoryProjectFile(
+            "AppViewModel.cs",
+            """
+            using Lib;
+
+            namespace App;
+
+            public sealed class AppViewModel
+            {
+                public string Name => new LibValue().Value.Name;
+            }
+            """,
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(appProject);
+        solution.Projects.Add(libProject);
+        solution.Projects.Add(coreProject);
+
+        await AddStorageProjectReferencesForTestAsync(solution);
+
+        Assert.Contains(appProject.AssemblyReferences, reference => reference.Name == "Lib" && reference.Image is { Length: > 0 });
+        Assert.Contains(appProject.AssemblyReferences, reference => reference.Name == "Core" && reference.Image is { Length: > 0 });
+        var result = await CompilerService.GetProjectAssembly(
+            appProject.AssemblyName,
+            appProject.GetCSharpFileSnapshot(),
+            appProject.AssemblyReferences);
+
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+    }
+
+    [Fact]
     public void MsBuildWorkspaceLoader_ResolvesNestedStorageSolutionProjectPaths()
     {
         var method = typeof(MsBuildWorkspaceLoader).GetMethod(
@@ -3593,6 +3690,18 @@ public sealed class MainViewModelTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(method);
         method.Invoke(viewModel, new object[] { solution });
+    }
+
+    private static async Task AddStorageProjectReferencesForTestAsync(InMemorySolution solution)
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "AddStorageProjectReferencesAsync",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = Assert.IsAssignableFrom<Task>(method.Invoke(
+            null,
+            new object?[] { solution, null, CancellationToken.None }));
+        await task;
     }
 
     private static void ActivateWorkspaceFile(MainViewModel viewModel, InMemoryProjectFile file)

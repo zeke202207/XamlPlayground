@@ -11,6 +11,7 @@ using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
+using XamlPlayground.Services;
 
 namespace XamlPlayground.Workspace;
 
@@ -190,6 +191,7 @@ public static class MsBuildWorkspaceLoader
             throw new InvalidDataException("No supported projects could be loaded from the selected directory.");
         }
 
+        await AddStorageProjectReferencesAsync(solution, progress, cancellationToken);
         return solution;
     }
 
@@ -395,6 +397,250 @@ public static class MsBuildWorkspaceLoader
         }
 
         return project;
+    }
+
+    private static async Task AddStorageProjectReferencesAsync(
+        InMemorySolution solution,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var projectsByPath = solution.Projects
+            .Where(static project => !string.IsNullOrWhiteSpace(project.ProjectFilePath))
+            .ToDictionary(static project => NormalizePath(project.ProjectFilePath!), StringComparer.OrdinalIgnoreCase);
+        var emittedReferences = new Dictionary<string, Task<WorkspaceAssemblyReference?>>(StringComparer.OrdinalIgnoreCase);
+        var completed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var project in solution.Projects)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await AddStorageProjectReferencesToProjectAsync(
+                project,
+                projectsByPath,
+                emittedReferences,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                completed,
+                progress,
+                cancellationToken);
+        }
+    }
+
+    private static async Task AddStorageProjectReferencesToProjectAsync(
+        InMemoryProject project,
+        IReadOnlyDictionary<string, InMemoryProject> projectsByPath,
+        Dictionary<string, Task<WorkspaceAssemblyReference?>> emittedReferences,
+        HashSet<string> visiting,
+        HashSet<string> completed,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var projectKey = GetStorageProjectKey(project);
+        if (completed.Contains(projectKey))
+        {
+            return;
+        }
+
+        if (!visiting.Add(projectKey))
+        {
+            progress?.Report($"Skipped cyclic project reference for {project.Name}.");
+            return;
+        }
+
+        foreach (var referencedProject in GetStorageProjectReferences(project, projectsByPath))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await AddStorageProjectReferencesToProjectAsync(
+                referencedProject,
+                projectsByPath,
+                emittedReferences,
+                visiting,
+                completed,
+                progress,
+                cancellationToken);
+
+            foreach (var transitiveReference in referencedProject.AssemblyReferences)
+            {
+                AddReference(project, transitiveReference);
+            }
+
+            var reference = await GetOrCreateStorageProjectReferenceAssemblyAsync(
+                referencedProject,
+                emittedReferences,
+                progress,
+                cancellationToken);
+            AddReference(project, reference);
+        }
+
+        visiting.Remove(projectKey);
+        completed.Add(projectKey);
+    }
+
+    private static IEnumerable<InMemoryProject> GetStorageProjectReferences(
+        InMemoryProject project,
+        IReadOnlyDictionary<string, InMemoryProject> projectsByPath)
+    {
+        var projectFile = project.Files.FirstOrDefault(static file => file.Kind == ProjectFileKind.ProjectFile);
+        if (projectFile is null)
+        {
+            yield break;
+        }
+
+        var projectDirectory = GetDirectoryName(project.ProjectFilePath ?? projectFile.Path);
+        foreach (var referencePath in ReadProjectReferencePaths(projectFile.Text))
+        {
+            var resolvedPath = CollapseRelativeSegments(
+                string.IsNullOrWhiteSpace(projectDirectory)
+                    ? referencePath
+                    : $"{projectDirectory.TrimEnd('/')}/{referencePath}");
+            if (projectsByPath.TryGetValue(resolvedPath, out var referencedProject) &&
+                !ReferenceEquals(project, referencedProject))
+            {
+                yield return referencedProject;
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> ReadProjectReferencePaths(string projectText)
+    {
+        try
+        {
+            var document = XDocument.Parse(projectText, LoadOptions.None);
+            return document
+                .Descendants()
+                .Where(static element => element.Name.LocalName == "ProjectReference")
+                .Select(static element => element.Attribute("Include")?.Value)
+                .Where(static include => !string.IsNullOrWhiteSpace(include))
+                .Select(static include => NormalizePath(include!))
+                .ToArray();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    private static Task<WorkspaceAssemblyReference?> GetOrCreateStorageProjectReferenceAssemblyAsync(
+        InMemoryProject referencedProject,
+        Dictionary<string, Task<WorkspaceAssemblyReference?>> emittedReferences,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var projectKey = GetStorageProjectKey(referencedProject);
+        if (!emittedReferences.TryGetValue(projectKey, out var task))
+        {
+            task = CreateStorageProjectReferenceAssemblyAsync(referencedProject, progress, cancellationToken);
+            emittedReferences[projectKey] = task;
+        }
+
+        return task;
+    }
+
+    private static async Task<WorkspaceAssemblyReference?> CreateStorageProjectReferenceAssemblyAsync(
+        InMemoryProject referencedProject,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var sourceFiles = referencedProject.GetCSharpFileSnapshot();
+            if (sourceFiles.Length == 0)
+            {
+                return null;
+            }
+
+            var parseOptions = referencedProject.CSharpParseOptions ??
+                               CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
+            var syntaxTrees = sourceFiles
+                .Where(static file => !string.IsNullOrWhiteSpace(file.Text))
+                .Select(file => CSharpSyntaxTree.ParseText(file.Text, parseOptions, file.Path, cancellationToken: cancellationToken))
+                .ToArray();
+            var references = await GetStorageCompilationReferencesAsync(referencedProject);
+            var compilationOptions = (referencedProject.CSharpCompilationOptions ??
+                                      new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+                .WithOutputKind(OutputKind.DynamicallyLinkedLibrary)
+                .WithOptimizationLevel(OptimizationLevel.Release);
+            var assemblyName = string.IsNullOrWhiteSpace(referencedProject.AssemblyName)
+                ? referencedProject.Name
+                : referencedProject.AssemblyName;
+            var compilation = CSharpCompilation.Create(
+                assemblyName,
+                syntaxTrees,
+                references,
+                compilationOptions);
+
+            using var stream = new MemoryStream();
+            var result = compilation.Emit(stream, cancellationToken: cancellationToken);
+            if (!result.Success)
+            {
+                var firstError = result.Diagnostics.FirstOrDefault(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+                if (firstError is { })
+                {
+                    progress?.Report($"Could not compile storage project reference {referencedProject.Name}: {firstError.GetMessage()}");
+                }
+
+                return null;
+            }
+
+            return WorkspaceAssemblyReference.FromImage(
+                assemblyName + ".dll",
+                stream.ToArray(),
+                isRuntimeAssembly: true);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            progress?.Report($"Could not compile storage project reference {referencedProject.Name}: {exception.Message}");
+            return null;
+        }
+    }
+
+    private static async Task<IReadOnlyList<PortableExecutableReference>> GetStorageCompilationReferencesAsync(
+        InMemoryProject project)
+    {
+        var references = new List<PortableExecutableReference>();
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var workspaceReference in project.AssemblyReferences)
+        {
+            var metadataReference = workspaceReference.CreateMetadataReference();
+            var key = workspaceReference.Image is { Length: > 0 }
+                ? workspaceReference.Name
+                : metadataReference is { }
+                    ? GetReferenceKey(metadataReference)
+                    : workspaceReference.Name;
+            if (metadataReference is { } && !string.IsNullOrWhiteSpace(key) && keys.Add(key))
+            {
+                references.Add(metadataReference);
+            }
+        }
+
+        foreach (var baseReference in await CompilerService.GetMetadataReferences())
+        {
+            var key = GetReferenceKey(baseReference);
+            if (!string.IsNullOrWhiteSpace(key) && keys.Add(key))
+            {
+                references.Add(baseReference);
+            }
+        }
+
+        return references;
+    }
+
+    private static string GetStorageProjectKey(InMemoryProject project)
+    {
+        return string.IsNullOrWhiteSpace(project.ProjectFilePath)
+            ? project.Name
+            : NormalizePath(project.ProjectFilePath);
+    }
+
+    private static string? GetReferenceKey(PortableExecutableReference reference)
+    {
+        var path = reference.FilePath ?? reference.Display;
+        return string.IsNullOrWhiteSpace(path)
+            ? null
+            : Path.GetFileNameWithoutExtension(path);
     }
 
     private static async Task AddRoslynReferencesAsync(
