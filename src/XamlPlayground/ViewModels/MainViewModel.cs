@@ -1982,7 +1982,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         try
         {
             WorkspaceStatus = $"Building {project.Name}...";
-            var result = await RunDotNetBuildAsync(projectFilePath);
+            var result = await RunDotNetBuildAsync(
+                projectFilePath,
+                noRestore: !ShouldRestoreWorkspaceProjectBeforeBuild(project));
             if (result.ExitCode == 0)
             {
                 project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
@@ -1996,6 +1998,48 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         catch (Exception exception)
         {
             Console.WriteLine(exception);
+        }
+
+        return false;
+    }
+
+    private static bool ShouldRestoreWorkspaceProjectBeforeBuild(InMemoryProject project)
+    {
+        var targetAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
+        if (string.IsNullOrWhiteSpace(targetAssemblyPath) || !File.Exists(targetAssemblyPath))
+        {
+            return true;
+        }
+
+        DateTime outputWriteTime;
+        try
+        {
+            outputWriteTime = File.GetLastWriteTimeUtc(targetAssemblyPath);
+        }
+        catch
+        {
+            return true;
+        }
+
+        foreach (var file in project.Files.Where(static file => file.Kind == ProjectFileKind.ProjectFile))
+        {
+            var projectInputPath = ResolveWorkspaceProjectInputPath(project, file);
+            if (string.IsNullOrWhiteSpace(projectInputPath) || !File.Exists(projectInputPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (File.GetLastWriteTimeUtc(projectInputPath) > outputWriteTime)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         return false;
@@ -2287,19 +2331,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             : null;
     }
 
-    private static async Task<DotNetProcessResult> RunDotNetBuildAsync(string projectPath)
+    private static async Task<DotNetProcessResult> RunDotNetBuildAsync(string projectPath, bool noRestore)
     {
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo("dotnet")
+        using var process = new Process
         {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
+            StartInfo = CreateDotNetBuildStartInfo(projectPath, noRestore)
         };
-        process.StartInfo.ArgumentList.Add("build");
-        process.StartInfo.ArgumentList.Add(projectPath);
-        process.StartInfo.ArgumentList.Add("--no-restore");
-        process.StartInfo.ArgumentList.Add("--nologo");
 
         if (!process.Start())
         {
@@ -2318,6 +2355,25 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             .Distinct()
             .ToArray();
         return new DotNetProcessResult(process.ExitCode, lines);
+    }
+
+    private static ProcessStartInfo CreateDotNetBuildStartInfo(string projectPath, bool noRestore)
+    {
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add("build");
+        startInfo.ArgumentList.Add(projectPath);
+        if (noRestore)
+        {
+            startInfo.ArgumentList.Add("--no-restore");
+        }
+
+        startInfo.ArgumentList.Add("--nologo");
+        return startInfo;
     }
 
     private static bool CanPreviewXamlFile(InMemoryProjectFile? file)

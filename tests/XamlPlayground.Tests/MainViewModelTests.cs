@@ -1690,6 +1690,77 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void WorkspaceBuildRestoreRequirement_DetectsProjectFileNewerThanOutput()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundBuildRestore-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        var sourcePath = Path.Combine(projectDirectory, "ViewModel.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(sourcePath, "public sealed class ViewModel { }");
+            File.WriteAllText(outputPath, "not a real assembly");
+
+            var oldTime = DateTime.UtcNow.AddMinutes(-10);
+            var newTime = DateTime.UtcNow.AddMinutes(10);
+            File.SetLastWriteTimeUtc(outputPath, oldTime);
+            File.SetLastWriteTimeUtc(projectPath, newTime);
+            File.SetLastWriteTimeUtc(sourcePath, newTime);
+
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                OutputAssemblyPath = outputPath,
+                IsMsBuildWorkspace = true
+            };
+            project.AddFile(new InMemoryProjectFile(
+                "SampleApp.csproj",
+                "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+                ProjectFileKind.ProjectFile,
+                sourcePath: projectPath));
+            project.AddFile(new InMemoryProjectFile(
+                "ViewModel.cs",
+                "public sealed class ViewModel { }",
+                ProjectFileKind.CSharp,
+                sourcePath: sourcePath));
+            var method = typeof(MainViewModel).GetMethod(
+                "ShouldRestoreWorkspaceProjectBeforeBuild",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object[] { project })!);
+
+            File.SetLastWriteTimeUtc(projectPath, oldTime.AddMinutes(-1));
+
+            Assert.False((bool)method.Invoke(null, new object[] { project })!);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void DotNetBuildStartInfo_OmitsNoRestoreWhenRestoreIsRequired()
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "CreateDotNetBuildStartInfo",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var noRestore = Assert.IsType<System.Diagnostics.ProcessStartInfo>(
+            method.Invoke(null, new object[] { "App.csproj", true }));
+        var restore = Assert.IsType<System.Diagnostics.ProcessStartInfo>(
+            method.Invoke(null, new object[] { "App.csproj", false }));
+
+        Assert.Contains("--no-restore", noRestore.ArgumentList);
+        Assert.DoesNotContain("--no-restore", restore.ArgumentList);
+    }
+
+    [Fact]
     public void RemotePreview_DisablesLocalVisualEditorOverlay()
     {
         TestApplication.EnsureAvaloniaInitialized();
