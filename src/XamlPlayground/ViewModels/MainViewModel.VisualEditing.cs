@@ -5642,9 +5642,7 @@ public partial class MainViewModel
 
     private void RefreshWorkspaceAfterThemeFileChanges(InMemoryProjectFile? fileToOpen)
     {
-        SolutionExplorerNodes = Solution is { } solution
-            ? BuildSolutionExplorer(solution)
-            : new ObservableCollection<SolutionExplorerNodeViewModel>();
+        SetSolutionExplorerNodes(Solution);
         RefreshControlThemes();
 
         if (fileToOpen is not null)

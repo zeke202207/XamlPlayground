@@ -1464,6 +1464,36 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void SolutionExplorerSearch_SeesThemeFilesAddedDuringActiveSearch()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var project = viewModel.ActiveProject;
+        Assert.NotNull(project);
+        viewModel.SolutionExplorerSearchText = "NewTheme.axaml";
+        viewModel.ApplySolutionExplorerSearchNow();
+        Assert.Null(FindNode(viewModel.SolutionExplorerNodes, "NewTheme.axaml"));
+        var themeFile = project.AddFile(new InMemoryProjectFile(
+            "Themes/NewTheme.axaml",
+            "<ResourceDictionary xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Resource));
+        var method = typeof(MainViewModel).GetMethod(
+            "RefreshWorkspaceAfterThemeFileChanges",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        method.Invoke(viewModel, new object?[] { themeFile });
+
+        Assert.NotNull(FindNode(viewModel.SolutionExplorerNodes, "NewTheme.axaml"));
+
+        viewModel.SolutionExplorerSearchText = string.Empty;
+        viewModel.ApplySolutionExplorerSearchNow();
+
+        Assert.NotNull(FindNode(viewModel.SolutionExplorerNodes, "NewTheme.axaml"));
+    }
+
+    [Fact]
     public void SolutionExplorerNodeCommands_ExpandAndCollapseSubtree()
     {
         TestApplication.EnsureAvaloniaInitialized();
