@@ -1768,6 +1768,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         InMemoryProjectFile xamlFile,
         string xamlText)
     {
+        if (TryGetDirtyWorkspaceBuildInput(project, xamlFile, out var dirtyFile))
+        {
+            StopRemotePreview();
+            LastErrorMessage = GetUnsavedWorkspaceBuildInputMessage(dirtyFile);
+            return true;
+        }
+
         project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
         if (ShouldBuildWorkspaceProjectBeforeUsingOutput(project))
         {
@@ -2163,6 +2170,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private static bool IsWorkspaceOutputAssemblyStale(InMemoryProject project, string targetAssemblyPath)
     {
+        if (TryGetDirtyWorkspaceBuildInput(project, null, out _))
+        {
+            return true;
+        }
+
         DateTime outputWriteTime;
         try
         {
@@ -2200,6 +2212,38 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private static bool IsWorkspaceBuildInputFile(InMemoryProjectFile file)
     {
         return file.Kind is ProjectFileKind.CSharp or ProjectFileKind.Xaml or ProjectFileKind.Resource or ProjectFileKind.ProjectFile;
+    }
+
+    private static bool TryGetDirtyWorkspaceBuildInput(
+        InMemoryProject project,
+        InMemoryProjectFile? activeXamlFile,
+        [NotNullWhen(true)] out InMemoryProjectFile? dirtyFile)
+    {
+        foreach (var file in project.Files.Where(IsWorkspaceBuildInputFile))
+        {
+            if (!file.IsDirty)
+            {
+                continue;
+            }
+
+            if (activeXamlFile is { } &&
+                ReferenceEquals(file, activeXamlFile) &&
+                file.IsXaml)
+            {
+                continue;
+            }
+
+            dirtyFile = file;
+            return true;
+        }
+
+        dirtyFile = null;
+        return false;
+    }
+
+    private static string GetUnsavedWorkspaceBuildInputMessage(InMemoryProjectFile file)
+    {
+        return $"Save {file.Path} before using isolated workspace preview. Unsaved code, project, or resource changes cannot be included in the built workspace assembly.";
     }
 
     private static string? ResolveWorkspaceProjectInputPath(InMemoryProject project, InMemoryProjectFile file)

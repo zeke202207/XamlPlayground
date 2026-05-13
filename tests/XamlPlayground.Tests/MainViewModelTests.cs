@@ -1745,6 +1745,85 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void WorkspaceOutputAssemblyFreshness_DetectsDirtyBuildInput()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundDirtyOutputFreshness-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        var sourcePath = Path.Combine(projectDirectory, "ViewModel.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(sourcePath, "public sealed class ViewModel { }");
+            File.WriteAllText(outputPath, "not a real assembly");
+
+            var outputTime = DateTime.UtcNow.AddMinutes(10);
+            var sourceTime = DateTime.UtcNow.AddMinutes(-10);
+            File.SetLastWriteTimeUtc(outputPath, outputTime);
+            File.SetLastWriteTimeUtc(sourcePath, sourceTime);
+
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                OutputAssemblyPath = outputPath,
+                IsMsBuildWorkspace = true
+            };
+            var codeFile = project.AddFile(new InMemoryProjectFile(
+                "ViewModel.cs",
+                "public sealed class ViewModel { }",
+                ProjectFileKind.CSharp,
+                sourcePath: sourcePath));
+            var method = typeof(MainViewModel).GetMethod(
+                "ShouldBuildWorkspaceProjectBeforeUsingOutput",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            codeFile.IsDirty = true;
+            Assert.True((bool)method.Invoke(null, new object[] { project })!);
+
+            codeFile.MarkClean();
+            Assert.False((bool)method.Invoke(null, new object[] { project })!);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void WorkspaceDirtyBuildInputDetection_IgnoresActiveXamlButFindsDirtyCode()
+    {
+        var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", "SampleApp.csproj")
+        {
+            IsMsBuildWorkspace = true
+        };
+        var xamlFile = project.AddFile(new InMemoryProjectFile(
+            "MainWindow.axaml",
+            "<Window xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        var codeFile = project.AddFile(new InMemoryProjectFile(
+            "MainWindow.axaml.cs",
+            "public partial class MainWindow { }",
+            ProjectFileKind.CSharp));
+        var method = typeof(MainViewModel).GetMethod(
+            "TryGetDirtyWorkspaceBuildInput",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        xamlFile.IsDirty = true;
+        var activeXamlOnly = new object?[] { project, xamlFile, null };
+        Assert.False((bool)method.Invoke(null, activeXamlOnly)!);
+        Assert.Null(activeXamlOnly[2]);
+
+        codeFile.IsDirty = true;
+        var dirtyCode = new object?[] { project, xamlFile, null };
+        Assert.True((bool)method.Invoke(null, dirtyCode)!);
+        Assert.Same(codeFile, dirtyCode[2]);
+    }
+
+    [Fact]
     public void WorkspaceBuildRestoreRequirement_DetectsProjectFileNewerThanOutput()
     {
         var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundBuildRestore-{Guid.NewGuid():N}");
