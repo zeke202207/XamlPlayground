@@ -185,7 +185,7 @@ public partial class MainViewModel
 
     public string AnimationPlaybackButtonText => AnimationTimelinePlaying ? "Pause" : "Play";
 
-    public bool VisualEditorPreviewContentHitTestVisible => !VisualEditorDesignerMode;
+    public bool VisualEditorPreviewContentHitTestVisible => !VisualEditorDesignerMode && !IsRemotePreviewActive;
 
     public double VisualEditorPreviewThumbSize => 8;
 
@@ -700,6 +700,7 @@ public partial class MainViewModel
     partial void OnVisualEditorDesignerModeChanged(bool value)
     {
         OnPropertyChanged(nameof(VisualEditorPreviewContentHitTestVisible));
+        OnPropertyChanged(nameof(IsVisualEditorOverlayActive));
         if (!value)
         {
             ClearVisualEditorPreviewDropFeedback();

@@ -247,6 +247,8 @@ public partial class PreviewView : UserControl
 
     private void PreviewViewOnLayoutUpdated(object? sender, EventArgs e)
     {
+        UpdateRemotePreviewViewport();
+
         if (_designerDragMode != DesignerDragMode.None ||
             _sourceSelectionViewModel is not { Control: not null, SelectedVisualEditorNode: not null })
         {
@@ -254,6 +256,32 @@ public partial class PreviewView : UserControl
         }
 
         QueueSynchronizePreviewSelectionFromSource();
+    }
+
+    private void UpdateRemotePreviewViewport()
+    {
+        if (_sourceSelectionViewModel is not { IsRemotePreviewActive: true } viewModel)
+        {
+            return;
+        }
+
+        var bounds = PreviewSurface.Bounds;
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            bounds = Bounds;
+        }
+
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return;
+        }
+
+        var scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
+        viewModel.UpdateRemotePreviewViewport(
+            bounds.Width,
+            bounds.Height,
+            96 * scaling,
+            96 * scaling);
     }
 
     private void SynchronizePreviewSelectionFromSource()

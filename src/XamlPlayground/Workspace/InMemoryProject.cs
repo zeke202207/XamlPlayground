@@ -97,7 +97,14 @@ public sealed class InMemoryProject
 
     private static string? NormalizeProjectFilePath(string? path)
     {
-        var normalizedPath = path?.Replace('\\', '/').Trim('/');
-        return string.IsNullOrWhiteSpace(normalizedPath) ? null : normalizedPath;
+        var normalizedPath = path?.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return null;
+        }
+
+        return System.IO.Path.IsPathRooted(normalizedPath)
+            ? normalizedPath.TrimEnd('/')
+            : normalizedPath.Trim('/');
     }
 }

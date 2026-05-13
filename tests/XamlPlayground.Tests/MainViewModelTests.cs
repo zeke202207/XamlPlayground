@@ -691,6 +691,18 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void InMemoryProject_PreservesAbsoluteProjectFilePath()
+    {
+        var absoluteProjectPath = Path.Combine(
+            Path.GetTempPath(),
+            "XamlPlaygroundAbsoluteProject",
+            "App.csproj");
+        var project = new InMemoryProject("App", "App", "msbuild", absoluteProjectPath);
+
+        Assert.Equal(absoluteProjectPath.Replace('\\', '/').TrimEnd('/'), project.ProjectFilePath);
+    }
+
+    [Fact]
     public void StandardSolutionStorage_PreservesImportedProjectPathOnExport()
     {
         var solution = new InMemorySolution("StandardApp");
@@ -1353,6 +1365,63 @@ public sealed class MainViewModelTests
 
         Assert.Equal("/Pages/AddDeleteRowsPage.axaml", relative);
         Assert.Equal("/Pages/AddDeleteRowsPage.axaml", absolute);
+    }
+
+    [Fact]
+    public void WorkspacePreviewTargetAssemblyResolution_FindsPreferredBinOutputWhenRoslynPathIsMissing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewTarget-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var net8Output = Path.Combine(projectDirectory, "bin", "Debug", "net8.0", "SampleApp.dll");
+        var net10Output = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(net8Output)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(net10Output)!);
+            File.WriteAllBytes(net8Output, CompileTestAssemblyImage("SampleApp", "public sealed class Older { }"));
+            File.WriteAllBytes(net10Output, CompileTestAssemblyImage("SampleApp", "public sealed class Preferred { }"));
+            var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                TargetFramework = null,
+                IsMsBuildWorkspace = true
+            };
+            var method = typeof(MainViewModel).GetMethod(
+                "ResolveWorkspaceTargetAssemblyPath",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var resolved = Assert.IsType<string>(method.Invoke(null, new object[] { project }));
+
+            Assert.Equal(net10Output, resolved);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void RemotePreview_DisablesLocalVisualEditorOverlay()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            VisualEditorDesignerMode = true
+        };
+
+        Assert.True(viewModel.IsVisualEditorOverlayActive);
+
+        viewModel.IsRemotePreviewActive = true;
+
+        Assert.False(viewModel.IsVisualEditorOverlayActive);
+        Assert.False(viewModel.VisualEditorPreviewContentHitTestVisible);
     }
 
     [Fact]

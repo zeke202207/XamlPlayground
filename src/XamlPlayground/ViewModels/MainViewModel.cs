@@ -44,6 +44,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 {
     private static readonly TimeSpan AutoRunDelay = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan SolutionExplorerSearchDelay = TimeSpan.FromMilliseconds(200);
+    private static readonly string[] PreferredWorkspacePreviewFrameworks =
+    {
+        "net10.0",
+        "net9.0",
+        "net8.0",
+        "net7.0",
+        "net6.0",
+        "net5.0",
+        "netcoreapp3.1",
+        "netcoreapp3.0"
+    };
     private static readonly TimeSpan SolutionExplorerRegexTimeout = TimeSpan.FromMilliseconds(50);
     private const string PlaygroundXamlDocument = "Main.axaml";
 
@@ -95,7 +106,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _dockThemeManager = new DockFluentThemeManager();
         _solutionFactory = new InMemorySolutionFactory(OnProjectFileChanged);
         _remotePreviewService.FrameReceived += OnRemotePreviewFrameReceived;
-        _remotePreviewService.ErrorReceived += error => Dispatcher.UIThread.Post(() => LastErrorMessage = error);
+        _remotePreviewService.ErrorReceived += error => Dispatcher.UIThread.Post(
+            () => LastErrorMessage = FormatRemotePreviewError(error));
 
         NewFileCommand = new RelayCommand(NewFile);
         ShowNewProjectWizardCommand = new RelayCommand(ShowNewProjectWizard);
@@ -135,6 +147,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     public bool IsInProcessPreviewActive => !IsRemotePreviewActive;
 
+    public bool IsVisualEditorOverlayActive => VisualEditorDesignerMode && !IsRemotePreviewActive;
+
     public void Dispose()
     {
         _timer?.Dispose();
@@ -147,6 +161,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     partial void OnIsRemotePreviewActiveChanged(bool value)
     {
         OnPropertyChanged(nameof(IsInProcessPreviewActive));
+        OnPropertyChanged(nameof(IsVisualEditorOverlayActive));
+        OnPropertyChanged(nameof(VisualEditorPreviewContentHitTestVisible));
+        if (value)
+        {
+            ClearVisualEditorPreviewDropFeedback();
+            VisualEditorPreviewSelectionVisible = false;
+            UpdateVisualEditorPreviewCurrentContainerBounds(null);
+        }
     }
     
     public ICommand RunCommand { get; }
@@ -1731,6 +1753,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         InMemoryProjectFile xamlFile,
         string xamlText)
     {
+        project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
         if (string.IsNullOrWhiteSpace(project.OutputAssemblyPath) ||
             !File.Exists(project.OutputAssemblyPath))
         {
@@ -1771,13 +1794,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private static bool ShouldUseRemoteWorkspacePreview(InMemoryProject? project)
     {
         if (Utilities.IsBrowser() ||
-            project is not { IsMsBuildWorkspace: true } ||
-            string.IsNullOrWhiteSpace(project.OutputAssemblyPath))
+            project is not { IsMsBuildWorkspace: true })
         {
             return false;
         }
 
-        var outputDirectory = Path.GetDirectoryName(project.OutputAssemblyPath);
+        var targetAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project);
+        if (string.IsNullOrWhiteSpace(targetAssemblyPath))
+        {
+            return false;
+        }
+
+        var outputDirectory = Path.GetDirectoryName(targetAssemblyPath);
         if (string.IsNullOrWhiteSpace(outputDirectory) ||
             !Directory.Exists(outputDirectory))
         {
@@ -1923,6 +1951,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             var result = await RunDotNetBuildAsync(project.ProjectFilePath);
             if (result.ExitCode == 0)
             {
+                project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
                 AddWorkspaceOutputDirectoryReferences(project);
                 WorkspaceStatus = $"{project.Name}: build refreshed.";
                 return true;
@@ -1940,7 +1969,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private static void AddWorkspaceOutputDirectoryReferences(InMemoryProject project)
     {
-        var outputDirectory = Path.GetDirectoryName(project.OutputAssemblyPath);
+        var targetAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project);
+        var outputDirectory = Path.GetDirectoryName(targetAssemblyPath);
         if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
         {
             return;
@@ -1970,6 +2000,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         out WorkspaceAssemblyLoadContext context,
         out IReadOnlyList<Assembly> loadedAssemblies)
     {
+        var targetAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project);
+        project.OutputAssemblyPath = targetAssemblyPath ?? project.OutputAssemblyPath;
+        var outputDirectory = Path.GetDirectoryName(project.OutputAssemblyPath);
         foreach (var reference in GetWorkspaceOutputAssemblyCandidates(project, workspaceReferences))
         {
             var mainAssemblyPath = reference.FilePath is { } && File.Exists(reference.FilePath)
@@ -1978,7 +2011,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             var candidateContext = new WorkspaceAssemblyLoadContext(
                 Path.GetRandomFileName(),
                 workspaceReferences,
-                Path.GetDirectoryName(project.OutputAssemblyPath),
+                outputDirectory,
                 new[] { project.AssemblyName, project.Name, reference.Name },
                 mainAssemblyPath);
 
@@ -2004,7 +2037,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         IReadOnlyList<WorkspaceAssemblyReference> workspaceReferences)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (WorkspaceAssemblyReference.FromPath(project.OutputAssemblyPath, isRuntimeAssembly: true) is { } outputReference &&
+        var targetAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project);
+        if (WorkspaceAssemblyReference.FromPath(targetAssemblyPath, isRuntimeAssembly: true) is { } outputReference &&
             seen.Add(GetWorkspaceAssemblyReferenceKey(outputReference)))
         {
             yield return outputReference;
@@ -2032,6 +2066,79 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return string.IsNullOrWhiteSpace(reference.FilePath)
             ? reference.Name
             : reference.FilePath;
+    }
+
+    private static string? ResolveWorkspaceTargetAssemblyPath(InMemoryProject project)
+    {
+        if (!string.IsNullOrWhiteSpace(project.OutputAssemblyPath) &&
+            File.Exists(project.OutputAssemblyPath))
+        {
+            return project.OutputAssemblyPath;
+        }
+
+        var projectDirectory = string.IsNullOrWhiteSpace(project.ProjectFilePath)
+            ? null
+            : Path.GetDirectoryName(project.ProjectFilePath);
+        if (string.IsNullOrWhiteSpace(projectDirectory))
+        {
+            return null;
+        }
+
+        var targetName = (string.IsNullOrWhiteSpace(project.AssemblyName)
+            ? project.Name
+            : project.AssemblyName) + ".dll";
+        foreach (var configuration in new[] { "Debug", "Release" })
+        {
+            if (!string.IsNullOrWhiteSpace(project.TargetFramework))
+            {
+                var candidate = Path.Combine(projectDirectory, "bin", configuration, project.TargetFramework, targetName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            var configurationRoot = Path.Combine(projectDirectory, "bin", configuration);
+            if (!Directory.Exists(configurationRoot))
+            {
+                continue;
+            }
+
+            foreach (var framework in PreferredWorkspacePreviewFrameworks)
+            {
+                var candidate = Path.Combine(configurationRoot, framework, targetName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        foreach (var configuration in new[] { "Debug", "Release" })
+        {
+            var configurationRoot = Path.Combine(projectDirectory, "bin", configuration);
+            if (!Directory.Exists(configurationRoot))
+            {
+                continue;
+            }
+
+            try
+            {
+                var candidate = Directory
+                    .EnumerateFiles(configurationRoot, targetName, SearchOption.AllDirectories)
+                    .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                    .FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(candidate))
+                {
+                    return candidate;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
     }
 
     private static async Task<DotNetProcessResult> RunDotNetBuildAsync(string projectPath)
@@ -2144,6 +2251,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return $"XAML {diagnostic.Severity} {document}{position}: {diagnostic.Id}: {diagnostic.Title}";
     }
 
+    private static string FormatRemotePreviewError(WorkspaceRemotePreviewError error)
+    {
+        var document = string.IsNullOrWhiteSpace(error.FilePath)
+            ? "remote preview"
+            : error.FilePath;
+        var position = error.Line is { } line
+            ? $" Line {line}, position {error.Column ?? 1}"
+            : string.Empty;
+
+        return $"XAML Error {document}{position}: {error.Message}";
+    }
+
     private static string? CombineDiagnostics(params string?[] messages)
     {
         var lines = messages
@@ -2226,6 +2345,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 RemotePreviewBitmap = bitmap;
             }
         });
+    }
+
+    public void UpdateRemotePreviewViewport(double width, double height, double dpiX, double dpiY)
+    {
+        if (!IsRemotePreviewActive)
+        {
+            return;
+        }
+
+        _remotePreviewService.UpdateViewport(width, height, dpiX, dpiY);
     }
 
     private static Bitmap? TryCreateRemotePreviewBitmap(FrameMessage frame)

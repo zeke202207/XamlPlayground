@@ -1,10 +1,13 @@
 using System;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Avalonia.Remote.Protocol;
 using Avalonia.Remote.Protocol.Designer;
@@ -20,7 +23,7 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
 
     public event Action<FrameMessage>? FrameReceived;
 
-    public event Action<string>? ErrorReceived;
+    public event Action<WorkspaceRemotePreviewError>? ErrorReceived;
 
     public async Task<WorkspaceRemotePreviewResult> StartOrUpdateAsync(
         string xaml,
@@ -67,14 +70,18 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
                     var exitCode = _process?.ExitCode;
                     if (exitCode is not 0 and not null)
                     {
-                        ErrorReceived?.Invoke($"Workspace preview host exited with code {exitCode}.");
+                        ErrorReceived?.Invoke(new WorkspaceRemotePreviewError(
+                            $"Workspace preview host exited with code {exitCode}.",
+                            null,
+                            null,
+                            null));
                     }
                 };
                 _process.ErrorDataReceived += (_, e) =>
                 {
                     if (!string.IsNullOrWhiteSpace(e.Data))
                     {
-                        ErrorReceived?.Invoke(e.Data);
+                        ErrorReceived?.Invoke(new WorkspaceRemotePreviewError(e.Data, null, null, null));
                     }
                 };
                 _process.Start();
@@ -88,8 +95,19 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
             }
         }
 
-        await _session.SendUpdateXamlAsync(xaml, targetAssemblyPath, xamlFileProjectPath);
+        var (viewportWidth, viewportHeight) = TryGetDesignSize(xaml);
+        await _session.SendUpdateXamlAsync(
+            xaml,
+            targetAssemblyPath,
+            xamlFileProjectPath,
+            viewportWidth,
+            viewportHeight);
         return WorkspaceRemotePreviewResult.Success();
+    }
+
+    public void UpdateViewport(double width, double height, double dpiX, double dpiY)
+    {
+        _session?.UpdateViewport(width, height, dpiX, dpiY);
     }
 
     public void Dispose()
@@ -154,6 +172,42 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
             CreateNoWindow = true
         };
     }
+
+    private static (double? Width, double? Height) TryGetDesignSize(string xamlText)
+    {
+        if (string.IsNullOrWhiteSpace(xamlText))
+        {
+            return (null, null);
+        }
+
+        var width = TryMatchDesignDimension(xamlText, "DesignWidth")
+                    ?? TryMatchDesignDimension(xamlText, "Width");
+        var height = TryMatchDesignDimension(xamlText, "DesignHeight")
+                     ?? TryMatchDesignDimension(xamlText, "Height");
+
+        return (width, height);
+    }
+
+    private static double? TryMatchDesignDimension(string text, string propertyName)
+    {
+        var regex = new Regex(
+            $"\\b(?:\\w+:)?{propertyName}\\s*=\\s*\"(?<value>[0-9]+(?:\\.[0-9]+)?)\"",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var match = regex.Match(text);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var value = match.Groups["value"].Value;
+        return double.TryParse(
+            value,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture,
+            out var result)
+            ? result
+            : null;
+    }
 }
 
 public readonly record struct WorkspaceRemotePreviewResult(bool IsSuccess, string? ErrorMessage)
@@ -163,6 +217,8 @@ public readonly record struct WorkspaceRemotePreviewResult(bool IsSuccess, strin
     public static WorkspaceRemotePreviewResult Fail(string errorMessage) => new(false, errorMessage);
 }
 
+public sealed record WorkspaceRemotePreviewError(string Message, int? Line, int? Column, string? FilePath);
+
 internal sealed class RemotePreviewTcpSession : IDisposable
 {
     private readonly IDisposable _listener;
@@ -171,6 +227,11 @@ internal sealed class RemotePreviewTcpSession : IDisposable
     private string? _pendingXaml;
     private string? _pendingAssemblyPath;
     private string? _pendingProjectPath;
+    private double? _pendingViewportWidth;
+    private double? _pendingViewportHeight;
+    private double _viewportWidth = 800;
+    private double _viewportHeight = 600;
+    private string? _currentProjectPath;
 
     [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Avalonia designer transport uses BSON reflection by design.")]
     public RemotePreviewTcpSession()
@@ -183,9 +244,14 @@ internal sealed class RemotePreviewTcpSession : IDisposable
 
     public event Action<FrameMessage>? FrameReceived;
 
-    public event Action<string>? ErrorReceived;
+    public event Action<WorkspaceRemotePreviewError>? ErrorReceived;
 
-    public Task SendUpdateXamlAsync(string xaml, string assemblyPath, string xamlFileProjectPath)
+    public Task SendUpdateXamlAsync(
+        string xaml,
+        string assemblyPath,
+        string xamlFileProjectPath,
+        double? viewportWidth,
+        double? viewportHeight)
     {
         IAvaloniaRemoteTransportConnection? connection;
         lock (_gate)
@@ -195,13 +261,16 @@ internal sealed class RemotePreviewTcpSession : IDisposable
                 _pendingXaml = xaml;
                 _pendingAssemblyPath = assemblyPath;
                 _pendingProjectPath = xamlFileProjectPath;
+                _pendingViewportWidth = viewportWidth;
+                _pendingViewportHeight = viewportHeight;
                 return Task.CompletedTask;
             }
 
             connection = _connection;
+            _currentProjectPath = xamlFileProjectPath;
         }
 
-        SendViewportMessage(connection);
+        UpdateViewportIfNeeded(connection, viewportWidth, viewportHeight, 96, 96);
         return connection.Send(new UpdateXamlMessage
         {
             Xaml = xaml,
@@ -220,6 +289,29 @@ internal sealed class RemotePreviewTcpSession : IDisposable
         }
     }
 
+    public void UpdateViewport(double width, double height, double dpiX, double dpiY)
+    {
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        IAvaloniaRemoteTransportConnection? connection;
+        lock (_gate)
+        {
+            _pendingViewportWidth = width;
+            _pendingViewportHeight = height;
+            connection = _connection;
+        }
+
+        if (connection is null)
+        {
+            return;
+        }
+
+        UpdateViewportIfNeeded(connection, width, height, dpiX, dpiY);
+    }
+
     private void OnConnected(IAvaloniaRemoteTransportConnection connection)
     {
         lock (_gate)
@@ -229,18 +321,13 @@ internal sealed class RemotePreviewTcpSession : IDisposable
         }
 
         connection.OnMessage += OnMessage;
-        connection.OnException += (_, exception) => ErrorReceived?.Invoke($"Workspace preview transport error: {exception.Message}");
+        connection.OnException += (_, exception) => ErrorReceived?.Invoke(new WorkspaceRemotePreviewError(
+            $"Workspace preview transport error: {exception.Message}",
+            null,
+            null,
+            _currentProjectPath));
         connection.Start();
-        _ = connection.Send(new ClientSupportedPixelFormatsMessage
-        {
-            Formats = new[] { PixelFormat.Bgra8888 }
-        });
-        _ = connection.Send(new ClientRenderInfoMessage
-        {
-            DpiX = 96,
-            DpiY = 96
-        });
-        SendViewportMessage(connection);
+        SendPreflightMessages(connection);
         TrySendPendingUpdate(connection);
     }
 
@@ -256,10 +343,20 @@ internal sealed class RemotePreviewTcpSession : IDisposable
                 FrameReceived?.Invoke(frame);
                 break;
             case RequestViewportResizeMessage resize:
-                SendViewportMessage(connection, resize.Width, resize.Height);
+                UpdateViewportIfNeeded(connection, resize.Width, resize.Height, 96, 96);
                 break;
-            case UpdateXamlResultMessage { Error: { Length: > 0 } error }:
-                ErrorReceived?.Invoke(error);
+            case UpdateXamlResultMessage updateResult:
+                if (!string.IsNullOrWhiteSpace(updateResult.Error))
+                {
+                    var line = TryGetPositiveInt(updateResult, "LineNumber", "Line");
+                    var column = TryGetPositiveInt(updateResult, "LinePosition", "Position", "Column");
+                    ErrorReceived?.Invoke(new WorkspaceRemotePreviewError(
+                        updateResult.Error,
+                        line,
+                        column,
+                        _currentProjectPath));
+                }
+
                 break;
         }
     }
@@ -269,14 +366,20 @@ internal sealed class RemotePreviewTcpSession : IDisposable
         string? xaml;
         string? assemblyPath;
         string? projectPath;
+        double? viewportWidth;
+        double? viewportHeight;
         lock (_gate)
         {
             xaml = _pendingXaml;
             assemblyPath = _pendingAssemblyPath;
             projectPath = _pendingProjectPath;
+            viewportWidth = _pendingViewportWidth;
+            viewportHeight = _pendingViewportHeight;
             _pendingXaml = null;
             _pendingAssemblyPath = null;
             _pendingProjectPath = null;
+            _pendingViewportWidth = null;
+            _pendingViewportHeight = null;
         }
 
         if (string.IsNullOrWhiteSpace(xaml) ||
@@ -286,6 +389,12 @@ internal sealed class RemotePreviewTcpSession : IDisposable
             return;
         }
 
+        lock (_gate)
+        {
+            _currentProjectPath = projectPath;
+        }
+
+        UpdateViewportIfNeeded(connection, viewportWidth, viewportHeight, 96, 96);
         _ = connection.Send(new UpdateXamlMessage
         {
             Xaml = xaml,
@@ -294,17 +403,79 @@ internal sealed class RemotePreviewTcpSession : IDisposable
         });
     }
 
+    private static void SendPreflightMessages(IAvaloniaRemoteTransportConnection connection)
+    {
+        connection.Send(new ClientSupportedPixelFormatsMessage
+        {
+            Formats = new[] { PixelFormat.Bgra8888 }
+        });
+
+        connection.Send(new ClientRenderInfoMessage
+        {
+            DpiX = 96,
+            DpiY = 96
+        });
+
+        SendViewportMessage(connection, 800, 600, 96, 96);
+    }
+
+    private void UpdateViewportIfNeeded(
+        IAvaloniaRemoteTransportConnection connection,
+        double? width,
+        double? height,
+        double dpiX,
+        double dpiY)
+    {
+        if (width is null || height is null || width.Value <= 0 || height.Value <= 0)
+        {
+            return;
+        }
+
+        if (Math.Abs(_viewportWidth - width.Value) < 0.01 &&
+            Math.Abs(_viewportHeight - height.Value) < 0.01)
+        {
+            return;
+        }
+
+        _viewportWidth = width.Value;
+        _viewportHeight = height.Value;
+        SendViewportMessage(connection, _viewportWidth, _viewportHeight, dpiX, dpiY);
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "Remote protocol error messages are inspected reflectively to support multiple Avalonia protocol versions.")]
+    private static int? TryGetPositiveInt(object source, params string[] propertyNames)
+    {
+        foreach (var name in propertyNames)
+        {
+            var property = source.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+            if (property is null)
+            {
+                continue;
+            }
+
+            var value = property.GetValue(source);
+            if (value is int intValue && intValue > 0)
+            {
+                return intValue;
+            }
+        }
+
+        return null;
+    }
+
     private static void SendViewportMessage(
         IAvaloniaRemoteTransportConnection connection,
-        double width = 1000,
-        double height = 700)
+        double width,
+        double height,
+        double dpiX,
+        double dpiY)
     {
-        _ = connection.Send(new ClientViewportAllocatedMessage
+        connection.Send(new ClientViewportAllocatedMessage
         {
             Width = width,
             Height = height,
-            DpiX = 96,
-            DpiY = 96
+            DpiX = dpiX,
+            DpiY = dpiY
         });
     }
 
