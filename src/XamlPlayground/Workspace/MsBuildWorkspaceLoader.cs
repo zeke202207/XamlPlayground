@@ -688,6 +688,33 @@ public static class MsBuildWorkspaceLoader
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
+        AddRoslynMetadataReferences(inMemoryProject, project);
+
+        var emittedProjectReferences = new Dictionary<ProjectId, Task<WorkspaceAssemblyReference?>>();
+        foreach (var projectReference in project.ProjectReferences)
+        {
+            var referencedProject = project.Solution.GetProject(projectReference.ProjectId);
+            if (referencedProject is null)
+            {
+                continue;
+            }
+
+            await AddRoslynProjectReferenceAsync(
+                inMemoryProject,
+                referencedProject,
+                emittedProjectReferences,
+                new HashSet<ProjectId>(),
+                progress,
+                cancellationToken);
+        }
+
+        AddReference(inMemoryProject, WorkspaceAssemblyReference.FromPath(
+            project.OutputFilePath,
+            isRuntimeAssembly: true));
+    }
+
+    private static void AddRoslynMetadataReferences(InMemoryProject inMemoryProject, Project project)
+    {
         foreach (var metadataReference in project.MetadataReferences.OfType<PortableExecutableReference>())
         {
             var referencePath = metadataReference.FilePath;
@@ -699,32 +726,64 @@ public static class MsBuildWorkspaceLoader
                 AddReference(inMemoryProject, WorkspaceAssemblyReference.FromPath(runtimePath, isRuntimeAssembly: true));
             }
         }
+    }
 
-        foreach (var projectReference in project.ProjectReferences)
+    private static async Task AddRoslynProjectReferenceAsync(
+        InMemoryProject inMemoryProject,
+        Project referencedProject,
+        Dictionary<ProjectId, Task<WorkspaceAssemblyReference?>> emittedProjectReferences,
+        HashSet<ProjectId> visiting,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (!visiting.Add(referencedProject.Id))
         {
-            var referencedProject = project.Solution.GetProject(projectReference.ProjectId);
-            if (referencedProject is null)
+            progress?.Report($"Skipped cyclic project reference for {referencedProject.Name}.");
+            return;
+        }
+
+        try
+        {
+            AddRoslynMetadataReferences(inMemoryProject, referencedProject);
+
+            foreach (var projectReference in referencedProject.ProjectReferences)
             {
-                continue;
+                var transitiveProject = referencedProject.Solution.GetProject(projectReference.ProjectId);
+                if (transitiveProject is null)
+                {
+                    continue;
+                }
+
+                await AddRoslynProjectReferenceAsync(
+                    inMemoryProject,
+                    transitiveProject,
+                    emittedProjectReferences,
+                    visiting,
+                    progress,
+                    cancellationToken);
             }
 
             var outputReference = GetProjectOutputReference(referencedProject);
             if (ShouldEmitProjectReferenceFromSourceDuringLoad(referencedProject, outputReference))
             {
-                var sourceReference = await CreateProjectReferenceAssemblyAsync(referencedProject, null, cancellationToken);
+                var sourceReference = await GetOrCreateProjectReferenceAssemblyAsync(
+                    referencedProject,
+                    emittedProjectReferences,
+                    progress,
+                    cancellationToken);
                 if (sourceReference is { })
                 {
-                    AddReference(inMemoryProject, sourceReference);
-                    continue;
+                    ReplaceReference(inMemoryProject, sourceReference);
+                    return;
                 }
             }
 
             AddReference(inMemoryProject, outputReference);
         }
-
-        AddReference(inMemoryProject, WorkspaceAssemblyReference.FromPath(
-            project.OutputFilePath,
-            isRuntimeAssembly: true));
+        finally
+        {
+            visiting.Remove(referencedProject.Id);
+        }
     }
 
     private static bool ShouldEmitProjectReferenceFromSource(Project referencedProject)
@@ -890,6 +949,22 @@ public static class MsBuildWorkspaceLoader
             progress?.Report($"Could not compile project reference {referencedProject.Name}: {exception.Message}");
             return null;
         }
+    }
+
+    private static Task<WorkspaceAssemblyReference?> GetOrCreateProjectReferenceAssemblyAsync(
+        Project referencedProject,
+        Dictionary<ProjectId, Task<WorkspaceAssemblyReference?>> emittedProjectReferences,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (emittedProjectReferences.TryGetValue(referencedProject.Id, out var existing))
+        {
+            return existing;
+        }
+
+        var task = CreateProjectReferenceAssemblyAsync(referencedProject, progress, cancellationToken);
+        emittedProjectReferences.Add(referencedProject.Id, task);
+        return task;
     }
 
     private static void AddReference(InMemoryProject project, WorkspaceAssemblyReference? reference)

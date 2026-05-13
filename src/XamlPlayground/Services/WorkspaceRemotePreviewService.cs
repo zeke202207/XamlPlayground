@@ -110,9 +110,15 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
         _session?.UpdateViewport(width, height, dpiX, dpiY);
     }
 
-    public void Dispose()
+    public void Stop()
     {
         StopCurrentProcess();
+        _targetAssemblyPath = null;
+    }
+
+    public void Dispose()
+    {
+        Stop();
     }
 
     private void StopCurrentProcess()

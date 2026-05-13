@@ -479,6 +479,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void LoadSolution(InMemorySolution solution)
     {
+        StopRemotePreview();
         EnsureSolutionDocumentsOnCurrentThread(solution);
         Solution = solution;
         ActiveProject = SelectInitialProject(solution);
@@ -1634,13 +1635,27 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     }
                 }
             }
-            else if (project is { IsMsBuildWorkspace: true } &&
-                     TryLoadWorkspaceOutputAssembly(project, workspaceReferences, out var outputAssembly, out var outputContext, out var loadedAssemblies))
+            else if (project is { IsMsBuildWorkspace: true })
             {
-                scriptAssembly = outputAssembly;
-                previewAssemblyScope = new WorkspacePreviewAssemblyScope(outputAssembly, outputContext, loadedAssemblies);
-                XamlIntelliSenseService.RegisterWorkspaceAssemblies(new[] { outputAssembly }.Concat(loadedAssemblies));
-                Console.WriteLine($"Loaded workspace output assembly: {outputAssembly.GetName().Name}");
+                var buildRequired = ShouldBuildWorkspaceProjectBeforeUsingOutput(project);
+                if (buildRequired && !await TryBuildWorkspaceProjectAsync(project))
+                {
+                    LastErrorMessage = "Project output assembly is stale or missing and rebuild failed.";
+                    return;
+                }
+
+                if (buildRequired)
+                {
+                    workspaceReferences = project.AssemblyReferences.ToArray();
+                }
+
+                if (TryLoadWorkspaceOutputAssembly(project, workspaceReferences, out var outputAssembly, out var outputContext, out var loadedAssemblies))
+                {
+                    scriptAssembly = outputAssembly;
+                    previewAssemblyScope = new WorkspacePreviewAssemblyScope(outputAssembly, outputContext, loadedAssemblies);
+                    XamlIntelliSenseService.RegisterWorkspaceAssemblies(new[] { outputAssembly }.Concat(loadedAssemblies));
+                    Console.WriteLine($"Loaded workspace output assembly: {outputAssembly.GetName().Name}");
+                }
             }
 
             var projectResourceFiles = project?.GetXamlFiles()
@@ -1754,10 +1769,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         string xamlText)
     {
         project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
-        if (string.IsNullOrWhiteSpace(project.OutputAssemblyPath) ||
-            !File.Exists(project.OutputAssemblyPath))
+        if (ShouldBuildWorkspaceProjectBeforeUsingOutput(project))
         {
             if (!await TryBuildWorkspaceProjectAsync(project) ||
+                string.IsNullOrWhiteSpace(project.OutputAssemblyPath) ||
                 !File.Exists(project.OutputAssemblyPath))
             {
                 LastErrorMessage = "Project output assembly not found. Build the project first.";
@@ -1765,13 +1780,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             }
         }
 
+        var outputAssemblyPath = project.OutputAssemblyPath;
+        if (string.IsNullOrWhiteSpace(outputAssemblyPath) ||
+            !File.Exists(outputAssemblyPath))
+        {
+            LastErrorMessage = "Project output assembly not found. Build the project first.";
+            return true;
+        }
+
         var previousScope = _previous;
         var projectDirectory = ResolveWorkspaceDirectory(Path.GetDirectoryName(project.ProjectFilePath)) ??
-                               ResolveWorkspaceDirectory(Path.GetDirectoryName(project.OutputAssemblyPath));
+                               ResolveWorkspaceDirectory(Path.GetDirectoryName(outputAssemblyPath));
         var projectPath = BuildRemotePreviewXamlProjectPath(xamlFile.Path, projectDirectory);
         var result = await _remotePreviewService.StartOrUpdateAsync(
             xamlText,
-            project.OutputAssemblyPath,
+            outputAssemblyPath,
             projectPath,
             projectDirectory);
         if (!result.IsSuccess)
@@ -1908,6 +1931,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         IReadOnlyList<WorkspaceAssemblyReference> workspaceReferences,
         string? failureMessage)
     {
+        var buildRequired = ShouldBuildWorkspaceProjectBeforeUsingOutput(project);
+        if (buildRequired)
+        {
+            if (!await TryBuildWorkspaceProjectAsync(project))
+            {
+                return new WorkspaceOutputFallbackResult(false, null, failureMessage);
+            }
+
+            workspaceReferences = project.AssemblyReferences.ToArray();
+        }
+
         if (TryUseWorkspaceOutputAssemblyFallback(
                 project,
                 workspaceReferences,
@@ -1918,7 +1952,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             return new WorkspaceOutputFallbackResult(true, assemblyScope, diagnosticsMessage);
         }
 
-        if (!await TryBuildWorkspaceProjectAsync(project))
+        if (buildRequired || !await TryBuildWorkspaceProjectAsync(project))
         {
             return new WorkspaceOutputFallbackResult(false, null, failureMessage);
         }
@@ -2066,6 +2100,79 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return string.IsNullOrWhiteSpace(reference.FilePath)
             ? reference.Name
             : reference.FilePath;
+    }
+
+    private static bool ShouldBuildWorkspaceProjectBeforeUsingOutput(InMemoryProject project)
+    {
+        var targetAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
+        if (string.IsNullOrWhiteSpace(targetAssemblyPath) || !File.Exists(targetAssemblyPath))
+        {
+            return true;
+        }
+
+        return IsWorkspaceOutputAssemblyStale(project, targetAssemblyPath);
+    }
+
+    private static bool IsWorkspaceOutputAssemblyStale(InMemoryProject project, string targetAssemblyPath)
+    {
+        DateTime outputWriteTime;
+        try
+        {
+            outputWriteTime = File.GetLastWriteTimeUtc(targetAssemblyPath);
+        }
+        catch
+        {
+            return true;
+        }
+
+        foreach (var file in project.Files.Where(IsWorkspaceBuildInputFile))
+        {
+            var sourcePath = ResolveWorkspaceProjectInputPath(project, file);
+            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (File.GetLastWriteTimeUtc(sourcePath) > outputWriteTime)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsWorkspaceBuildInputFile(InMemoryProjectFile file)
+    {
+        return file.Kind is ProjectFileKind.CSharp or ProjectFileKind.Xaml or ProjectFileKind.Resource or ProjectFileKind.ProjectFile;
+    }
+
+    private static string? ResolveWorkspaceProjectInputPath(InMemoryProject project, InMemoryProjectFile file)
+    {
+        if (!string.IsNullOrWhiteSpace(file.SourcePath))
+        {
+            return ResolveWorkspaceFilePath(file.SourcePath);
+        }
+
+        if (Path.IsPathRooted(file.Path))
+        {
+            return ResolveWorkspaceFilePath(file.Path);
+        }
+
+        var projectFilePath = ResolveWorkspaceFilePath(project.ProjectFilePath);
+        var projectDirectory = string.IsNullOrWhiteSpace(projectFilePath)
+            ? null
+            : Path.GetDirectoryName(projectFilePath);
+        return string.IsNullOrWhiteSpace(projectDirectory)
+            ? null
+            : ResolveWorkspaceFilePath(Path.Combine(projectDirectory, file.Path));
     }
 
     private static string? ResolveWorkspaceTargetAssemblyPath(InMemoryProject project)
@@ -2366,13 +2473,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Child = control
         };
 
-        IsRemotePreviewActive = false;
-        RemotePreviewBitmap = null;
+        StopRemotePreview();
         Control = scope;
         DiagnosticsRoot = scope;
         LastErrorMessage = diagnosticsMessage;
         _previous = assemblyScope;
         previousScope?.Unload();
+    }
+
+    private void StopRemotePreview()
+    {
+        _remotePreviewService.Stop();
+        IsRemotePreviewActive = false;
+        RemotePreviewBitmap = null;
     }
 
     private void OnRemotePreviewFrameReceived(FrameMessage frame)

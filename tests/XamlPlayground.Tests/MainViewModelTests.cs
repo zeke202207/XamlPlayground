@@ -726,10 +726,7 @@ public sealed class MainViewModelTests
         }
         finally
         {
-            if (Directory.Exists(root))
-            {
-                Directory.Delete(root, recursive: true);
-            }
+            TryDeleteDirectory(root);
         }
     }
 
@@ -830,6 +827,29 @@ public sealed class MainViewModelTests
 
         Assert.Equal("src/StandardApp/StandardApp.csproj", slnEntry.Path);
         Assert.Equal("src/StandardApp/StandardApp.csproj", slnxEntry.Path);
+    }
+
+    [Fact]
+    public async Task InMemoryProjectFile_SaveToStorageFailsWhenTruncationIsUnsupported()
+    {
+        var storageFile = NonTruncatingStorageFileProxy.Create(
+            "Shorter.axaml",
+            "previous longer content",
+            out var storageFileProxy);
+        var file = new InMemoryProjectFile(
+            "Shorter.axaml",
+            "previous longer content",
+            ProjectFileKind.Xaml,
+            sourceStorageFile: storageFile)
+        {
+            Text = "short"
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(file.SaveToSourceAsync);
+
+        Assert.Contains("does not support truncating", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("previous longer content", storageFileProxy.Text);
+        Assert.True(file.IsDirty);
     }
 
     [Fact]
@@ -1195,6 +1215,111 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task MsBuildWorkspaceLoader_WiresLocalTransitiveProjectReferences()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var workspace = new AdhocWorkspace();
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundLocalProjectReferences-{Guid.NewGuid():N}");
+        var coreDirectory = Path.Combine(root, "Core");
+        var libDirectory = Path.Combine(root, "Lib");
+        var appDirectory = Path.Combine(root, "App");
+        var coreOutputPath = Path.Combine(coreDirectory, "bin", "Debug", "net10.0", "Core.dll");
+        var libOutputPath = Path.Combine(libDirectory, "bin", "Debug", "net10.0", "Lib.dll");
+        var coreSourcePath = Path.Combine(coreDirectory, "CoreValue.cs");
+        var libSourcePath = Path.Combine(libDirectory, "LibValue.cs");
+        var appProjectPath = Path.Combine(appDirectory, "App.csproj");
+        var reference = MetadataReference.CreateFromFile(GetNetCoreReferenceAssemblyPath("System.Runtime"));
+        var coreId = ProjectId.CreateNewId("Core");
+        var libId = ProjectId.CreateNewId("Lib");
+        var appId = ProjectId.CreateNewId("App");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(coreOutputPath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(libOutputPath)!);
+            Directory.CreateDirectory(appDirectory);
+            var coreImage = CompileTestAssemblyImage(
+                "Core",
+                "namespace Core; public sealed class CoreValue { public string Name => \"Core\"; }");
+            File.WriteAllBytes(coreOutputPath, coreImage);
+            File.WriteAllBytes(
+                libOutputPath,
+                CompileTestAssemblyImage(
+                    "Lib",
+                    "using Core; namespace Lib; public sealed class LibValue { public CoreValue Value { get; } = new(); }",
+                    new[] { MetadataReference.CreateFromImage(coreImage) }));
+            File.WriteAllText(coreSourcePath, "namespace Core; public sealed class CoreValue { public string Name => \"Core\"; }");
+            File.WriteAllText(libSourcePath, "using Core; namespace Lib; public sealed class LibValue { public CoreValue Value { get; } = new(); }");
+            var outputTime = DateTime.UtcNow;
+            File.SetLastWriteTimeUtc(coreOutputPath, outputTime);
+            File.SetLastWriteTimeUtc(libOutputPath, outputTime);
+            File.SetLastWriteTimeUtc(coreSourcePath, outputTime.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(libSourcePath, outputTime.AddMinutes(-10));
+
+            var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
+                coreId,
+                VersionStamp.Create(),
+                "Core",
+                "Core",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(coreDirectory, "Core.csproj"),
+                outputFilePath: coreOutputPath,
+                metadataReferences: new[] { reference }));
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(coreId),
+                "CoreValue.cs",
+                Microsoft.CodeAnalysis.Text.SourceText.From(
+                    "namespace Core; public sealed class CoreValue { public string Name => \"Core\"; }"),
+                filePath: coreSourcePath);
+            solution = solution.AddProject(ProjectInfo.Create(
+                libId,
+                VersionStamp.Create(),
+                "Lib",
+                "Lib",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(libDirectory, "Lib.csproj"),
+                outputFilePath: libOutputPath,
+                metadataReferences: new[] { reference }));
+            solution = solution.AddProjectReference(libId, new ProjectReference(coreId));
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(libId),
+                "LibValue.cs",
+                Microsoft.CodeAnalysis.Text.SourceText.From(
+                    "using Core; namespace Lib; public sealed class LibValue { public CoreValue Value { get; } = new(); }"),
+                filePath: libSourcePath);
+            solution = solution.AddProject(ProjectInfo.Create(
+                appId,
+                VersionStamp.Create(),
+                "App",
+                "App",
+                LanguageNames.CSharp,
+                filePath: appProjectPath,
+                outputFilePath: Path.Combine(appDirectory, "bin", "Debug", "net10.0", "App.dll"),
+                metadataReferences: new[] { reference }));
+            solution = solution.AddProjectReference(appId, new ProjectReference(libId));
+            Assert.True(workspace.TryApplyChanges(solution));
+            var appRoslynProject = workspace.CurrentSolution.GetProject(appId);
+            Assert.NotNull(appRoslynProject);
+            var appProject = new InMemoryProject("App", "App", "msbuild", appProjectPath)
+            {
+                AssemblyName = "App"
+            };
+
+            await AddRoslynReferencesForTestAsync(appProject, appRoslynProject);
+
+            Assert.Contains(appProject.AssemblyReferences, assemblyReference => assemblyReference.Name == "Lib" && assemblyReference.FilePath == libOutputPath);
+            Assert.Contains(appProject.AssemblyReferences, assemblyReference => assemblyReference.Name == "Core" && assemblyReference.FilePath == coreOutputPath);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task MsBuildWorkspaceLoader_PrefersStorageProjectReferenceSourceOverStaleBinOutput()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -1520,6 +1645,57 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void WorkspaceOutputAssemblyFreshness_DetectsSourceNewerThanOutput()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundOutputFreshness-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        var sourcePath = Path.Combine(projectDirectory, "ViewModel.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(sourcePath, "public sealed class ViewModel { }");
+            File.WriteAllText(outputPath, "not a real assembly");
+
+            var oldTime = DateTime.UtcNow.AddMinutes(-10);
+            var newTime = DateTime.UtcNow.AddMinutes(10);
+            File.SetLastWriteTimeUtc(outputPath, oldTime);
+            File.SetLastWriteTimeUtc(sourcePath, newTime);
+
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                OutputAssemblyPath = outputPath,
+                IsMsBuildWorkspace = true
+            };
+            project.AddFile(new InMemoryProjectFile(
+                "ViewModel.cs",
+                "public sealed class ViewModel { }",
+                ProjectFileKind.CSharp,
+                sourcePath: sourcePath));
+            var method = typeof(MainViewModel).GetMethod(
+                "ShouldBuildWorkspaceProjectBeforeUsingOutput",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object[] { project })!);
+
+            File.SetLastWriteTimeUtc(sourcePath, oldTime.AddMinutes(-1));
+
+            Assert.False((bool)method.Invoke(null, new object[] { project })!);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void RemotePreview_DisablesLocalVisualEditorOverlay()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -1535,6 +1711,29 @@ public sealed class MainViewModelTests
 
         Assert.False(viewModel.IsVisualEditorOverlayActive);
         Assert.False(viewModel.VisualEditorPreviewContentHitTestVisible);
+    }
+
+    [Fact]
+    public void LoadSolution_StopsRemotePreviewState()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var project = new InMemoryProject("App", "App", "msbuild");
+        project.AddFile(new InMemoryProjectFile(
+            "Main.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        solution.Projects.Add(project);
+        var viewModel = new MainViewModel(null)
+        {
+            IsRemotePreviewActive = true
+        };
+
+        LoadSolutionIntoViewModel(viewModel, solution);
+
+        Assert.False(viewModel.IsRemotePreviewActive);
+        Assert.Null(viewModel.RemotePreviewBitmap);
     }
 
     [Fact]
@@ -4392,6 +4591,18 @@ public sealed class MainViewModelTests
         await task;
     }
 
+    private static async Task AddRoslynReferencesForTestAsync(InMemoryProject inMemoryProject, Project project)
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "AddRoslynReferencesAsync",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = Assert.IsAssignableFrom<Task>(method.Invoke(
+            null,
+            new object?[] { inMemoryProject, project, null, CancellationToken.None }));
+        await task;
+    }
+
     private static void ActivateWorkspaceFile(MainViewModel viewModel, InMemoryProjectFile file)
     {
         var method = typeof(MainViewModel).GetMethod(
@@ -4707,6 +4918,110 @@ public sealed class MainViewModelTests
             result.Success,
             string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
         return stream.ToArray();
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch (UnauthorizedAccessException) when (OperatingSystem.IsWindows())
+        {
+        }
+        catch (IOException) when (OperatingSystem.IsWindows())
+        {
+        }
+    }
+
+    private class NonTruncatingStorageFileProxy : DispatchProxy
+    {
+        private NonTruncatingMemoryStream _stream = null!;
+        private string _name = string.Empty;
+        private string _text = string.Empty;
+        private Uri _path = new("file:///storage.axaml");
+
+        public static Avalonia.Platform.Storage.IStorageFile Create(
+            string name,
+            string text,
+            out NonTruncatingStorageFileProxy proxy)
+        {
+            var storageFile = DispatchProxy.Create<Avalonia.Platform.Storage.IStorageFile, NonTruncatingStorageFileProxy>();
+            proxy = (NonTruncatingStorageFileProxy)(object)storageFile;
+            proxy.Initialize(name, text);
+            return storageFile;
+        }
+
+        public string Text
+        {
+            get => _text;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            return targetMethod?.Name switch
+            {
+                "get_Name" => _name,
+                "get_Path" => _path,
+                "get_CanBookmark" => false,
+                "OpenReadAsync" => OpenReadAsync(),
+                "OpenWriteAsync" => OpenWriteAsync(),
+                "GetBasicPropertiesAsync" => Task.FromResult(new Avalonia.Platform.Storage.StorageItemProperties()),
+                "SaveBookmarkAsync" => Task.FromResult<string?>(null),
+                "GetParentAsync" => Task.FromResult<Avalonia.Platform.Storage.IStorageFolder?>(null),
+                "DeleteAsync" => Task.CompletedTask,
+                "MoveAsync" => Task.FromResult<Avalonia.Platform.Storage.IStorageItem?>(null),
+                "Dispose" => null,
+                _ => GetDefaultValue(targetMethod?.ReturnType)
+            };
+        }
+
+        private void Initialize(string name, string text)
+        {
+            _name = name;
+            _text = text;
+            _path = new Uri("file:///" + name);
+            _stream = new NonTruncatingMemoryStream();
+            using var writer = new StreamWriter(_stream, leaveOpen: true);
+            writer.Write(text);
+            writer.Flush();
+            _stream.Position = 0;
+        }
+
+        private Task<Stream> OpenReadAsync()
+        {
+            _stream.Position = 0;
+            return Task.FromResult<Stream>(_stream);
+        }
+
+        private Task<Stream> OpenWriteAsync()
+        {
+            _stream.Position = 0;
+            return Task.FromResult<Stream>(_stream);
+        }
+
+        private static object? GetDefaultValue(Type? type)
+        {
+            if (type is null || type == typeof(void))
+            {
+                return null;
+            }
+
+            return type.IsValueType ? Activator.CreateInstance(type) : null;
+        }
+    }
+
+    private sealed class NonTruncatingMemoryStream : MemoryStream
+    {
+        public override void SetLength(long value)
+        {
+            throw new NotSupportedException();
+        }
     }
 
     private sealed record VersionedPreviewProject(

@@ -133,10 +133,18 @@ public sealed partial class InMemoryProjectFile : ObservableObject
             await using var stream = await sourceStorageFile.OpenWriteAsync();
             try
             {
+                if (!stream.CanSeek)
+                {
+                    throw new NotSupportedException("The storage file write stream does not support truncation.");
+                }
+
                 stream.SetLength(0);
+                stream.Position = 0;
             }
             catch (NotSupportedException)
             {
+                throw new InvalidOperationException(
+                    $"Unable to safely save {Path} because the storage provider does not support truncating the existing file.");
             }
 
             await using var writer = new StreamWriter(stream);

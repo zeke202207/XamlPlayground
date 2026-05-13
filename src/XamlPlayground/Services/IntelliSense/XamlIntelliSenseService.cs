@@ -118,8 +118,9 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
             foreach (var assembly in assemblies.Where(static assembly => !assembly.IsDynamic))
             {
                 var name = assembly.GetName().Name;
-                if (!string.IsNullOrWhiteSpace(name) && s_workspaceAssemblyNames.Add(name))
+                if (!string.IsNullOrWhiteSpace(name))
                 {
+                    s_workspaceAssemblyNames.Add(name);
                     changed = true;
                 }
             }
