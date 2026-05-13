@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
+using XamlPlayground.Workspace;
 
 namespace XamlPlayground.Services;
 
@@ -218,9 +219,16 @@ public static class CompilerService
 
     public static async Task<ScriptCompilationResult> GetProjectAssembly(
         string assemblyName,
-        IEnumerable<(string Path, string Text)> codeFiles)
+        IEnumerable<(string Path, string Text)> codeFiles,
+        IEnumerable<WorkspaceAssemblyReference>? workspaceReferences = null)
     {
         var references = await GetMetadataReferences();
+        var workspaceReferenceList = workspaceReferences?
+            .Where(reference =>
+                string.IsNullOrWhiteSpace(assemblyName) ||
+                !string.Equals(reference.Name, assemblyName, StringComparison.OrdinalIgnoreCase))
+            .ToArray() ?? Array.Empty<WorkspaceAssemblyReference>();
+        var allReferences = MergeReferences(references, workspaceReferenceList);
 
         var parsedSyntaxTrees = codeFiles
             .Where(static file => !string.IsNullOrWhiteSpace(file.Text))
@@ -234,7 +242,7 @@ public static class CompilerService
         var compilation = CSharpCompilation.Create(
             string.IsNullOrWhiteSpace(assemblyName) ? Path.GetRandomFileName() : assemblyName,
             parsedSyntaxTrees,
-            references,
+            allReferences,
             compilationOptions);
 
         using var ms = new MemoryStream();
@@ -247,22 +255,78 @@ public static class CompilerService
                 Console.WriteLine(error);
             }
 
-            return new ScriptCompilationResult(null, null, result.Diagnostics);
+            return new ScriptCompilationResult(null, null, result.Diagnostics, Array.Empty<Assembly>());
         }
 
         ms.Seek(0, SeekOrigin.Begin);
 
         var context = new AssemblyLoadContext(name: Path.GetRandomFileName(), isCollectible: true);
+        context.Resolving += (_, name) => WorkspaceAssemblyReference.ResolveAssembly(workspaceReferenceList, context, name);
         var assembly = context.LoadFromStream(ms);
+        var loadedAssemblies = WorkspaceAssemblyReference.LoadRuntimeAssemblies(
+            workspaceReferenceList,
+            string.IsNullOrWhiteSpace(assemblyName) ? null : assemblyName);
 
-        return new ScriptCompilationResult(assembly, context, result.Diagnostics);
+        return new ScriptCompilationResult(assembly, context, result.Diagnostics, loadedAssemblies);
+    }
+
+    private static IReadOnlyList<PortableExecutableReference> MergeReferences(
+        IReadOnlyList<PortableExecutableReference> baseReferences,
+        IReadOnlyList<WorkspaceAssemblyReference> workspaceReferences)
+    {
+        if (workspaceReferences.Count == 0)
+        {
+            return baseReferences;
+        }
+
+        var references = new List<PortableExecutableReference>();
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var workspaceReference in workspaceReferences)
+        {
+            var metadataReference = workspaceReference.CreateMetadataReference();
+            if (metadataReference is null)
+            {
+                continue;
+            }
+
+            var key = GetReferenceKey(metadataReference) ?? workspaceReference.Name;
+            if (!keys.Add(key))
+            {
+                continue;
+            }
+
+            references.Add(metadataReference);
+        }
+
+        foreach (var baseReference in baseReferences)
+        {
+            var key = GetReferenceKey(baseReference);
+            if (!string.IsNullOrWhiteSpace(key) && !keys.Add(key))
+            {
+                continue;
+            }
+
+            references.Add(baseReference);
+        }
+
+        return references;
+    }
+
+    private static string? GetReferenceKey(PortableExecutableReference reference)
+    {
+        var path = reference.FilePath ?? reference.Display;
+        return string.IsNullOrWhiteSpace(path)
+            ? null
+            : Path.GetFileNameWithoutExtension(path);
     }
 }
 
 public sealed record ScriptCompilationResult(
     Assembly? Assembly,
     AssemblyLoadContext? Context,
-    IReadOnlyList<Diagnostic> Diagnostics)
+    IReadOnlyList<Diagnostic> Diagnostics,
+    IReadOnlyList<Assembly> LoadedAssemblies)
 {
     public bool Success => Assembly is not null;
 }
