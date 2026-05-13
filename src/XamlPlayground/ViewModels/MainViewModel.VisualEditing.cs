@@ -5565,7 +5565,11 @@ public partial class MainViewModel
         bool updateSourceCatalog)
     {
         var loadedFiles = themeProject.Files
-            .Select(themeFile => _solutionFactory.AddOrUpdateResource(project, themeFile.Path, themeFile.Text))
+            .Select(themeFile => _solutionFactory.AddOrUpdateResource(
+                project,
+                themeFile.Path,
+                themeFile.Text,
+                includeInRuntimePreview: !TemplateRequiresRuntimeIsolation(themeFile.Text)))
             .ToArray();
 
         if (updateSourceCatalog)

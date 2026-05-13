@@ -108,7 +108,8 @@ public sealed class InMemorySolutionFactory
     public InMemoryProjectFile AddOrUpdateResource(
         InMemoryProject project,
         string path,
-        string xaml)
+        string xaml,
+        bool includeInRuntimePreview = true)
     {
         var normalizedPath = NormalizeResourcePath(path);
         if (project.FindFile(normalizedPath) is { } existing)
@@ -120,7 +121,23 @@ public sealed class InMemorySolutionFactory
                     normalizedPath,
                     xaml,
                     ProjectFileKind.Resource,
-                    _fileChanged));
+                    _fileChanged,
+                    includeInRuntimePreview: includeInRuntimePreview));
+            }
+
+            if (existing.IncludeInRuntimePreview != includeInRuntimePreview)
+            {
+                var index = project.Files.IndexOf(existing);
+                var replacement = new InMemoryProjectFile(
+                    normalizedPath,
+                    xaml,
+                    ProjectFileKind.Resource,
+                    _fileChanged,
+                    includeInRuntimePreview: includeInRuntimePreview);
+                project.Files.RemoveAt(index);
+                project.Files.Insert(index, replacement);
+                _fileChanged(replacement);
+                return replacement;
             }
 
             existing.Text = xaml;
@@ -131,7 +148,8 @@ public sealed class InMemorySolutionFactory
             normalizedPath,
             xaml,
             ProjectFileKind.Resource,
-            _fileChanged));
+            _fileChanged,
+            includeInRuntimePreview: includeInRuntimePreview));
     }
 
     public InMemoryProjectFile AddImportedThemeResource(

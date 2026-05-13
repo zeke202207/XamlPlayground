@@ -16,7 +16,10 @@ public static class StandardSolutionStorage
 {
     private const string SolutionFolderProjectTypeGuid = "{66A26720-8FB5-11D2-AA7E-00C04F688DDE}";
     private const string CSharpProjectTypeGuid = "{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}";
+    private const string VisualBasicProjectTypeGuid = "{F184B08F-C81C-45F6-A57F-5ABD9991F28F}";
+    private const string FSharpProjectTypeGuid = "{F2A71F9B-5D33-465A-A702-920D77279786}";
     private static readonly XName IncludeAttribute = "Include";
+    private static readonly XName LinkAttribute = "Link";
 
     public static InMemorySolution LoadFromLocalPath(
         string solutionPath,
@@ -65,9 +68,10 @@ public static class StandardSolutionStorage
         {
             var projectFileName = GetProjectFileName(project);
             var projectPath = $"{EscapeSlnValue(project.Name)}/{EscapeSlnValue(projectFileName)}";
+            var projectTypeGuid = GetProjectTypeGuid(projectFileName);
             var projectGuid = CreateStableGuid($"{solution.Name}/{project.Name}");
             builder.AppendLine(
-                $"Project(\"{CSharpProjectTypeGuid}\") = \"{EscapeSlnValue(project.Name)}\", \"{projectPath}\", \"{projectGuid}\"");
+                $"Project(\"{projectTypeGuid}\") = \"{EscapeSlnValue(project.Name)}\", \"{projectPath}\", \"{projectGuid}\"");
             builder.AppendLine("EndProject");
         }
 
@@ -247,19 +251,18 @@ public static class StandardSolutionStorage
             ProjectFileKind.ProjectFile,
             fileChanged));
 
-        foreach (var filePath in EnumerateLocalProjectFiles(projectDirectory, projectPath, projectText))
+        foreach (var file in EnumerateLocalProjectFiles(projectDirectory, projectPath, projectText))
         {
-            var relativePath = SolutionStorage.NormalizeProjectPath(Path.GetRelativePath(projectDirectory, filePath));
-            if (project.FindFile(relativePath) is not null)
+            if (project.FindFile(file.ProjectPath) is not null)
             {
                 continue;
             }
 
-            var text = File.ReadAllText(filePath);
+            var text = File.ReadAllText(file.FullPath);
             project.AddFile(new InMemoryProjectFile(
-                relativePath,
+                file.ProjectPath,
                 text,
-                ClassifyFile(relativePath, text),
+                ClassifyFile(file.ProjectPath, text),
                 fileChanged));
         }
 
@@ -318,41 +321,55 @@ public static class StandardSolutionStorage
             $"standard.{Path.GetExtension(entry.Path).TrimStart('.')}");
     }
 
-    private static IEnumerable<string> EnumerateLocalProjectFiles(
+    private static IEnumerable<LocalProjectFile> EnumerateLocalProjectFiles(
         string projectDirectory,
         string projectPath,
         string projectText)
     {
-        var files = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var files = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var file in Directory.EnumerateFiles(projectDirectory, "*", SearchOption.AllDirectories))
         {
-            if (HasIgnoredPathSegment(Path.GetRelativePath(projectDirectory, file)) ||
+            var projectFilePath = SolutionStorage.NormalizeProjectPath(Path.GetRelativePath(projectDirectory, file));
+            if (HasIgnoredPathSegment(projectFilePath) ||
                 file.Equals(projectPath, StringComparison.OrdinalIgnoreCase) ||
                 !IsImportableFilePath(file))
             {
                 continue;
             }
 
-            files.Add(file);
+            files.TryAdd(projectFilePath, file);
         }
 
-        foreach (var explicitPath in ReadExplicitProjectIncludes(projectText))
+        foreach (var include in ReadExplicitProjectIncludes(projectText))
         {
-            if (HasGlobSyntax(explicitPath))
+            if (HasGlobSyntax(include.Include))
             {
                 continue;
             }
 
-            var fullPath = Path.GetFullPath(Path.Combine(projectDirectory, explicitPath.Replace('/', Path.DirectorySeparatorChar)));
+            var localIncludePath = include.Include
+                .Replace('\\', Path.DirectorySeparatorChar)
+                .Replace('/', Path.DirectorySeparatorChar);
+            var fullPath = Path.GetFullPath(Path.Combine(projectDirectory, localIncludePath));
             if (File.Exists(fullPath) &&
                 !fullPath.Equals(projectPath, StringComparison.OrdinalIgnoreCase) &&
                 IsImportableFilePath(fullPath))
             {
-                files.Add(fullPath);
+                var projectFilePath = CreateExplicitProjectFilePath(projectDirectory, fullPath, include);
+                if (!HasIgnoredPathSegment(projectFilePath))
+                {
+                    if (files.TryGetValue(projectFilePath, out var existingFullPath) &&
+                        fullPath.Equals(existingFullPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    files.TryAdd(CreateUniqueProjectPath(files.Keys, projectFilePath), fullPath);
+                }
             }
         }
 
-        return files;
+        return files.Select(static file => new LocalProjectFile(file.Value, file.Key));
     }
 
     private static async Task<IReadOnlyList<(string Path, string Text)>> EnumerateStorageProjectFilesAsync(
@@ -379,7 +396,7 @@ public static class StandardSolutionStorage
         return files;
     }
 
-    private static IEnumerable<string> ReadExplicitProjectIncludes(string projectText)
+    private static IEnumerable<ProjectItemInclude> ReadExplicitProjectIncludes(string projectText)
     {
         XDocument document;
         try
@@ -401,8 +418,64 @@ public static class StandardSolutionStorage
             var include = element.Attribute(IncludeAttribute)?.Value;
             if (!string.IsNullOrWhiteSpace(include))
             {
-                yield return include;
+                yield return new ProjectItemInclude(include, element.Attribute(LinkAttribute)?.Value);
             }
+        }
+    }
+
+    private static string CreateExplicitProjectFilePath(
+        string projectDirectory,
+        string fullPath,
+        ProjectItemInclude include)
+    {
+        if (!string.IsNullOrWhiteSpace(include.Link))
+        {
+            return SolutionStorage.NormalizeProjectPath(include.Link);
+        }
+
+        var relativePath = Path.GetRelativePath(projectDirectory, fullPath);
+        var normalizedRelativePath = relativePath.Replace('\\', '/');
+        if (!normalizedRelativePath.StartsWith("../", StringComparison.Ordinal) &&
+            !normalizedRelativePath.Equals("..", StringComparison.Ordinal))
+        {
+            return SolutionStorage.NormalizeProjectPath(normalizedRelativePath);
+        }
+
+        var normalizedInclude = include.Include.Replace('\\', '/').Trim('/');
+        var segments = normalizedInclude
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Where(static segment => segment is not "." and not "..")
+            .ToArray();
+        var linkedPath = segments.Length == 0
+            ? Path.GetFileName(fullPath)
+            : string.Join('/', segments);
+        return SolutionStorage.NormalizeProjectPath($"Linked/{linkedPath}");
+    }
+
+    private static string CreateUniqueProjectPath(IEnumerable<string> existingPaths, string path)
+    {
+        var existing = existingPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!existing.Contains(path))
+        {
+            return path;
+        }
+
+        var directory = Path.GetDirectoryName(path)?.Replace('\\', '/');
+        var extension = Path.GetExtension(path);
+        var fileName = Path.GetFileNameWithoutExtension(path);
+        var index = 2;
+        while (true)
+        {
+            var candidateName = $"{fileName}{index}{extension}";
+            var candidate = string.IsNullOrWhiteSpace(directory)
+                ? candidateName
+                : $"{directory}/{candidateName}";
+            if (!existing.Contains(candidate))
+            {
+                return candidate;
+            }
+
+            index++;
         }
     }
 
@@ -434,7 +507,7 @@ public static class StandardSolutionStorage
         if (extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase) ||
             extension.Equals(".axaml", StringComparison.OrdinalIgnoreCase))
         {
-            return IsResourceDictionary(text) ? ProjectFileKind.Resource : ProjectFileKind.Xaml;
+            return IsAvaloniaResourceFile(text) ? ProjectFileKind.Resource : ProjectFileKind.Xaml;
         }
 
         if (extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase) ||
@@ -449,12 +522,12 @@ public static class StandardSolutionStorage
         return ProjectFileKind.Text;
     }
 
-    private static bool IsResourceDictionary(string text)
+    private static bool IsAvaloniaResourceFile(string text)
     {
         try
         {
             var document = XDocument.Parse(text, LoadOptions.PreserveWhitespace);
-            return document.Root?.Name.LocalName == "ResourceDictionary";
+            return document.Root?.Name.LocalName is "ResourceDictionary" or "Styles";
         }
         catch
         {
@@ -523,6 +596,22 @@ public static class StandardSolutionStorage
                $"{project.Name}.csproj";
     }
 
+    private static string GetProjectTypeGuid(string projectFileName)
+    {
+        var extension = Path.GetExtension(projectFileName);
+        if (extension.Equals(".vbproj", StringComparison.OrdinalIgnoreCase))
+        {
+            return VisualBasicProjectTypeGuid;
+        }
+
+        if (extension.Equals(".fsproj", StringComparison.OrdinalIgnoreCase))
+        {
+            return FSharpProjectTypeGuid;
+        }
+
+        return CSharpProjectTypeGuid;
+    }
+
     private static string EscapeSlnValue(string value)
     {
         return value.Replace("\"", string.Empty, StringComparison.Ordinal);
@@ -544,6 +633,10 @@ public static class StandardSolutionStorage
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
         return new Guid(bytes.Take(16).ToArray()).ToString("B", CultureInfo.InvariantCulture).ToUpperInvariant();
     }
+
+    private sealed record ProjectItemInclude(string Include, string? Link);
+
+    private sealed record LocalProjectFile(string FullPath, string ProjectPath);
 
     private static async Task<IStorageFile> GetStorageFileByPathAsync(
         IStorageFolder root,

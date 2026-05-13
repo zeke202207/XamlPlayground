@@ -464,14 +464,37 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void StandardSolutionStorage_WritesSlnProjectTypeGuidForProjectExtension()
+    {
+        var solution = new InMemorySolution("Mixed");
+        var csharpProject = new InMemoryProject("CSharpApp", "CSharpApp", "standard.csproj");
+        csharpProject.AddFile(new InMemoryProjectFile("CSharpApp.csproj", "<Project />", ProjectFileKind.ProjectFile));
+        var visualBasicProject = new InMemoryProject("VisualBasicApp", "VisualBasicApp", "standard.vbproj");
+        visualBasicProject.AddFile(new InMemoryProjectFile("VisualBasicApp.vbproj", "<Project />", ProjectFileKind.ProjectFile));
+        var fsharpProject = new InMemoryProject("FSharpApp", "FSharpApp", "standard.fsproj");
+        fsharpProject.AddFile(new InMemoryProjectFile("FSharpApp.fsproj", "<Project />", ProjectFileKind.ProjectFile));
+        solution.Projects.Add(csharpProject);
+        solution.Projects.Add(visualBasicProject);
+        solution.Projects.Add(fsharpProject);
+
+        var sln = StandardSolutionStorage.SaveSln(solution);
+
+        Assert.Contains("Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"CSharpApp\"", sln, StringComparison.Ordinal);
+        Assert.Contains("Project(\"{F184B08F-C81C-45F6-A57F-5ABD9991F28F}\") = \"VisualBasicApp\"", sln, StringComparison.Ordinal);
+        Assert.Contains("Project(\"{F2A71F9B-5D33-465A-A702-920D77279786}\") = \"FSharpApp\"", sln, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StandardSolutionStorage_LoadsLocalSlnxProjectFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundStandardSolution-{Guid.NewGuid():N}");
         try
         {
             var projectRoot = Path.Combine(root, "ImportedApp");
+            var sharedRoot = Path.Combine(root, "Shared");
             Directory.CreateDirectory(Path.Combine(projectRoot, "Views"));
             Directory.CreateDirectory(Path.Combine(projectRoot, "Styles"));
+            Directory.CreateDirectory(sharedRoot);
             var slnxPath = Path.Combine(root, "ImportedApp.slnx");
             File.WriteAllText(slnxPath, """
                                         <Solution>
@@ -483,6 +506,10 @@ public sealed class MainViewModelTests
                                                                                  <PropertyGroup>
                                                                                    <RootNamespace>Imported.Root</RootNamespace>
                                                                                  </PropertyGroup>
+                                                                                 <ItemGroup>
+                                                                                   <Compile Include="..\Shared\Foo.cs" />
+                                                                                   <Compile Include="..\Shared\Bar.cs" Link="Linked\Bar.cs" />
+                                                                                 </ItemGroup>
                                                                                </Project>
                                                                                """);
             File.WriteAllText(Path.Combine(projectRoot, "Views", "MainView.axaml"), """
@@ -493,7 +520,14 @@ public sealed class MainViewModelTests
             File.WriteAllText(Path.Combine(projectRoot, "Styles", "Resources.axaml"), """
                                                                                       <ResourceDictionary xmlns="https://github.com/avaloniaui" />
                                                                                       """);
+            File.WriteAllText(Path.Combine(projectRoot, "Styles.axaml"), """
+                                                                         <Styles xmlns="https://github.com/avaloniaui">
+                                                                           <Style Selector="Button" />
+                                                                         </Styles>
+                                                                         """);
             File.WriteAllText(Path.Combine(projectRoot, "Views", "MainView.axaml.cs"), "namespace Imported.Root.Views; public partial class MainView { }");
+            File.WriteAllText(Path.Combine(sharedRoot, "Foo.cs"), "namespace Shared; public sealed class Foo { }");
+            File.WriteAllText(Path.Combine(sharedRoot, "Bar.cs"), "namespace Shared; public sealed class Bar { }");
 
             var solution = StandardSolutionStorage.LoadFromLocalPath(slnxPath, File.ReadAllText(slnxPath));
 
@@ -504,7 +538,11 @@ public sealed class MainViewModelTests
             Assert.Contains(project.Files, file => file.Path == "ImportedApp.csproj" && file.Kind == ProjectFileKind.ProjectFile);
             Assert.Contains(project.Files, file => file.Path == "Views/MainView.axaml" && file.Kind == ProjectFileKind.Xaml);
             Assert.Contains(project.Files, file => file.Path == "Styles/Resources.axaml" && file.Kind == ProjectFileKind.Resource);
+            Assert.Contains(project.Files, file => file.Path == "Styles.axaml" && file.Kind == ProjectFileKind.Resource);
             Assert.Contains(project.Files, file => file.Path == "Views/MainView.axaml.cs" && file.Kind == ProjectFileKind.CSharp);
+            Assert.Contains(project.Files, file => file.Path == "Linked/Shared/Foo.cs" && file.Kind == ProjectFileKind.CSharp);
+            Assert.Contains(project.Files, file => file.Path == "Linked/Bar.cs" && file.Kind == ProjectFileKind.CSharp);
+            Assert.DoesNotContain(project.Files, file => file.Path == "File.txt");
         }
         finally
         {
@@ -1663,6 +1701,46 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ApplyControlThemeProject_IsolatesExternalClrThemeResources()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            EnableAutoRun = false
+        };
+        var themeProject = ThemeProjectStorage.CreateDocument(
+            "SavedMaterialTheme",
+            new[]
+            {
+                (
+                    "Themes/SavedMaterialButton.axaml",
+                    """
+                    <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                        xmlns:assists="clr-namespace:Material.Styles.Assists">
+                      <ControlTheme x:Key="SavedMaterialButtonTheme" TargetType="Button">
+                        <Setter Property="assists:ButtonAssist.CornerRadius" Value="4" />
+                      </ControlTheme>
+                    </ResourceDictionary>
+                    """)
+            });
+        var method = typeof(MainViewModel).GetMethod(
+            "ApplyControlThemeProject",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var loadedCount = Assert.IsType<int>(method.Invoke(
+            viewModel,
+            new object[] { viewModel.ActiveProject!, themeProject, "Theme project: SavedMaterialTheme", false }));
+
+        Assert.Equal(1, loadedCount);
+        var file = viewModel.ActiveProject!.FindFile("Themes/SavedMaterialButton.axaml");
+        Assert.NotNull(file);
+        Assert.False(file.IncludeInRuntimePreview);
+    }
+
+    [Fact]
     public void InMemorySolutionFactory_AddOrUpdateResource_UpdatesExistingThemeResource()
     {
         var changedFiles = new List<string>();
@@ -1677,6 +1755,26 @@ public sealed class MainViewModelTests
         Assert.Equal("Themes/MyButtonTheme1.axaml", file.Path);
         Assert.Equal("<ResourceDictionary><SolidColorBrush x:Key=\"Brush\" /></ResourceDictionary>", file.Text);
         Assert.Contains("Themes/MyButtonTheme1.axaml", changedFiles);
+    }
+
+    [Fact]
+    public void InMemorySolutionFactory_AddOrUpdateResource_ReplacesResourceWhenPreviewIsolationChanges()
+    {
+        var solutionFactory = new InMemorySolutionFactory(_ => { });
+        var solution = solutionFactory.CreateSolution("ThemeApp", AvaloniaProjectTemplates.All[0]);
+        var project = Assert.Single(solution.Projects);
+        var file = solutionFactory.AddOrUpdateResource(project, "Themes/MyButtonTheme1.axaml", "<ResourceDictionary />");
+
+        var isolatedFile = solutionFactory.AddOrUpdateResource(
+            project,
+            "Themes/MyButtonTheme1.axaml",
+            "<ResourceDictionary><SolidColorBrush x:Key=\"Brush\" /></ResourceDictionary>",
+            includeInRuntimePreview: false);
+
+        Assert.NotSame(file, isolatedFile);
+        Assert.Equal("Themes/MyButtonTheme1.axaml", isolatedFile.Path);
+        Assert.False(isolatedFile.IncludeInRuntimePreview);
+        Assert.DoesNotContain(project.Files, candidate => ReferenceEquals(candidate, file));
     }
 
     [Fact]
