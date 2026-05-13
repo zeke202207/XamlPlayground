@@ -1014,7 +1014,8 @@ public partial class MainViewModel
     private void BuildBindingMarkupFromFields()
     {
         BindingEditorRawValue = CreateBindingRawValueFromFields(
-            _selectedBindingDefinition?.LocationKind ?? XamlBindingLocationKind.Attribute);
+            _selectedBindingDefinition?.LocationKind ?? XamlBindingLocationKind.Attribute,
+            _selectedBindingDefinition);
     }
 
     private bool CanApplyBindingEditor()
@@ -1119,7 +1120,7 @@ public partial class MainViewModel
             (AreBindingFieldsChanged(binding) &&
              string.Equals(rawValue, binding.RawValue, StringComparison.Ordinal)))
         {
-            rawValue = CreateBindingRawValueFromFields(binding.LocationKind);
+            rawValue = CreateBindingRawValueFromFields(binding.LocationKind, binding);
         }
 
         return binding.LocationKind == XamlBindingLocationKind.ObjectElement &&
@@ -1128,8 +1129,27 @@ public partial class MainViewModel
             : rawValue;
     }
 
-    private string CreateBindingRawValueFromFields(XamlBindingLocationKind locationKind)
+    private string CreateBindingRawValueFromFields(
+        XamlBindingLocationKind locationKind,
+        XamlBindingDefinition? sourceBinding = null)
     {
+        if (locationKind == XamlBindingLocationKind.ObjectElement &&
+            sourceBinding is not null)
+        {
+            return XamlDesignEditor.BuildBindingObjectElementPreservingContent(
+                sourceBinding.RawValue,
+                BindingEditorKind,
+                BindingEditorPath,
+                BindingEditorMode,
+                BindingEditorSource,
+                BindingEditorElementName,
+                BindingEditorRelativeSource,
+                BindingEditorConverter,
+                BindingEditorStringFormat,
+                BindingEditorFallbackValue,
+                BindingEditorTargetNullValue);
+        }
+
         return locationKind == XamlBindingLocationKind.ObjectElement
             ? XamlDesignEditor.BuildBindingObjectElement(
                 BindingEditorKind,

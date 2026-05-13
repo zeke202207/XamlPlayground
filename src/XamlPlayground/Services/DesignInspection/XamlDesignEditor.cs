@@ -365,6 +365,63 @@ public sealed class XamlDesignEditor
             fields.TargetNullValue);
     }
 
+    public static string BuildBindingObjectElementPreservingContent(
+        string rawXaml,
+        string kind,
+        string path,
+        string mode,
+        string source,
+        string elementName,
+        string relativeSource,
+        string converter,
+        string stringFormat,
+        string fallbackValue,
+        string targetNullValue)
+    {
+        if (!XamlTextEditor.TryParse(rawXaml, out var document, out _) ||
+            document.RootSyntax is null ||
+            (!string.IsNullOrWhiteSpace(kind) &&
+             !string.Equals(document.RootSyntax.NameNode.LocalName, kind.Trim(), StringComparison.Ordinal)))
+        {
+            return BuildBindingObjectElement(
+                kind,
+                path,
+                mode,
+                source,
+                elementName,
+                relativeSource,
+                converter,
+                stringFormat,
+                fallbackValue,
+                targetNullValue);
+        }
+
+        var edited = rawXaml;
+        Update("Path", path);
+        Update("Mode", mode);
+        Update("Source", source);
+        Update("ElementName", elementName);
+        Update("RelativeSource", relativeSource);
+        Update("Converter", converter);
+        Update("StringFormat", stringFormat);
+        Update("FallbackValue", fallbackValue);
+        Update("TargetNullValue", targetNullValue);
+        return edited;
+
+        void Update(string name, string value)
+        {
+            if (!XamlTextEditor.TryParse(edited, out var currentDocument, out _) ||
+                currentDocument.RootSyntax is not { } root)
+            {
+                return;
+            }
+
+            edited = string.IsNullOrWhiteSpace(value)
+                ? XamlTextEditor.RemoveAttribute(edited, root, name)
+                : XamlTextEditor.SetAttributeValue(edited, root, name, value.Trim());
+        }
+    }
+
     private static bool TryIsDocumentRootResource(
         string xaml,
         XamlResourceDefinition resource,

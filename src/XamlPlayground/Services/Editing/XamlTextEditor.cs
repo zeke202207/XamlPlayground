@@ -162,6 +162,20 @@ internal static class XamlTextEditor
         return xaml.Insert(insertAt, CreateAttributeInsertionText(xaml, element, name, value));
     }
 
+    public static string RemoveAttribute(
+        string xaml,
+        IXmlElementSyntax element,
+        string name)
+    {
+        var attribute = FindAttribute(element, name);
+        if (attribute is null)
+        {
+            return xaml;
+        }
+
+        return ReplaceRange(xaml, attribute.Span.Start, attribute.Span.Length, string.Empty);
+    }
+
     public static string InsertChild(
         string xaml,
         IXmlElementSyntax parent,

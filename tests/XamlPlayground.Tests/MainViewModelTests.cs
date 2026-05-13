@@ -203,6 +203,70 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void BindingEditorFieldEdits_PreserveMultiBindingChildren()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ActiveXamlFile!.Text = """
+                                         <UserControl xmlns="https://github.com/avaloniaui">
+                                           <TextBlock>
+                                             <TextBlock.Text>
+                                               <MultiBinding StringFormat="{}{0} {1}">
+                                                 <Binding Path="FirstName" />
+                                                 <Binding Path="LastName" />
+                                               </MultiBinding>
+                                             </TextBlock.Text>
+                                           </TextBlock>
+                                         </UserControl>
+                                         """;
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+        viewModel.SelectedBindingInspectorNode = viewModel.BindingInspectorNodes
+            .SelectMany(static node => node.Children)
+            .Single(static node => node.Binding?.Kind == "MultiBinding");
+
+        viewModel.BindingEditorStringFormat = "{}{0}, {1}";
+        viewModel.ApplyBindingEditorCommand.Execute(null);
+
+        Assert.Contains("<MultiBinding StringFormat=\"{}{0}, {1}\">", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.Contains("<Binding Path=\"FirstName\" />", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.Contains("<Binding Path=\"LastName\" />", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<MultiBinding StringFormat=\"{}{0}, {1}\" />", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BindingEditorBuildMarkup_PreservesMultiBindingChildren()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ActiveXamlFile!.Text = """
+                                         <UserControl xmlns="https://github.com/avaloniaui">
+                                           <TextBlock>
+                                             <TextBlock.Text>
+                                               <MultiBinding StringFormat="{}{0} {1}">
+                                                 <Binding Path="FirstName" />
+                                                 <Binding Path="LastName" />
+                                               </MultiBinding>
+                                             </TextBlock.Text>
+                                           </TextBlock>
+                                         </UserControl>
+                                         """;
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+        viewModel.SelectedBindingInspectorNode = viewModel.BindingInspectorNodes
+            .SelectMany(static node => node.Children)
+            .Single(static node => node.Binding?.Kind == "MultiBinding");
+
+        viewModel.BindingEditorStringFormat = "{}{0}, {1}";
+        viewModel.BuildBindingMarkupCommand.Execute(null);
+
+        Assert.Contains("<MultiBinding StringFormat=\"{}{0}, {1}\">", viewModel.BindingEditorRawValue, StringComparison.Ordinal);
+        Assert.Contains("<Binding Path=\"FirstName\" />", viewModel.BindingEditorRawValue, StringComparison.Ordinal);
+        Assert.Contains("<Binding Path=\"LastName\" />", viewModel.BindingEditorRawValue, StringComparison.Ordinal);
+        Assert.DoesNotContain("<MultiBinding StringFormat=\"{}{0}, {1}\" />", viewModel.BindingEditorRawValue, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResourceEditorFieldEdits_AreAppliedWithoutEditingRawXaml()
     {
         TestApplication.EnsureAvaloniaInitialized();
