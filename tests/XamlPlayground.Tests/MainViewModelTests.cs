@@ -1007,6 +1007,20 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void MsBuildWorkspaceLoader_IncludesRootStorageBinAssemblies()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsStorageProjectAssemblyReferencePath",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.True((bool)method.Invoke(null, new object[] { "bin/Debug/net10.0/App.dll" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { "src/App/bin/Debug/net10.0/App.dll" })!);
+        Assert.False((bool)method.Invoke(null, new object[] { "obj/Debug/net10.0/App.dll" })!);
+        Assert.False((bool)method.Invoke(null, new object[] { "src/App/binary/App.dll" })!);
+    }
+
+    [Fact]
     public void MsBuildWorkspaceLoader_ExcludesSiblingProjectFoldersFromRootStorageProject()
     {
         var excludeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(

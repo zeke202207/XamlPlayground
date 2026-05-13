@@ -1771,6 +1771,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
         if (ShouldBuildWorkspaceProjectBeforeUsingOutput(project))
         {
+            StopRemotePreview();
             if (!await TryBuildWorkspaceProjectAsync(project) ||
                 string.IsNullOrWhiteSpace(project.OutputAssemblyPath) ||
                 !File.Exists(project.OutputAssemblyPath))

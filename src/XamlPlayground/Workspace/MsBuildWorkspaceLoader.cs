@@ -401,7 +401,7 @@ public static class MsBuildWorkspaceLoader
 
         foreach (var assembly in assemblies
                      .Where(assembly => IsStorageProjectFileInScope(projectFolder, assembly.RelativePath, excludedProjectFolders) &&
-                                        assembly.RelativePath.Contains("/bin/", StringComparison.OrdinalIgnoreCase))
+                                        IsStorageProjectAssemblyReferencePath(assembly.RelativePath))
                      .OrderBy(static assembly => assembly.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
             AddReference(project, WorkspaceAssemblyReference.FromImage(
@@ -411,6 +411,13 @@ public static class MsBuildWorkspaceLoader
         }
 
         return project;
+    }
+
+    private static bool IsStorageProjectAssemblyReferencePath(string relativePath)
+    {
+        var normalizedPath = NormalizePath(relativePath);
+        return normalizedPath.StartsWith("bin/", StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.Contains("/bin/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task AddStorageProjectReferencesAsync(
