@@ -127,6 +127,7 @@ public partial class MainViewModel
     [ObservableProperty] private ObservableCollection<FluentControlThemeTemplateViewModel> _filteredFluentControlThemeTemplates = new();
     [ObservableProperty] private FluentControlThemeTemplateViewModel? _selectedFluentControlThemeTemplate;
     [ObservableProperty] private string _controlThemeSearchText = string.Empty;
+    [ObservableProperty] private string _controlThemeRepositoryUrl = string.Empty;
     [ObservableProperty] private string _controlThemeSourceStatus = "Fluent theme source not loaded.";
     [ObservableProperty] private string _controlThemeSelectedTargetType = "No control selected.";
     [ObservableProperty] private string _controlThemeStatus = "No custom control themes.";
@@ -281,6 +282,12 @@ public partial class MainViewModel
 
     public ICommand LoadControlThemeProjectCommand { get; private set; } = null!;
 
+    public ICommand LoadControlThemeFolderCommand { get; private set; } = null!;
+
+    public ICommand LoadBundledFluentThemeProjectCommand { get; private set; } = null!;
+
+    public ICommand LoadControlThemeRepositoryCommand { get; private set; } = null!;
+
     public ICommand AddAnimationTrackCommand { get; private set; } = null!;
 
     public ICommand AddAnimationKeyFrameCommand { get; private set; } = null!;
@@ -362,6 +369,9 @@ public partial class MainViewModel
         ExportSelectedControlThemeCommand = new AsyncRelayCommand(ExportSelectedControlTheme, () => SelectedControlTheme is not null);
         SaveControlThemeProjectCommand = new AsyncRelayCommand(SaveControlThemeProject, CanSaveControlThemeProject);
         LoadControlThemeProjectCommand = new AsyncRelayCommand(LoadControlThemeProject, () => ActiveProject is not null);
+        LoadControlThemeFolderCommand = new AsyncRelayCommand(LoadControlThemeFolder, () => ActiveProject is not null);
+        LoadBundledFluentThemeProjectCommand = new RelayCommand(LoadBundledFluentThemeProject, () => ActiveProject is not null);
+        LoadControlThemeRepositoryCommand = new AsyncRelayCommand(LoadControlThemeRepository, CanLoadControlThemeRepository);
         AddAnimationTrackCommand = new RelayCommand(AddAnimationTrack, CanAddAnimationTrack);
         AddAnimationKeyFrameCommand = new RelayCommand(AddAnimationKeyFrame, CanEditAnimationKeyFrames);
         UpdateAnimationKeyFrameCommand = new RelayCommand(UpdateAnimationKeyFrame, () => SelectedAnimationTimelineKeyFrame is not null);
@@ -514,6 +524,11 @@ public partial class MainViewModel
     partial void OnControlThemeSearchTextChanged(string value)
     {
         RefreshControlThemeFilters();
+    }
+
+    partial void OnControlThemeRepositoryUrlChanged(string value)
+    {
+        (LoadControlThemeRepositoryCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
     }
 
     partial void OnSelectedThemeResourceChanged(ThemeResourceViewModel? value)
@@ -2973,9 +2988,9 @@ public partial class MainViewModel
                     template.SourcePath)));
         RefreshControlThemeFilters();
 
-        ControlThemeSourceStatus = _controlThemeCatalog.SourceRoot is null
-            ? "Fluent theme source not found. Initialize external/Avalonia or set XAML_PLAYGROUND_AVALONIA_FLUENT_THEME_PATH."
-            : $"Fluent source: {_controlThemeCatalog.SourceRoot}";
+        ControlThemeSourceStatus = FluentControlThemeTemplates.Count == 0
+            ? $"{_controlThemeCatalog.SourceDescription} No ControlTheme templates found."
+            : $"{_controlThemeCatalog.SourceDescription} ({FluentControlThemeTemplates.Count} template(s)).";
     }
 
     private void RefreshControlThemes()
@@ -5370,17 +5385,127 @@ public partial class MainViewModel
             using var reader = new StreamReader(stream);
             var json = await reader.ReadToEndAsync();
             var themeProject = ThemeProjectStorage.Load(json);
-            var loadedFiles = themeProject.Files
-                .Select(themeFile => _solutionFactory.AddOrUpdateResource(project, themeFile.Path, themeFile.Text))
-                .ToArray();
-
-            RefreshWorkspaceAfterThemeFileChanges(loadedFiles.FirstOrDefault());
-            ControlThemeStatus = $"Loaded {loadedFiles.Length} theme file(s) from {themeProject.Name}.";
+            var loadedFileCount = ApplyControlThemeProject(
+                project,
+                themeProject,
+                $"Theme project: {themeProject.Name}",
+                updateSourceCatalog: false);
+            ControlThemeStatus = $"Loaded {loadedFileCount} theme file(s) from {themeProject.Name}.";
         }
         catch (Exception exception)
         {
             ControlThemeStatus = $"Failed to load theme project: {exception.Message}";
         }
+    }
+
+    private async Task LoadControlThemeFolder()
+    {
+        if (ActiveProject is not { } project || StorageProvider is null)
+        {
+            return;
+        }
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Load theme folder",
+            AllowMultiple = false
+        });
+
+        var folder = folders.FirstOrDefault();
+        if (folder is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var source = await ThemeProjectSourceLoader.LoadFromStorageFolderAsync(folder);
+            var loadedFileCount = ApplyControlThemeProject(
+                project,
+                source.Project,
+                source.Description,
+                updateSourceCatalog: true);
+            ControlThemeStatus = $"Loaded {loadedFileCount} theme file(s) from folder.";
+        }
+        catch (Exception exception)
+        {
+            ControlThemeStatus = $"Failed to load theme folder: {exception.Message}";
+        }
+    }
+
+    private void LoadBundledFluentThemeProject()
+    {
+        if (ActiveProject is not { } project)
+        {
+            return;
+        }
+
+        try
+        {
+            var source = ThemeProjectSourceLoader.LoadEmbeddedFluentThemeProject();
+            var loadedFileCount = ApplyControlThemeProject(
+                project,
+                source.Project,
+                source.Description,
+                updateSourceCatalog: true);
+            ControlThemeStatus = $"Loaded {loadedFileCount} bundled Fluent theme file(s).";
+        }
+        catch (Exception exception)
+        {
+            ControlThemeStatus = $"Failed to load bundled Fluent theme: {exception.Message}";
+        }
+    }
+
+    private bool CanLoadControlThemeRepository()
+    {
+        return ActiveProject is not null && !string.IsNullOrWhiteSpace(ControlThemeRepositoryUrl);
+    }
+
+    private async Task LoadControlThemeRepository()
+    {
+        if (ActiveProject is not { } project || string.IsNullOrWhiteSpace(ControlThemeRepositoryUrl))
+        {
+            return;
+        }
+
+        var repositoryUrl = ControlThemeRepositoryUrl.Trim();
+        ControlThemeStatus = $"Loading theme repository {repositoryUrl}...";
+
+        try
+        {
+            var source = await ThemeProjectSourceLoader.LoadFromRemoteGitRepositoryAsync(repositoryUrl);
+            var loadedFileCount = ApplyControlThemeProject(
+                project,
+                source.Project,
+                source.Description,
+                updateSourceCatalog: true);
+            ControlThemeStatus = $"Loaded {loadedFileCount} theme file(s) from repository.";
+        }
+        catch (Exception exception)
+        {
+            ControlThemeStatus = $"Failed to load theme repository: {exception.Message}";
+        }
+    }
+
+    private int ApplyControlThemeProject(
+        InMemoryProject project,
+        ThemeProjectDocument themeProject,
+        string sourceDescription,
+        bool updateSourceCatalog)
+    {
+        var loadedFiles = themeProject.Files
+            .Select(themeFile => _solutionFactory.AddOrUpdateResource(project, themeFile.Path, themeFile.Text))
+            .ToArray();
+
+        if (updateSourceCatalog)
+        {
+            _controlThemeCatalog = new FluentControlThemeCatalog(themeProject, sourceDescription);
+            LoadFluentControlThemeTemplates();
+        }
+
+        RefreshWorkspaceAfterThemeFileChanges(loadedFiles.FirstOrDefault());
+
+        return loadedFiles.Length;
     }
 
     private IReadOnlyList<InMemoryProjectFile> GetControlThemeProjectFiles()
@@ -5446,6 +5571,9 @@ public partial class MainViewModel
         (ExportSelectedControlThemeCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         (SaveControlThemeProjectCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         (LoadControlThemeProjectCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+        (LoadControlThemeFolderCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+        (LoadBundledFluentThemeProjectCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        (LoadControlThemeRepositoryCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
         NotifyAnimationCommandsChanged();
     }
 
