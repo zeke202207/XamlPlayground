@@ -652,6 +652,25 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void MsBuildWorkspaceLoader_ResolvesNestedStorageSolutionProjectPaths()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "ResolveStorageSolutionProjectPath",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.Equal(
+            "src/App/App.csproj",
+            method.Invoke(null, new object[] { "src/App.slnx", "App/App.csproj" }));
+        Assert.Equal(
+            "src/App/App.csproj",
+            method.Invoke(null, new object[] { "src/Solutions/App.sln", "../App/App.csproj" }));
+        Assert.Equal(
+            "App/App.csproj",
+            method.Invoke(null, new object[] { "App.sln", "App/App.csproj" }));
+    }
+
+    [Fact]
     public void InMemoryProject_GetCSharpFiles_ExcludesEditableNonCompilationFiles()
     {
         var project = new InMemoryProject("ImportedApp", "ImportedApp", "msbuild");

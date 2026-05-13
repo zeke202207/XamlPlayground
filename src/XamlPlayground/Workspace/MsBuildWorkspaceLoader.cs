@@ -157,7 +157,9 @@ public static class MsBuildWorkspaceLoader
         foreach (var entry in entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var projectPath = NormalizePath(entry.Path);
+            var projectPath = solutionFile is null
+                ? NormalizePath(entry.Path)
+                : ResolveStorageSolutionProjectPath(solutionFile.RelativePath, entry.Path);
             if (!fileByPath.TryGetValue(projectPath, out var projectFile))
             {
                 progress?.Report($"Skipped missing project {projectPath}.");
@@ -1020,6 +1022,52 @@ public static class MsBuildWorkspaceLoader
         return filePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             ? NormalizePath(filePath[prefix.Length..])
             : NormalizePath(filePath);
+    }
+
+    private static string ResolveStorageSolutionProjectPath(string solutionPath, string projectPath)
+    {
+        var solutionDirectory = GetDirectoryName(solutionPath);
+        var normalizedProjectPath = NormalizePath(projectPath);
+        if (string.IsNullOrWhiteSpace(solutionDirectory))
+        {
+            return normalizedProjectPath;
+        }
+
+        return CollapseRelativeSegments($"{solutionDirectory.TrimEnd('/')}/{normalizedProjectPath}");
+    }
+
+    private static string CollapseRelativeSegments(string path)
+    {
+        var segments = new List<string>();
+        foreach (var segment in NormalizePath(path).Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment.Equals(".", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (segment.Equals("..", StringComparison.Ordinal))
+            {
+                if (segments.Count == 0)
+                {
+                    segments.Add(segment);
+                }
+                else if (segments[^1].Equals("..", StringComparison.Ordinal))
+                {
+                    segments.Add(segment);
+                }
+                else
+                {
+                    segments.RemoveAt(segments.Count - 1);
+                }
+
+                continue;
+            }
+
+            segments.Add(segment);
+        }
+
+        return string.Join('/', segments);
     }
 
     private static string GetDirectoryName(string path)
