@@ -5412,9 +5412,7 @@ public partial class MainViewModel
 
         try
         {
-            await using var stream = await file.OpenWriteAsync();
-            await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(themeFile.Text);
+            await WriteStorageFileTextAsync(file, themeFile.Text);
             ControlThemeStatus = $"Exported {selectedTheme.Key}.";
         }
         catch (Exception exception)
@@ -5461,9 +5459,7 @@ public partial class MainViewModel
             var json = ThemeProjectStorage.Save(
                 project.Name,
                 themeFiles.Select(static themeFile => (themeFile.Path, themeFile.Text)));
-            await using var stream = await file.OpenWriteAsync();
-            await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(json);
+            await WriteStorageFileTextAsync(file, json);
             ControlThemeStatus = $"Saved {themeFiles.Count} theme file(s) to theme project.";
         }
         catch (Exception exception)

@@ -463,9 +463,7 @@ public partial class MainViewModel : ViewModelBase
                 : extension.Equals(".sln", StringComparison.OrdinalIgnoreCase)
                     ? StandardSolutionStorage.SaveSln(solution)
                     : SolutionStorage.Save(solution);
-            await using var stream = await file.OpenWriteAsync();
-            await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(text);
+            await WriteStorageFileTextAsync(file, text);
             if (!isStandardSolutionMetadataExport)
             {
                 MarkSolutionClean(solution);
@@ -1471,9 +1469,7 @@ public partial class MainViewModel : ViewModelBase
                 try
                 {
                     _openXamlFile = file;
-                    await using var stream = await _openXamlFile.OpenWriteAsync();
-                    await using var writer = new StreamWriter(stream);
-                    await writer.WriteAsync(ActiveXamlFile.Text);
+                    await WriteStorageFileTextAsync(_openXamlFile, ActiveXamlFile.Text);
                     ActiveXamlFile.MarkClean();
                 }
                 catch (Exception exception)
@@ -1484,9 +1480,7 @@ public partial class MainViewModel : ViewModelBase
         }
         else
         {
-            await using var stream = await _openXamlFile.OpenWriteAsync();
-            await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(ActiveXamlFile.Text);
+            await WriteStorageFileTextAsync(_openXamlFile, ActiveXamlFile.Text);
             ActiveXamlFile.MarkClean();
         }
     }
@@ -1557,9 +1551,7 @@ public partial class MainViewModel : ViewModelBase
                 try
                 {
                     _openCodeFile = file;
-                    await using var stream = await _openCodeFile.OpenWriteAsync();
-                    await using var writer = new StreamWriter(stream);
-                    await writer.WriteAsync(ActiveCodeFile.Text);
+                    await WriteStorageFileTextAsync(_openCodeFile, ActiveCodeFile.Text);
                     ActiveCodeFile.MarkClean();
                 }
                 catch (Exception exception)
@@ -1570,10 +1562,23 @@ public partial class MainViewModel : ViewModelBase
         }
         else
         {
-            await using var stream = await _openCodeFile.OpenWriteAsync();
-            await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(ActiveCodeFile.Text);
+            await WriteStorageFileTextAsync(_openCodeFile, ActiveCodeFile.Text);
             ActiveCodeFile.MarkClean();
         }
+    }
+
+    private static async Task WriteStorageFileTextAsync(IStorageFile file, string text)
+    {
+        await using var stream = await file.OpenWriteAsync();
+        try
+        {
+            stream.SetLength(0);
+        }
+        catch (NotSupportedException)
+        {
+        }
+
+        await using var writer = new StreamWriter(stream);
+        await writer.WriteAsync(text);
     }
 }
