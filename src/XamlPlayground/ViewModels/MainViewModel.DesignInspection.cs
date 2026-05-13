@@ -1004,18 +1004,8 @@ public partial class MainViewModel
         }
 
         var rawValue = binding.LocationKind == XamlBindingLocationKind.ObjectElement &&
-                       BindingEditorRawValue.TrimStart().StartsWith('{')
-            ? XamlDesignEditor.BuildBindingObjectElement(
-                BindingEditorKind,
-                BindingEditorPath,
-                BindingEditorMode,
-                BindingEditorSource,
-                BindingEditorElementName,
-                BindingEditorRelativeSource,
-                BindingEditorConverter,
-                BindingEditorStringFormat,
-                BindingEditorFallbackValue,
-                BindingEditorTargetNullValue)
+                       BindingEditorRawValue.TrimStart().StartsWith("{", StringComparison.Ordinal)
+            ? XamlDesignEditor.BuildBindingObjectElementFromMarkup(BindingEditorRawValue)
             : BindingEditorRawValue;
         var edit = _designEditor.ReplaceBinding(file.Text, binding, rawValue);
         ApplyDesignFileEdit(file, edit, $"Updated binding on {binding.PropertyName}.");

@@ -349,6 +349,22 @@ public sealed class XamlDesignEditor
         }
     }
 
+    public static string BuildBindingObjectElementFromMarkup(string markup)
+    {
+        var fields = XamlBindingMarkup.Parse(markup);
+        return BuildBindingObjectElement(
+            fields.Kind,
+            fields.Path,
+            fields.Mode,
+            fields.Source,
+            fields.ElementName,
+            fields.RelativeSource,
+            fields.Converter,
+            fields.StringFormat,
+            fields.FallbackValue,
+            fields.TargetNullValue);
+    }
+
     private static bool TryIsDocumentRootResource(
         string xaml,
         XamlResourceDefinition resource,

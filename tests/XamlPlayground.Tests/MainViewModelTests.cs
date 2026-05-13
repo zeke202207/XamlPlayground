@@ -154,6 +154,30 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void BindingEditorRawMarkup_ReplacesObjectElementBinding()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        viewModel.ActiveXamlFile!.Text = """
+                                         <UserControl xmlns="https://github.com/avaloniaui">
+                                           <TextBlock>
+                                             <TextBlock.Text>
+                                               <Binding Path="Title" />
+                                             </TextBlock.Text>
+                                           </TextBlock>
+                                         </UserControl>
+                                         """;
+        viewModel.RefreshDesignInspectorsCommand.Execute(null);
+
+        viewModel.BindingEditorRawValue = "{Binding DisplayName, Mode=OneWay}";
+        viewModel.ApplyBindingEditorCommand.Execute(null);
+
+        Assert.Contains("<Binding Path=\"DisplayName\" Mode=\"OneWay\" />", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Path=\"Title\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StyleSetterUnknownProperty_IsPreservedWhenStyleIsSelected()
     {
         TestApplication.EnsureAvaloniaInitialized();
