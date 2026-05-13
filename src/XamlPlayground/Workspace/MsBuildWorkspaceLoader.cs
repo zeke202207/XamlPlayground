@@ -210,6 +210,14 @@ public static class MsBuildWorkspaceLoader
         var solutionFolders = File.Exists(workspacePath) && IsSolutionPath(workspacePath)
             ? ParseSolutionFolders(workspacePath)
             : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var projectFolders = roslynSolution.Projects
+            .Select(static project => project.FilePath)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(static path => Path.GetDirectoryName(path!))
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(static path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         foreach (var project in roslynSolution.Projects)
         {
@@ -219,6 +227,7 @@ public static class MsBuildWorkspaceLoader
                 project,
                 workspaceRoot,
                 solutionFolders,
+                projectFolders,
                 fileChanged,
                 progress,
                 cancellationToken);
@@ -237,6 +246,7 @@ public static class MsBuildWorkspaceLoader
         Project project,
         string? workspaceRoot,
         IReadOnlyDictionary<string, string> solutionFolders,
+        IReadOnlyList<string> projectFolders,
         Action<InMemoryProjectFile>? fileChanged,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
@@ -261,6 +271,7 @@ public static class MsBuildWorkspaceLoader
         };
 
         var addedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var excludedProjectFolders = GetExcludedLocalProjectFolders(projectDirectory, projectFolders);
         if (!string.IsNullOrWhiteSpace(projectFilePath) && File.Exists(projectFilePath))
         {
             AddLocalFile(
@@ -311,7 +322,7 @@ public static class MsBuildWorkspaceLoader
                 includeInCompilation: false);
         }
 
-        foreach (var filePath in EnumerateProjectFiles(projectDirectory, projectFilePath))
+        foreach (var filePath in EnumerateProjectFiles(projectDirectory, projectFilePath, excludedProjectFolders))
         {
             var text = await File.ReadAllTextAsync(filePath, cancellationToken);
             AddLocalFile(
@@ -759,7 +770,7 @@ public static class MsBuildWorkspaceLoader
         Project referencedProject,
         WorkspaceAssemblyReference? outputReference)
     {
-        return outputReference is null && ShouldEmitProjectReferenceFromSource(referencedProject);
+        return outputReference is null || ShouldEmitProjectReferenceFromSource(referencedProject);
     }
 
     private static WorkspaceAssemblyReference? GetProjectOutputReference(Project project)
@@ -935,7 +946,10 @@ public static class MsBuildWorkspaceLoader
             sourcePath: fullPath));
     }
 
-    private static IEnumerable<string> EnumerateProjectFiles(string? projectDirectory, string projectFilePath)
+    private static IEnumerable<string> EnumerateProjectFiles(
+        string? projectDirectory,
+        string projectFilePath,
+        IEnumerable<string>? excludedProjectFolders = null)
     {
         if (string.IsNullOrWhiteSpace(projectDirectory) || !Directory.Exists(projectDirectory))
         {
@@ -952,9 +966,11 @@ public static class MsBuildWorkspaceLoader
             yield break;
         }
 
+        var excludedFolders = excludedProjectFolders?.ToArray() ?? Array.Empty<string>();
         foreach (var file in files)
         {
             if (file.Equals(projectFilePath, StringComparison.OrdinalIgnoreCase) ||
+                IsUnderExcludedLocalProjectFolder(file, excludedFolders) ||
                 IsIgnoredProjectPath(file) ||
                 !IsImportableFilePath(file))
             {
@@ -980,7 +996,14 @@ public static class MsBuildWorkspaceLoader
             {
                 case IStorageFolder childFolder when IsIgnoredDirectoryName(childFolder.Name):
                     break;
-                case IStorageFolder childFolder when !IsIgnoredDirectoryName(childFolder.Name):
+                case IStorageFolder childFolder when IsBuildOutputDirectoryName(childFolder.Name):
+                    if (childFolder.Name.Equals("bin", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await EnumerateAssemblyStorageFolderAsync(childFolder, path, assemblies, cancellationToken);
+                    }
+
+                    break;
+                case IStorageFolder childFolder:
                     await EnumerateStorageFolderAsync(childFolder, path, files, assemblies, cancellationToken);
                     break;
                 case IStorageFile file when IsImportableFilePath(path):
@@ -1638,6 +1661,33 @@ public static class MsBuildWorkspaceLoader
                name.Equals(".vs", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsBuildOutputDirectoryName(string name)
+    {
+        return name.Equals("bin", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("obj", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> GetExcludedLocalProjectFolders(
+        string? projectDirectory,
+        IEnumerable<string> projectFolders)
+    {
+        var normalizedProjectDirectory = NormalizeLocalPath(projectDirectory);
+        return projectFolders
+            .Select(NormalizeLocalPath)
+            .Where(static folder => !string.IsNullOrWhiteSpace(folder))
+            .Where(folder => !IsSameOrUnderProjectFolder(normalizedProjectDirectory, folder))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool IsUnderExcludedLocalProjectFolder(
+        string filePath,
+        IEnumerable<string> excludedProjectFolders)
+    {
+        var normalizedFilePath = NormalizeLocalPath(filePath);
+        return excludedProjectFolders.Any(folder => IsUnderProjectFolder(folder, normalizedFilePath));
+    }
+
     private static bool IsUnderProjectFolder(string projectFolder, string filePath)
     {
         return string.IsNullOrWhiteSpace(projectFolder) ||
@@ -1745,6 +1795,23 @@ public static class MsBuildWorkspaceLoader
     private static string NormalizePath(string path)
     {
         return path.Replace('\\', '/').Trim('/');
+    }
+
+    private static string NormalizeLocalPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return NormalizePath(Path.GetFullPath(path));
+        }
+        catch
+        {
+            return NormalizePath(path);
+        }
     }
 
     private static string GetRelativePath(string? projectPath, string filePath, string fallbackName)

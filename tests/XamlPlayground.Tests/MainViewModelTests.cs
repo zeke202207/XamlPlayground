@@ -721,6 +721,19 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void MsBuildWorkspaceLoader_ClassifiesBuildOutputFoldersForStorageEnumeration()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsBuildOutputDirectoryName",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.True((bool)method.Invoke(null, new object[] { "bin" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { "obj" })!);
+        Assert.False((bool)method.Invoke(null, new object[] { "src" })!);
+    }
+
+    [Fact]
     public void MsBuildWorkspaceLoader_ExcludesSiblingProjectFoldersFromRootStorageProject()
     {
         var excludeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
@@ -776,6 +789,53 @@ public sealed class MainViewModelTests
         Assert.Contains("src/Lib", childExcludedArray);
         Assert.True((bool)scopeMethod.Invoke(null, new object[] { "src/App/Plugin", "src/App/Plugin/PluginView.axaml", childExcludedArray })!);
         Assert.False((bool)scopeMethod.Invoke(null, new object[] { "src/App/Plugin", "src/App/MainView.axaml", childExcludedArray })!);
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_ExcludesSiblingProjectFoldersFromLocalRootProject()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundLocalProjectScope-{Guid.NewGuid():N}");
+        var libRoot = Path.Combine(root, "Lib");
+        var sampleRoot = Path.Combine(root, "Samples", "Controls");
+        try
+        {
+            Directory.CreateDirectory(libRoot);
+            Directory.CreateDirectory(sampleRoot);
+            File.WriteAllText(Path.Combine(root, "App.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(Path.Combine(root, "App.axaml"), "<UserControl />");
+            File.WriteAllText(Path.Combine(libRoot, "Lib.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(Path.Combine(libRoot, "LibView.axaml"), "<UserControl />");
+            File.WriteAllText(Path.Combine(sampleRoot, "Demo.axaml"), "<UserControl />");
+
+            var excludeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "GetExcludedLocalProjectFolders",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            var enumerateMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "EnumerateProjectFiles",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(excludeMethod);
+            Assert.NotNull(enumerateMethod);
+
+            var excluded = Assert.IsAssignableFrom<IEnumerable<string>>(excludeMethod.Invoke(
+                null,
+                new object[] { root, new[] { root, libRoot, sampleRoot } }));
+            var files = Assert.IsAssignableFrom<IEnumerable<string>>(enumerateMethod.Invoke(
+                    null,
+                    new object[] { root, Path.Combine(root, "App.csproj"), excluded }))
+                .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+                .ToArray();
+
+            Assert.Contains("App.axaml", files);
+            Assert.DoesNotContain("Lib/LibView.axaml", files);
+            Assert.DoesNotContain("Samples/Controls/Demo.axaml", files);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -1526,7 +1586,7 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void MsBuildWorkspaceLoader_EagerSourceEmitRequiresMissingOutputReference()
+    public void MsBuildWorkspaceLoader_SourceEmitDuringLoadTracksMissingOrStaleOutputs()
     {
         TestApplication.EnsureAvaloniaInitialized();
 
@@ -1567,6 +1627,10 @@ public sealed class MainViewModelTests
             Assert.NotNull(method);
 
             Assert.True((bool)method.Invoke(null, new object?[] { referencedProject, null })!);
+            Assert.True((bool)method.Invoke(null, new object?[] { referencedProject, runtimeReference })!);
+
+            File.SetLastWriteTimeUtc(sourcePath, DateTime.UtcNow.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(outputPath, DateTime.UtcNow);
             Assert.False((bool)method.Invoke(null, new object?[] { referencedProject, runtimeReference })!);
         }
         finally
