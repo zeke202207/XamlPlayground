@@ -639,6 +639,8 @@ public static class StandardSolutionStorage
     {
         var extension = Path.GetExtension(path);
         return extension.Equals(".cs", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".vb", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".fs", StringComparison.OrdinalIgnoreCase) ||
                extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase) ||
                extension.Equals(".axaml", StringComparison.OrdinalIgnoreCase) ||
                extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase) ||

@@ -526,6 +526,48 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void StandardSolutionStorage_LoadsVisualBasicAndFSharpSourceFiles()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundMixedSolution-{Guid.NewGuid():N}");
+        try
+        {
+            var visualBasicRoot = Path.Combine(root, "VisualBasicApp");
+            var fsharpRoot = Path.Combine(root, "FSharpApp");
+            Directory.CreateDirectory(visualBasicRoot);
+            Directory.CreateDirectory(fsharpRoot);
+            var slnxPath = Path.Combine(root, "Mixed.slnx");
+            File.WriteAllText(slnxPath, """
+                                        <Solution>
+                                          <Project Path="VisualBasicApp/VisualBasicApp.vbproj" />
+                                          <Project Path="FSharpApp/FSharpApp.fsproj" />
+                                        </Solution>
+                                        """);
+            File.WriteAllText(Path.Combine(visualBasicRoot, "VisualBasicApp.vbproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(Path.Combine(visualBasicRoot, "Module1.vb"), "Public Module Module1\nEnd Module");
+            File.WriteAllText(Path.Combine(fsharpRoot, "FSharpApp.fsproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(Path.Combine(fsharpRoot, "Program.fs"), "module Program");
+
+            var solution = StandardSolutionStorage.LoadFromLocalPath(slnxPath, File.ReadAllText(slnxPath));
+
+            var visualBasicProject = Assert.Single(
+                solution.Projects,
+                project => project.Name == "VisualBasicApp");
+            var fsharpProject = Assert.Single(
+                solution.Projects,
+                project => project.Name == "FSharpApp");
+            Assert.Contains(visualBasicProject.Files, file => file.Path == "Module1.vb" && file.Kind == ProjectFileKind.Text);
+            Assert.Contains(fsharpProject.Files, file => file.Path == "Program.fs" && file.Kind == ProjectFileKind.Text);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void StandardSolutionStorage_LoadsLocalSlnxProjectFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundStandardSolution-{Guid.NewGuid():N}");
