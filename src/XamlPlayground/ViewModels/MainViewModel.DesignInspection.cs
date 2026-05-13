@@ -231,6 +231,21 @@ public partial class MainViewModel
         NotifyDesignInspectionCommandsChanged();
     }
 
+    partial void OnResourceEditorKeyChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnResourceEditorTypeChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
+    partial void OnResourceEditorValueChanged(string value)
+    {
+        NotifyDesignInspectionCommandsChanged();
+    }
+
     private void RefreshDesignInspection()
     {
         var selectedStyleKey = CreateNodeSelectionKey(SelectedStyleInspectorNode);

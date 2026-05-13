@@ -313,4 +313,36 @@ public sealed class XamlDesignInspectorTests
         Assert.Contains("#FF0000", edit.Text);
         Assert.DoesNotContain("#0078D4", edit.Text);
     }
+
+    [Fact]
+    public void Editor_QuotesBindingMarkupValuesWithCommas()
+    {
+        var markup = XamlDesignEditor.BuildBindingMarkup(
+            "Binding",
+            "Title",
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            "{}{0}, {1}",
+            "N/A, unknown",
+            string.Empty);
+        var inspector = new XamlDesignInspector();
+
+        var binding = inspector.Analyze(new[]
+            {
+                new XamlDesignDocument(
+                    "Main.axaml",
+                    "<TextBlock xmlns=\"https://github.com/avaloniaui\" Text=\"" + markup + "\" />",
+                    IsResourceDictionary: false)
+            })
+            .Bindings
+            .Single();
+
+        Assert.Contains("StringFormat='{}{0}, {1}'", markup);
+        Assert.Contains("FallbackValue='N/A, unknown'", markup);
+        Assert.Equal("{}{0}, {1}", binding.StringFormat);
+        Assert.Equal("N/A, unknown", binding.FallbackValue);
+    }
 }

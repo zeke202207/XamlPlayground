@@ -301,7 +301,7 @@ public sealed class XamlDesignEditor
         {
             if (!string.IsNullOrWhiteSpace(value))
             {
-                parts.Add($"{name}={value.Trim()}");
+                parts.Add($"{name}={QuoteBindingMarkupValue(value.Trim())}");
             }
         }
     }
@@ -364,6 +364,38 @@ public sealed class XamlDesignEditor
             document.RootSyntax.AsNode.Span.Start == resource.Start &&
             document.RootSyntax.AsNode.Span.Length == resource.Length;
         return true;
+    }
+
+    private static string QuoteBindingMarkupValue(string value)
+    {
+        if (!RequiresBindingMarkupQuote(value) || IsQuoted(value))
+        {
+            return value;
+        }
+
+        if (!value.Contains('\'', StringComparison.Ordinal))
+        {
+            return $"'{value}'";
+        }
+
+        if (!value.Contains('"', StringComparison.Ordinal))
+        {
+            return $"\"{value}\"";
+        }
+
+        return $"'{value.Replace("'", "&apos;", StringComparison.Ordinal)}'";
+    }
+
+    private static bool RequiresBindingMarkupQuote(string value)
+    {
+        return value.Contains(',', StringComparison.Ordinal);
+    }
+
+    private static bool IsQuoted(string value)
+    {
+        return value.Length >= 2 &&
+               ((value[0] == '\'' && value[^1] == '\'') ||
+                (value[0] == '"' && value[^1] == '"'));
     }
 
     private static bool TryFindStyle(

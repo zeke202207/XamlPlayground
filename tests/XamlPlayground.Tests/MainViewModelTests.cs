@@ -57,6 +57,24 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ResourceEditorKeyChange_RequeriesCreateCommand()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            ResourceEditorRawXaml = string.Empty
+        };
+        var raised = false;
+        viewModel.CreateResourceCommand.CanExecuteChanged += (_, _) => raised = true;
+
+        viewModel.ResourceEditorKey = "CreatedBrush";
+
+        Assert.True(raised);
+        Assert.True(viewModel.CreateResourceCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task RuntimePreviewLoader_LoadsXClassUserControlWithCodeBehindRepeatedly()
     {
         TestApplication.EnsureAvaloniaInitialized();
