@@ -765,6 +765,45 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void RemotePreviewStartInfo_PrefersTargetDepsForIsolatedWorkspace()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewDeps-{Guid.NewGuid():N}");
+        var hostDirectory = Path.Combine(root, "host");
+        var targetDirectory = Path.Combine(root, "target");
+        var hostPath = Path.Combine(hostDirectory, "XamlPlayground.PreviewerHost.dll");
+        var targetPath = Path.Combine(targetDirectory, "SampleApp.dll");
+        var hostRuntimeConfig = Path.ChangeExtension(hostPath, ".runtimeconfig.json");
+        var hostDeps = Path.ChangeExtension(hostPath, ".deps.json");
+        var targetDeps = Path.Combine(targetDirectory, "SampleApp.deps.json");
+        try
+        {
+            Directory.CreateDirectory(hostDirectory);
+            Directory.CreateDirectory(targetDirectory);
+            File.WriteAllBytes(hostPath, Array.Empty<byte>());
+            File.WriteAllBytes(targetPath, Array.Empty<byte>());
+            File.WriteAllText(hostRuntimeConfig, "{}");
+            File.WriteAllText(hostDeps, "{}");
+            File.WriteAllText(targetDeps, "{}");
+            var method = typeof(WorkspaceRemotePreviewService).GetMethod(
+                "BuildStartInfo",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var startInfo = Assert.IsType<System.Diagnostics.ProcessStartInfo>(method.Invoke(
+                null,
+                new object[] { hostPath, targetPath, 12345, targetDirectory }));
+
+            Assert.Contains($"--runtimeconfig \"{hostRuntimeConfig}\"", startInfo.Arguments, StringComparison.Ordinal);
+            Assert.Contains($"--depsfile \"{targetDeps}\"", startInfo.Arguments, StringComparison.Ordinal);
+            Assert.DoesNotContain($"--depsfile \"{hostDeps}\"", startInfo.Arguments, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
     public void PreviewerHostProject_ReferencesAvaloniaPackageForDesignerSupport()
     {
         var projectPath = Path.Combine(
@@ -780,6 +819,69 @@ public sealed class MainViewModelTests
 
         Assert.NotNull(packageReference);
         Assert.Equal("$(AvaloniaVersion)", (string?)packageReference.Attribute("Version"));
+    }
+
+    [Fact]
+    public void PreviewerHostResolver_PrefersTargetAssemblyAndFallsBackToHostDirectory()
+    {
+        static string NormalizeResolvedPath(string path)
+        {
+            var normalized = Path.GetFullPath(path).Replace('\\', '/');
+            return OperatingSystem.IsMacOS() && normalized.StartsWith("/private/var/", StringComparison.Ordinal)
+                ? normalized["/private".Length..]
+                : normalized;
+        }
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewerResolver-{Guid.NewGuid():N}");
+        var hostDirectory = Path.Combine(root, "host");
+        var targetDirectory = Path.Combine(root, "target");
+        var hostPath = Path.Combine(hostDirectory, "XamlPlayground.PreviewerHost.dll");
+        var targetPath = Path.Combine(targetDirectory, "SampleApp.dll");
+        var targetDesignerSupportPath = Path.Combine(targetDirectory, "Avalonia.DesignerSupport.dll");
+        var hostDesignerSupportPath = Path.Combine(hostDirectory, "Avalonia.DesignerSupport.dll");
+        try
+        {
+            Directory.CreateDirectory(hostDirectory);
+            Directory.CreateDirectory(targetDirectory);
+            File.WriteAllBytes(hostPath, Array.Empty<byte>());
+            File.WriteAllBytes(targetPath, CompileTestAssemblyImage("SampleApp", "public sealed class SampleAppType { }"));
+            File.WriteAllBytes(
+                targetDesignerSupportPath,
+                CompileTestAssemblyImage("Avalonia.DesignerSupport", "public sealed class TargetDesignerSupport { }"));
+            File.WriteAllBytes(
+                hostDesignerSupportPath,
+                CompileTestAssemblyImage("Avalonia.DesignerSupport", "public sealed class HostDesignerSupport { }"));
+            var resolverType = typeof(XamlPlayground.PreviewerHost.Program).GetNestedType(
+                "TargetAssemblyResolver",
+                BindingFlags.NonPublic);
+            Assert.NotNull(resolverType);
+            var resolver = Activator.CreateInstance(
+                resolverType,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                args: new object[] { targetPath, hostPath },
+                culture: null);
+            Assert.NotNull(resolver);
+            var method = resolverType.GetMethod(
+                "ResolveAssemblyPath",
+                BindingFlags.Instance | BindingFlags.Public);
+            Assert.NotNull(method);
+
+            var targetResolved = Assert.IsType<string>(method.Invoke(
+                resolver,
+                new object[] { new AssemblyName("Avalonia.DesignerSupport") }));
+            File.Delete(targetDesignerSupportPath);
+            var hostResolved = Assert.IsType<string>(method.Invoke(
+                resolver,
+                new object[] { new AssemblyName("Avalonia.DesignerSupport") }));
+
+            Assert.Equal(NormalizeResolvedPath(targetDesignerSupportPath), NormalizeResolvedPath(targetResolved));
+            Assert.Equal(NormalizeResolvedPath(hostDesignerSupportPath), NormalizeResolvedPath(hostResolved));
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
     }
 
     [Fact]
@@ -2099,6 +2201,49 @@ public sealed class MainViewModelTests
 
         Assert.False(viewModel.IsRemotePreviewActive);
         Assert.Null(viewModel.RemotePreviewBitmap);
+    }
+
+    [Fact]
+    public void LoadSolution_UnloadsPreviousInProcessPreviewAndClearsDiagnosticsRoot()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var project = new InMemoryProject("Build", "Build", "msbuild");
+        project.AddFile(new InMemoryProjectFile(
+            "Build.cs",
+            "public sealed class Build { }",
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(project);
+        var viewModel = new MainViewModel(null)
+        {
+            Control = new Button(),
+            EnableAutoRun = false
+        };
+        viewModel.DiagnosticsRoot = viewModel.Control;
+        var context = new AssemblyLoadContext("PreviousPreviewTest", isCollectible: true);
+        var scopeType = typeof(MainViewModel).GetNestedType(
+            "WorkspacePreviewAssemblyScope",
+            BindingFlags.NonPublic);
+        Assert.NotNull(scopeType);
+        var scope = Activator.CreateInstance(
+            scopeType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null,
+            args: new object?[] { null, context, Array.Empty<Assembly>() },
+            culture: null);
+        Assert.NotNull(scope);
+        var previousField = typeof(MainViewModel).GetField(
+            "_previous",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(previousField);
+        previousField.SetValue(viewModel, scope);
+
+        LoadSolutionIntoViewModel(viewModel, solution);
+
+        Assert.Null(previousField.GetValue(viewModel));
+        Assert.Null(viewModel.Control);
+        Assert.Null(viewModel.DiagnosticsRoot);
     }
 
     [Fact]

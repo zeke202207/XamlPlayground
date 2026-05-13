@@ -154,8 +154,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _timer?.Dispose();
         _solutionExplorerSearchThrottle?.Dispose();
         _remotePreviewService.Dispose();
-        _previous?.Unload();
-        _previous = null;
+        UnloadPreviousInProcessPreview();
     }
 
     partial void OnIsRemotePreviewActiveChanged(bool value)
@@ -480,6 +479,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void LoadSolution(InMemorySolution solution)
     {
         StopRemotePreview();
+        UnloadPreviousInProcessPreview();
+        Control = null;
+        DiagnosticsRoot = null;
         EnsureSolutionDocumentsOnCurrentThread(solution);
         Solution = solution;
         ActiveProject = SelectInitialProject(solution);
@@ -2630,6 +2632,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _remotePreviewService.Stop();
         IsRemotePreviewActive = false;
         RemotePreviewBitmap = null;
+    }
+
+    private void UnloadPreviousInProcessPreview()
+    {
+        var previousScope = _previous;
+        _previous = null;
+        previousScope?.Unload();
     }
 
     private void OnRemotePreviewFrameReceived(FrameMessage frame)

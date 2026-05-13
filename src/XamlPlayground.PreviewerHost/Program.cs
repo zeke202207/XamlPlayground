@@ -13,7 +13,7 @@ public static class Program
     public static void Main(string[] args)
     {
         string targetAssemblyPath = ResolveTargetAssemblyPath(args);
-        TargetAssemblyResolver resolver = new(targetAssemblyPath);
+        TargetAssemblyResolver resolver = new(targetAssemblyPath, Assembly.GetExecutingAssembly().Location);
         AssemblyLoadContext.Default.Resolving += resolver.Resolve;
         AssemblyLoadContext.Default.ResolvingUnmanagedDll += resolver.ResolveUnmanaged;
 
@@ -91,11 +91,13 @@ public static class Program
     {
         private readonly AssemblyDependencyResolver _resolver;
         private readonly string _targetDirectory;
+        private readonly string _hostDirectory;
 
-        public TargetAssemblyResolver(string mainAssemblyPath)
+        public TargetAssemblyResolver(string mainAssemblyPath, string hostAssemblyPath)
         {
             _resolver = new AssemblyDependencyResolver(mainAssemblyPath);
             _targetDirectory = Path.GetDirectoryName(mainAssemblyPath) ?? string.Empty;
+            _hostDirectory = Path.GetDirectoryName(hostAssemblyPath) ?? string.Empty;
         }
 
         public Assembly? Resolve(AssemblyLoadContext context, AssemblyName assemblyName)
@@ -118,6 +120,15 @@ public static class Program
             if (path == null && !string.IsNullOrWhiteSpace(_targetDirectory))
             {
                 string candidate = Path.Combine(_targetDirectory, assemblyName.Name + ".dll");
+                if (File.Exists(candidate))
+                {
+                    path = candidate;
+                }
+            }
+
+            if (path == null && !string.IsNullOrWhiteSpace(_hostDirectory))
+            {
+                string candidate = Path.Combine(_hostDirectory, assemblyName.Name + ".dll");
                 if (File.Exists(candidate))
                 {
                     path = candidate;

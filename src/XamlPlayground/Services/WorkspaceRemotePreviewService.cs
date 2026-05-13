@@ -169,7 +169,7 @@ public sealed class WorkspaceRemotePreviewService : IDisposable
         var hostRuntimeConfig = Path.ChangeExtension(hostPath, ".runtimeconfig.json");
         var hostDeps = Path.ChangeExtension(hostPath, ".deps.json");
         var runtimeConfig = File.Exists(hostRuntimeConfig) ? hostRuntimeConfig : targetRuntimeConfig;
-        var depsFile = File.Exists(hostDeps) ? hostDeps : targetDeps;
+        var depsFile = File.Exists(targetDeps) ? targetDeps : hostDeps;
         var args = string.Join(
             " ",
             new[]
