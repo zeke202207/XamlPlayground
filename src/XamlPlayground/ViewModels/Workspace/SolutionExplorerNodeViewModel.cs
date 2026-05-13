@@ -29,6 +29,7 @@ public sealed partial class SolutionExplorerNodeViewModel : ViewModelBase
         ExpandRecursiveCommand = new RelayCommand(() => SetExpandedRecursive(true));
         CollapseRecursiveCommand = new RelayCommand(() => SetExpandedRecursive(false));
         SearchText = CreateSearchText(title, project, file);
+        NormalizedSearchText = SearchText.ToLowerInvariant();
         _isExpanded = kind is ProjectFileKind.Solution or ProjectFileKind.Project or ProjectFileKind.Folder;
     }
 
@@ -54,6 +55,8 @@ public sealed partial class SolutionExplorerNodeViewModel : ViewModelBase
 
     public string SearchText { get; }
 
+    public string NormalizedSearchText { get; }
+
     public string Icon => Kind switch
     {
         ProjectFileKind.Solution => "\u25c7",
@@ -66,9 +69,9 @@ public sealed partial class SolutionExplorerNodeViewModel : ViewModelBase
         _ => "\u2022"
     };
 
-    public bool MatchesSearch(string searchText)
+    public bool MatchesLiteralSearch(string normalizedSearchText)
     {
-        return SearchText.Contains(searchText, StringComparison.OrdinalIgnoreCase);
+        return NormalizedSearchText.Contains(normalizedSearchText, StringComparison.Ordinal);
     }
 
     public SolutionExplorerNodeViewModel CloneShallow()

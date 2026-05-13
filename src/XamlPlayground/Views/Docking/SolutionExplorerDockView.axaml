@@ -47,10 +47,24 @@
       </Button>
     </WrapPanel>
 
-    <TextBox DockPanel.Dock="Top"
-             Margin="6,0,6,4"
-             PlaceholderText="Search solution"
-             Text="{Binding Shell.SolutionExplorerSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+    <DockPanel DockPanel.Dock="Top"
+               Margin="6,0,6,4"
+               LastChildFill="True">
+      <CheckBox DockPanel.Dock="Right"
+                Content="Regex"
+                Margin="6,0,0,0"
+                VerticalAlignment="Center"
+                IsChecked="{Binding Shell.SolutionExplorerSearchUseRegex, Mode=TwoWay}" />
+      <TextBox PlaceholderText="Search solution"
+               Text="{Binding Shell.SolutionExplorerSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+    </DockPanel>
+
+    <TextBlock DockPanel.Dock="Top"
+               Margin="6,0,6,4"
+               Foreground="{DynamicResource ErrorPanelForegroundBrush}"
+               TextWrapping="Wrap"
+               IsVisible="{Binding Shell.HasSolutionExplorerSearchError}"
+               Text="{Binding Shell.SolutionExplorerSearchError}" />
 
     <Border DockPanel.Dock="Bottom"
             BorderThickness="0,1,0,0"

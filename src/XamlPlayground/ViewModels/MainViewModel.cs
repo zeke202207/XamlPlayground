@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia;
@@ -34,6 +35,8 @@ namespace XamlPlayground.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private static readonly TimeSpan AutoRunDelay = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan SolutionExplorerSearchDelay = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan SolutionExplorerRegexTimeout = TimeSpan.FromMilliseconds(50);
     private const string PlaygroundXamlDocument = "Main.axaml";
 
     [ObservableProperty] private ObservableCollection<SampleViewModel> _samples;
@@ -49,6 +52,8 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private InMemorySolution? _solution;
     [ObservableProperty] private ObservableCollection<SolutionExplorerNodeViewModel> _solutionExplorerNodes = new();
     [ObservableProperty] private string _solutionExplorerSearchText = string.Empty;
+    [ObservableProperty] private bool _solutionExplorerSearchUseRegex;
+    [ObservableProperty] private string? _solutionExplorerSearchError;
     [ObservableProperty] private SolutionExplorerNodeViewModel? _selectedSolutionExplorerNode;
     [ObservableProperty] private NewProjectWizardViewModel _newProjectWizard = new();
     [ObservableProperty] private InMemoryProject? _activeProject;
@@ -64,6 +69,8 @@ public partial class MainViewModel : ViewModelBase
     private IStorageFile? _openXamlFile;
     private IStorageFile? _openCodeFile;
     private ObservableCollection<SolutionExplorerNodeViewModel> _allSolutionExplorerNodes = new();
+    private IDisposable? _solutionExplorerSearchThrottle;
+    private int _solutionExplorerSearchRevision;
     private IDisposable? _timer;
 
     public MainViewModel(string? initialGist)
@@ -145,6 +152,14 @@ public partial class MainViewModel : ViewModelBase
 
     public string ThemeToggleToolTip => IsDarkTheme ? "Switch to light theme" : "Switch to dark theme";
 
+    public bool HasSolutionExplorerSearchError => !string.IsNullOrWhiteSpace(SolutionExplorerSearchError);
+
+    public void ApplySolutionExplorerSearchNow()
+    {
+        CancelPendingSolutionExplorerSearch();
+        ApplySolutionExplorerSearch();
+    }
+
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
@@ -200,7 +215,17 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnSolutionExplorerSearchTextChanged(string value)
     {
-        ApplySolutionExplorerSearch();
+        ScheduleSolutionExplorerSearch();
+    }
+
+    partial void OnSolutionExplorerSearchUseRegexChanged(bool value)
+    {
+        ScheduleSolutionExplorerSearch();
+    }
+
+    partial void OnSolutionExplorerSearchErrorChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasSolutionExplorerSearchError));
     }
 
     private void ToggleTheme()
@@ -619,15 +644,66 @@ public partial class MainViewModel : ViewModelBase
 
     private void SetSolutionExplorerNodes(InMemorySolution? solution)
     {
+        CancelPendingSolutionExplorerSearch();
         _allSolutionExplorerNodes = solution is { }
             ? BuildSolutionExplorer(solution)
             : new ObservableCollection<SolutionExplorerNodeViewModel>();
         ApplySolutionExplorerSearch();
     }
 
+    private void ScheduleSolutionExplorerSearch()
+    {
+        var revision = ++_solutionExplorerSearchRevision;
+        _solutionExplorerSearchThrottle?.Dispose();
+        _solutionExplorerSearchThrottle = null;
+
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            _ = ApplySolutionExplorerSearchAfterDelayAsync(revision);
+            return;
+        }
+
+        StartSolutionExplorerSearchTimer(revision);
+    }
+
+    private async Task ApplySolutionExplorerSearchAfterDelayAsync(int revision)
+    {
+        await Task.Delay(SolutionExplorerSearchDelay);
+        if (revision == _solutionExplorerSearchRevision)
+        {
+            ApplySolutionExplorerSearch();
+        }
+    }
+
+    private void StartSolutionExplorerSearchTimer(int revision)
+    {
+        if (revision != _solutionExplorerSearchRevision)
+        {
+            return;
+        }
+
+        _solutionExplorerSearchThrottle?.Dispose();
+        _solutionExplorerSearchThrottle = DispatcherTimer.RunOnce(() =>
+        {
+            _solutionExplorerSearchThrottle = null;
+            if (revision == _solutionExplorerSearchRevision)
+            {
+                ApplySolutionExplorerSearch();
+            }
+        }, SolutionExplorerSearchDelay);
+    }
+
+    private void CancelPendingSolutionExplorerSearch()
+    {
+        _solutionExplorerSearchRevision++;
+        _solutionExplorerSearchThrottle?.Dispose();
+        _solutionExplorerSearchThrottle = null;
+    }
+
     private void ApplySolutionExplorerSearch()
     {
         SelectedSolutionExplorerNode = null;
+        SolutionExplorerSearchError = null;
 
         var searchText = SolutionExplorerSearchText.Trim();
         if (searchText.Length == 0)
@@ -636,13 +712,48 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var filteredNodes = new ObservableCollection<SolutionExplorerNodeViewModel>();
-        foreach (var node in _allSolutionExplorerNodes)
+        Func<SolutionExplorerNodeViewModel, bool> isMatch;
+        if (SolutionExplorerSearchUseRegex)
         {
-            if (FilterSolutionExplorerNode(node, searchText) is { } filteredNode)
+            Regex regex;
+            try
             {
-                filteredNodes.Add(filteredNode);
+                regex = new Regex(
+                    searchText,
+                    RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
+                    SolutionExplorerRegexTimeout);
             }
+            catch (Exception exception) when (exception is ArgumentException or RegexParseException)
+            {
+                SolutionExplorerSearchError = $"Invalid regex: {exception.Message}";
+                SolutionExplorerNodes = _allSolutionExplorerNodes;
+                return;
+            }
+
+            isMatch = node => regex.IsMatch(node.SearchText);
+        }
+        else
+        {
+            var normalizedSearchText = searchText.ToLowerInvariant();
+            isMatch = node => node.MatchesLiteralSearch(normalizedSearchText);
+        }
+
+        var filteredNodes = new ObservableCollection<SolutionExplorerNodeViewModel>();
+        try
+        {
+            foreach (var node in _allSolutionExplorerNodes)
+            {
+                if (FilterSolutionExplorerNode(node, isMatch) is { } filteredNode)
+                {
+                    filteredNodes.Add(filteredNode);
+                }
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            SolutionExplorerSearchError = "Regex search timed out.";
+            SolutionExplorerNodes = _allSolutionExplorerNodes;
+            return;
         }
 
         SolutionExplorerNodes = filteredNodes;
@@ -650,41 +761,36 @@ public partial class MainViewModel : ViewModelBase
 
     private static SolutionExplorerNodeViewModel? FilterSolutionExplorerNode(
         SolutionExplorerNodeViewModel node,
-        string searchText)
+        Func<SolutionExplorerNodeViewModel, bool> isMatch)
     {
-        if (node.MatchesSearch(searchText))
+        if (isMatch(node))
         {
-            return CloneSolutionExplorerSubtree(node);
+            node.IsExpanded = true;
+            return node;
         }
 
-        var clone = node.CloneShallow();
+        List<SolutionExplorerNodeViewModel>? filteredChildren = null;
         foreach (var child in node.Children)
         {
-            if (FilterSolutionExplorerNode(child, searchText) is { } filteredChild)
+            if (FilterSolutionExplorerNode(child, isMatch) is { } filteredChild)
             {
-                clone.Children.Add(filteredChild);
+                filteredChildren ??= new List<SolutionExplorerNodeViewModel>();
+                filteredChildren.Add(filteredChild);
             }
         }
 
-        if (clone.Children.Count == 0)
+        if (filteredChildren is null)
         {
             return null;
         }
 
-        clone.IsExpanded = true;
-        return clone;
-    }
-
-    private static SolutionExplorerNodeViewModel CloneSolutionExplorerSubtree(SolutionExplorerNodeViewModel node)
-    {
         var clone = node.CloneShallow();
-        clone.IsExpanded = true;
-
-        foreach (var child in node.Children)
+        foreach (var filteredChild in filteredChildren)
         {
-            clone.Children.Add(CloneSolutionExplorerSubtree(child));
+            clone.Children.Add(filteredChild);
         }
 
+        clone.IsExpanded = true;
         return clone;
     }
 

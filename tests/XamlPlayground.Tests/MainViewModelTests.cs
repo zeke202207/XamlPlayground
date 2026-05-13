@@ -1217,6 +1217,10 @@ public sealed class MainViewModelTests
 
         viewModel.SolutionExplorerSearchText = "Resources.axaml";
 
+        Assert.NotNull(FindNode(viewModel.SolutionExplorerNodes, "Main.axaml"));
+
+        viewModel.ApplySolutionExplorerSearchNow();
+
         var solutionNode = Assert.Single(viewModel.SolutionExplorerNodes);
         var projectNode = Assert.Single(solutionNode.Children);
         var folderNode = Assert.Single(projectNode.Children);
@@ -1230,7 +1234,67 @@ public sealed class MainViewModelTests
 
         viewModel.SolutionExplorerSearchText = string.Empty;
 
+        viewModel.ApplySolutionExplorerSearchNow();
+
         Assert.NotNull(FindNode(viewModel.SolutionExplorerNodes, "Main.axaml"));
+    }
+
+    [Fact]
+    public void SolutionExplorerSearch_DirectMatchesReuseSourceSubtree()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var sourceRoot = Assert.Single(viewModel.SolutionExplorerNodes);
+
+        viewModel.SolutionExplorerSearchText = sourceRoot.Title;
+
+        viewModel.ApplySolutionExplorerSearchNow();
+
+        Assert.Same(sourceRoot, Assert.Single(viewModel.SolutionExplorerNodes));
+    }
+
+    [Fact]
+    public void SolutionExplorerRegexSearch_FiltersTreeToMatchingAncestorPath()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            SolutionExplorerSearchUseRegex = true,
+            SolutionExplorerSearchText = @"Resources\.a?xaml"
+        };
+
+        viewModel.ApplySolutionExplorerSearchNow();
+
+        var solutionNode = Assert.Single(viewModel.SolutionExplorerNodes);
+        var projectNode = Assert.Single(solutionNode.Children);
+        var folderNode = Assert.Single(projectNode.Children);
+        var fileNode = Assert.Single(folderNode.Children);
+        Assert.False(viewModel.HasSolutionExplorerSearchError);
+        Assert.Null(viewModel.SolutionExplorerSearchError);
+        Assert.Equal("Styles", folderNode.Title);
+        Assert.Equal("Resources.axaml", fileNode.Title);
+        Assert.Null(FindNode(viewModel.SolutionExplorerNodes, "Main.axaml"));
+    }
+
+    [Fact]
+    public void SolutionExplorerRegexSearch_InvalidPatternShowsErrorAndLeavesTreeVisible()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            SolutionExplorerSearchUseRegex = true,
+            SolutionExplorerSearchText = "["
+        };
+
+        viewModel.ApplySolutionExplorerSearchNow();
+
+        Assert.True(viewModel.HasSolutionExplorerSearchError);
+        Assert.StartsWith("Invalid regex:", viewModel.SolutionExplorerSearchError, StringComparison.Ordinal);
+        Assert.NotNull(FindNode(viewModel.SolutionExplorerNodes, "Main.axaml"));
+        Assert.NotNull(FindNode(viewModel.SolutionExplorerNodes, "Resources.axaml"));
     }
 
     [Fact]
