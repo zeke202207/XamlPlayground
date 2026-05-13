@@ -383,6 +383,7 @@ public partial class MainViewModel
         PlayAnimationTimelineCommand = new RelayCommand(PlayAnimationTimeline, CanPlayAnimationTimeline);
         StopAnimationTimelineCommand = new RelayCommand(() => StopAnimationTimeline(completed: false), () => AnimationTimelinePlaying);
 
+        InitializeDesignInspection();
         LoadVisualEditorToolbox();
         LoadAnimationPresets();
         LoadFluentControlThemeTemplates();
@@ -2995,6 +2996,7 @@ public partial class MainViewModel
                 theme.FilePath)));
 
         RefreshThemeResourceAnalysis();
+        RefreshDesignInspection();
         RefreshControlThemeFilters(previousKey);
         NotifyControlThemeCommandsChanged();
     }

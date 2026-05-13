@@ -150,6 +150,7 @@
     <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.v2.xaml" />
     <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
     <StyleInclude Source="avares://XamlPlayground/Controls/AdaptiveControl.axaml" />
+    <StyleInclude Source="avares://XamlPlayground/Controls/DesignInspectionDockStyles.axaml" />
     <Style Selector="ae|TextEditor.theme-aware">
       <Setter Property="Background" Value="{DynamicResource EditorBackgroundBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource EditorForegroundBrush}" />

@@ -1,0 +1,160 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             mc:Ignorable="d" d:DesignWidth="1040" d:DesignHeight="340"
+             x:Class="XamlPlayground.Views.Docking.BindingEditorDockView"
+             x:CompileBindings="True" x:DataType="vm:BindingEditorDockViewModel">
+  <UserControl.Resources>
+    <StreamGeometry x:Key="DesignApplyIcon">M9,16.2L4.8,12L3.4,13.4L9,19L21,7L19.6,5.6L9,16.2Z</StreamGeometry>
+    <StreamGeometry x:Key="DesignBuildIcon">M22,19.59L20.59,21L17.14,17.55L18.55,16.14L22,19.59M4,4H11V6H4V4M4,8H17V10H4V8M4,12H13V14H4V12M4,16H11V18H4V16M14.5,15.5L16,14L18,16L16.5,17.5L14.5,15.5Z</StreamGeometry>
+    <StreamGeometry x:Key="DesignOpenIcon">M10,4L12,6H20C21.1,6 22,6.9 22,8V18C22,19.1 21.1,20 20,20H4C2.9,20 2,19.1 2,18V6C2,4.9 2.9,4 4,4H10M4,8V18H20V8H4Z</StreamGeometry>
+  </UserControl.Resources>
+
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
+    <Border DockPanel.Dock="Top"
+            Classes="design-header">
+      <Grid ColumnDefinitions="*,Auto"
+            ColumnSpacing="8">
+        <StackPanel Spacing="2">
+          <TextBlock Classes="design-title"
+                     Text="Binding Editor" />
+          <TextBlock Classes="design-caption"
+                     Text="{Binding Shell.BindingEditorStatus}" />
+        </StackPanel>
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="4">
+          <Button Classes="design-tool"
+                  ToolTip.Tip="Build binding text from fields"
+                  Command="{Binding Shell.BuildBindingMarkupCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource DesignBuildIcon}" />
+          </Button>
+          <Button Classes="design-tool"
+                  ToolTip.Tip="Apply binding changes"
+                  Command="{Binding Shell.ApplyBindingEditorCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource DesignApplyIcon}" />
+          </Button>
+          <Button Classes="design-tool"
+                  ToolTip.Tip="Open selected binding source"
+                  Command="{Binding Shell.OpenSelectedBindingSourceCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource DesignOpenIcon}" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom"
+            Classes="design-status">
+      <TextBlock Text="{Binding Shell.BindingEditorRawValue}"
+                 FontSize="12"
+                 TextWrapping="NoWrap"
+                 TextTrimming="CharacterEllipsis"
+                 Opacity="0.72" />
+    </Border>
+
+    <Grid ColumnDefinitions="1.05*,1.45*,0.8*"
+          ColumnSpacing="8"
+          Margin="8"
+          MinHeight="260">
+      <Border Classes="design-panel">
+        <Grid RowDefinitions="Auto,*"
+              RowSpacing="6">
+          <TextBlock Classes="design-title"
+                     Text="Binding Fields" />
+          <ScrollViewer Grid.Row="1"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="design-label"
+                         Text="Kind" />
+              <TextBox Text="{Binding Shell.BindingEditorKind, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Property" />
+              <TextBox Text="{Binding Shell.BindingEditorPropertyName, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Path" />
+              <TextBox Text="{Binding Shell.BindingEditorPath, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Mode" />
+              <TextBox Text="{Binding Shell.BindingEditorMode, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="ElementName" />
+              <TextBox Text="{Binding Shell.BindingEditorElementName, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Source" />
+              <TextBox Text="{Binding Shell.BindingEditorSource, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="RelativeSource" />
+              <TextBox Text="{Binding Shell.BindingEditorRelativeSource, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Converter" />
+              <TextBox Text="{Binding Shell.BindingEditorConverter, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="StringFormat" />
+              <TextBox Text="{Binding Shell.BindingEditorStringFormat, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="FallbackValue" />
+              <TextBox Text="{Binding Shell.BindingEditorFallbackValue, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="TargetNullValue" />
+              <TextBox Text="{Binding Shell.BindingEditorTargetNullValue, Mode=TwoWay}" />
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+
+      <Border Grid.Column="1"
+              Classes="design-panel">
+        <Grid RowDefinitions="Auto,*"
+              RowSpacing="6">
+          <TextBlock Classes="design-title"
+                     Text="Raw Binding" />
+          <TextBox Grid.Row="1"
+                   Text="{Binding Shell.BindingEditorRawValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                   AcceptsReturn="True"
+                   TextWrapping="NoWrap"
+                   FontFamily="monospace"
+                   PlaceholderText="Binding markup extension or object element"
+                   ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto" />
+        </Grid>
+      </Border>
+
+      <Border Grid.Column="2"
+              Classes="design-panel">
+        <Grid RowDefinitions="Auto,*"
+              RowSpacing="6">
+          <TextBlock Classes="design-title"
+                     Text="Resolved Fields" />
+          <ListBox Grid.Row="1"
+                   Classes="design-list"
+                   ItemsSource="{Binding Shell.BindingEditorFields}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="visualVm:BindingInspectorFieldViewModel">
+                <StackPanel Margin="0,3"
+                            Spacing="2">
+                  <TextBlock Text="{Binding Name}"
+                             FontWeight="SemiBold"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Value}"
+                             FontSize="11"
+                             Opacity="0.66"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+      </Border>
+    </Grid>
+  </DockPanel>
+</UserControl>

@@ -159,6 +159,17 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ThemeToggleToolTip));
     }
 
+    partial void OnEnableAutoRunChanged(bool value)
+    {
+        if (value)
+        {
+            return;
+        }
+
+        _timer?.Dispose();
+        _timer = null;
+    }
+
     partial void OnLastErrorMessageChanged(string? value)
     {
         if (string.IsNullOrWhiteSpace(value) ||
@@ -665,14 +676,21 @@ public partial class MainViewModel : ViewModelBase
 
     private void OnProjectFileChanged(InMemoryProjectFile file)
     {
+        if (_isApplyingDesignInspectionEdit)
+        {
+            return;
+        }
+
         var resourceChanged = file.Kind == ProjectFileKind.Resource;
         if (resourceChanged)
         {
             RefreshControlThemes();
         }
-        else if (file.IsXaml)
+
+        if (file.IsXaml)
         {
             RefreshThemeResourceAnalysis();
+            RefreshDesignInspection();
         }
 
         if (ReferenceEquals(file, ActiveXamlFile))

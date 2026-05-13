@@ -1,0 +1,144 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             mc:Ignorable="d" d:DesignWidth="1040" d:DesignHeight="340"
+             x:Class="XamlPlayground.Views.Docking.ResourceEditorDockView"
+             x:CompileBindings="True" x:DataType="vm:ResourceEditorDockViewModel">
+  <UserControl.Resources>
+    <StreamGeometry x:Key="DesignApplyIcon">M9,16.2L4.8,12L3.4,13.4L9,19L21,7L19.6,5.6L9,16.2Z</StreamGeometry>
+    <StreamGeometry x:Key="DesignCreateIcon">M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z</StreamGeometry>
+    <StreamGeometry x:Key="DesignOpenIcon">M10,4L12,6H20C21.1,6 22,6.9 22,8V18C22,19.1 21.1,20 20,20H4C2.9,20 2,19.1 2,18V6C2,4.9 2.9,4 4,4H10M4,8V18H20V8H4Z</StreamGeometry>
+  </UserControl.Resources>
+
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
+    <Border DockPanel.Dock="Top"
+            Classes="design-header">
+      <Grid ColumnDefinitions="*,Auto"
+            ColumnSpacing="8">
+        <StackPanel Spacing="2">
+          <TextBlock Classes="design-title"
+                     Text="Resource Editor" />
+          <TextBlock Classes="design-caption"
+                     Text="{Binding Shell.ResourceEditorStatus}" />
+        </StackPanel>
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="4">
+          <Button Classes="design-tool"
+                  ToolTip.Tip="Create resource"
+                  Command="{Binding Shell.CreateResourceCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource DesignCreateIcon}" />
+          </Button>
+          <Button Classes="design-tool"
+                  ToolTip.Tip="Apply resource changes"
+                  Command="{Binding Shell.ApplyResourceEditorCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource DesignApplyIcon}" />
+          </Button>
+          <Button Classes="design-tool"
+                  ToolTip.Tip="Open selected resource source"
+                  Command="{Binding Shell.OpenSelectedResourceSourceCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource DesignOpenIcon}" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom"
+            Classes="design-status">
+      <TextBlock Text="{Binding Shell.ResourceEditorRawXaml}"
+                 FontSize="12"
+                 TextWrapping="NoWrap"
+                 TextTrimming="CharacterEllipsis"
+                 Opacity="0.72" />
+    </Border>
+
+    <Grid ColumnDefinitions="0.9*,1.55*,0.75*"
+          ColumnSpacing="8"
+          Margin="8"
+          MinHeight="260">
+      <Border Classes="design-panel">
+        <Grid RowDefinitions="Auto,*"
+              RowSpacing="6">
+          <TextBlock Classes="design-title"
+                     Text="Resource Shape" />
+          <ScrollViewer Grid.Row="1"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="design-label"
+                         Text="Key" />
+              <TextBox PlaceholderText="x:Key"
+                       Text="{Binding Shell.ResourceEditorKey, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Type" />
+              <TextBox PlaceholderText="SolidColorBrush"
+                       Text="{Binding Shell.ResourceEditorType, Mode=TwoWay}" />
+              <TextBlock Classes="design-label"
+                         Text="Value" />
+              <TextBox Text="{Binding Shell.ResourceEditorValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       FontFamily="monospace"
+                       PlaceholderText="Text value or object element content"
+                       ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto" />
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+
+      <Border Grid.Column="1"
+              Classes="design-panel">
+        <Grid RowDefinitions="Auto,*"
+              RowSpacing="6">
+          <TextBlock Classes="design-title"
+                     Text="Raw Resource XAML" />
+          <TextBox Grid.Row="1"
+                   Text="{Binding Shell.ResourceEditorRawXaml, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                   AcceptsReturn="True"
+                   TextWrapping="NoWrap"
+                   FontFamily="monospace"
+                   PlaceholderText="Complete resource element"
+                   ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto" />
+        </Grid>
+      </Border>
+
+      <Border Grid.Column="2"
+              Classes="design-panel">
+        <Grid RowDefinitions="Auto,*"
+              RowSpacing="6">
+          <TextBlock Classes="design-title"
+                     Text="Selection" />
+          <ListBox Grid.Row="1"
+                   Classes="design-list"
+                   ItemsSource="{Binding Shell.ResourceEditorSummary}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="visualVm:ResourceEditorSummaryViewModel">
+                <StackPanel Margin="0,3"
+                            Spacing="2">
+                  <TextBlock Text="{Binding Name}"
+                             FontWeight="SemiBold"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Value}"
+                             FontSize="11"
+                             Opacity="0.66"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+      </Border>
+    </Grid>
+  </DockPanel>
+</UserControl>

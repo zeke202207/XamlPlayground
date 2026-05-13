@@ -1,0 +1,107 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:XamlPlayground.ViewModels.Docking"
+             xmlns:visualVm="clr-namespace:XamlPlayground.ViewModels.VisualEditing"
+             xmlns:hier="clr-namespace:Avalonia.Controls.DataGridHierarchical;assembly=Avalonia.Controls.DataGrid"
+             mc:Ignorable="d" d:DesignWidth="320" d:DesignHeight="620"
+             x:Class="XamlPlayground.Views.Docking.StylesInspectorDockView"
+             x:CompileBindings="True" x:DataType="vm:StylesInspectorDockViewModel">
+  <UserControl.Resources>
+    <StreamGeometry x:Key="DesignRefreshIcon">M17.65,6.35C16.2,4.9 14.21,4 12,4C7.58,4 4,7.58 4,12S7.58,20 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.82,16.33 14.6,18 12,18C8.69,18 6,15.31 6,12S8.69,6 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z</StreamGeometry>
+    <StreamGeometry x:Key="DesignOpenIcon">M10,4L12,6H20C21.1,6 22,6.9 22,8V18C22,19.1 21.1,20 20,20H4C2.9,20 2,19.1 2,18V6C2,4.9 2.9,4 4,4H10M4,8V18H20V8H4Z</StreamGeometry>
+    <StreamGeometry x:Key="DesignExtractIcon">M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z</StreamGeometry>
+  </UserControl.Resources>
+
+  <DockPanel Background="{DynamicResource DockSurfacePanelBrush}">
+    <Border DockPanel.Dock="Top"
+            Classes="design-header">
+      <Grid ColumnDefinitions="*,Auto"
+            ColumnSpacing="8">
+        <StackPanel Spacing="2">
+          <TextBlock Classes="design-title"
+                     Text="Styles" />
+          <TextBlock Classes="design-caption"
+                     Text="{Binding Shell.DesignInspectionStatus}" />
+        </StackPanel>
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="4">
+          <Button Classes="design-tool"
+                  ToolTip.Tip="Refresh inspectors"
+                  Command="{Binding Shell.RefreshDesignInspectorsCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource DesignRefreshIcon}" />
+          </Button>
+          <Button Classes="design-tool"
+                  ToolTip.Tip="Open selected style source"
+                  Command="{Binding Shell.OpenSelectedStyleSourceCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource DesignOpenIcon}" />
+          </Button>
+          <Button Classes="design-tool"
+                  ToolTip.Tip="Create style from selected element"
+                  Command="{Binding Shell.CreateStyleFromSelectedElementCommand}">
+            <PathIcon Width="14"
+                      Height="14"
+                      Data="{StaticResource DesignExtractIcon}" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom"
+            Classes="design-status">
+      <TextBlock Text="{Binding Shell.StyleEditorStatus}"
+                 TextWrapping="Wrap"
+                 Opacity="0.75" />
+    </Border>
+
+    <DataGrid HierarchicalModel="{Binding Shell.StyleInspectorModel}"
+              HierarchicalRowsEnabled="True"
+              Classes="hierarchical design-grid"
+              SelectedItem="{Binding Shell.SelectedStyleInspectorNode, Mode=TwoWay}"
+              AutoScrollToSelectedItem="True"
+              AutoExpandSelectedItem="True"
+              SelectionMode="Single"
+              Margin="4">
+      <DataGrid.Columns>
+        <DataGridHierarchicalColumn Header="Style"
+                                    Width="2.4*"
+                                    x:CompileBindings="False"
+                                    Binding="{Binding Item}">
+          <DataGridHierarchicalColumn.CellTemplate>
+            <DataTemplate x:DataType="visualVm:DesignInspectorNodeViewModel">
+              <Grid RowDefinitions="Auto,Auto"
+                    MinHeight="34">
+                <TextBlock Text="{Binding Title}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Row="1"
+                           Text="{Binding Detail}"
+                           FontSize="11"
+                           Opacity="0.62"
+                           TextTrimming="CharacterEllipsis" />
+              </Grid>
+            </DataTemplate>
+          </DataGridHierarchicalColumn.CellTemplate>
+        </DataGridHierarchicalColumn>
+        <DataGridTemplateColumn Header="Kind"
+                                Width="88"
+                                x:CompileBindings="False">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="hier:HierarchicalNode">
+              <TextBlock x:DataType="visualVm:DesignInspectorNodeViewModel"
+                         DataContext="{Binding Item}"
+                         Text="{Binding Kind}"
+                         Opacity="0.78"
+                         TextTrimming="CharacterEllipsis" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>
