@@ -1454,6 +1454,12 @@ public sealed class MainViewModelTests
     [Fact]
     public void RemotePreviewProjectPath_UsesProjectRelativeWorkspaceFilePath()
     {
+        var projectDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"XamlPlaygroundRemotePath-{Guid.NewGuid():N}",
+            "samples",
+            "DataGridSample");
+        var xamlFilePath = Path.Combine(projectDirectory, "Pages", "AddDeleteRowsPage.axaml");
         var method = typeof(MainViewModel).GetMethod(
             "BuildRemotePreviewXamlProjectPath",
             BindingFlags.Static | BindingFlags.NonPublic);
@@ -1461,13 +1467,13 @@ public sealed class MainViewModelTests
 
         var relative = Assert.IsType<string>(method.Invoke(
             null,
-            new object?[] { "Pages/AddDeleteRowsPage.axaml", "/Users/wieslawsoltes/GitHub/Avalonia.Controls.DataGrid/samples/DataGridSample" }));
+            new object?[] { "Pages/AddDeleteRowsPage.axaml", projectDirectory }));
         var absolute = Assert.IsType<string>(method.Invoke(
             null,
             new object?[]
             {
-                "/Users/wieslawsoltes/GitHub/Avalonia.Controls.DataGrid/samples/DataGridSample/Pages/AddDeleteRowsPage.axaml",
-                "/Users/wieslawsoltes/GitHub/Avalonia.Controls.DataGrid/samples/DataGridSample"
+                xamlFilePath,
+                projectDirectory
             }));
 
         Assert.Equal("/Pages/AddDeleteRowsPage.axaml", relative);
