@@ -1,6 +1,7 @@
 using System.Threading;
 using Avalonia.Controls;
 using XamlPlayground.Services.IntelliSense;
+using XamlPlayground.Workspace;
 
 namespace XamlPlayground.Tests;
 
@@ -63,6 +64,87 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task CSharpDiagnostics_ReturnCompilerErrors()
+    {
+        var service = new CSharpIntelliSenseService();
+        const string code = """
+            public class Sample
+            {
+                public void Update()
+                {
+                    MissingSymbol();
+                }
+            }
+            """;
+
+        var result = await service.GetDiagnosticsAsync(code, CancellationToken.None);
+
+        Assert.Contains(result, diagnostic =>
+            diagnostic.Code == "CS0103" &&
+            diagnostic.Severity == EditorDiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public async Task CSharpDefinitionAndReferences_ReturnSymbolLocations()
+    {
+        var service = new CSharpIntelliSenseService();
+        const string code = """
+            public class Sample
+            {
+                private int Value;
+
+                public int Read()
+                {
+                    return Value;
+                }
+            }
+            """;
+
+        var usagePosition = code.LastIndexOf("Value", StringComparison.Ordinal) + 2;
+        var definition = await service.GetDefinitionAsync(code, usagePosition, CancellationToken.None);
+        var references = await service.GetReferencesAsync(code, usagePosition, CancellationToken.None);
+
+        Assert.NotNull(definition);
+        Assert.Equal(code.IndexOf("Value", StringComparison.Ordinal), definition.StartOffset);
+        Assert.Contains(references, reference => reference.IsDefinition);
+        Assert.Contains(references, reference => !reference.IsDefinition);
+    }
+
+    [Fact]
+    public async Task CSharpDefinition_UsesWorkspaceFiles()
+    {
+        var project = new InMemoryProject("Demo", "Demo", "blank");
+        var modelFile = project.AddFile(new InMemoryProjectFile(
+            "Models/Customer.cs",
+            "namespace Demo; public sealed class Customer { }",
+            ProjectFileKind.CSharp));
+        var currentFile = project.AddFile(new InMemoryProjectFile(
+            "Views/MainViewModel.cs",
+            "namespace Demo; public sealed class MainViewModel { private Customer? Current; }",
+            ProjectFileKind.CSharp));
+        var service = new CSharpIntelliSenseService(project, currentFile);
+
+        var position = currentFile.Text.IndexOf("Customer", StringComparison.Ordinal) + 2;
+        var definition = await service.GetDefinitionAsync(currentFile.Text, position, CancellationToken.None);
+
+        Assert.NotNull(definition);
+        Assert.Equal(modelFile.Path, definition.FilePath);
+    }
+
+    [Fact]
+    public async Task CSharpFormatDocument_FormatsSource()
+    {
+        var service = new CSharpIntelliSenseService();
+        const string code = "public class Sample{public int Read(){return 42;}}";
+
+        var formatted = await service.FormatDocumentAsync(code, CancellationToken.None);
+
+        Assert.NotNull(formatted);
+        Assert.Contains(Environment.NewLine, formatted, StringComparison.Ordinal);
+        Assert.Contains("return 42;", formatted, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task XamlCompletion_ReturnsAvaloniaElementNames()
     {
         _ = typeof(Button);
@@ -114,5 +196,78 @@ public sealed class IntelliSenseServiceTests
 
         Assert.NotNull(result);
         Assert.Contains(nameof(Button.Content), result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task XamlDiagnostics_ReturnUnknownMemberWarnings()
+    {
+        _ = typeof(Button);
+        var service = new XamlIntelliSenseService();
+        const string xaml = """<Button xmlns="https://github.com/avaloniaui" MissingProperty="1" />""";
+
+        var result = await service.GetDiagnosticsAsync(xaml, CancellationToken.None);
+
+        Assert.Contains(result, diagnostic =>
+            diagnostic.Code == "XAML1002" &&
+            diagnostic.Severity == EditorDiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public async Task XamlReferences_ReturnResourceReferences()
+    {
+        var service = new XamlIntelliSenseService();
+        const string xaml = """
+            <UserControl xmlns="https://github.com/avaloniaui">
+              <UserControl.Resources>
+                <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+              </UserControl.Resources>
+              <Border Background="{StaticResource AccentBrush}" />
+            </UserControl>
+            """;
+
+        var position = xaml.LastIndexOf("AccentBrush", StringComparison.Ordinal) + 2;
+        var result = await service.GetReferencesAsync(xaml, position, CancellationToken.None);
+
+        Assert.Contains(result, reference => reference.IsDefinition);
+        Assert.Contains(result, reference => !reference.IsDefinition);
+    }
+
+    [Fact]
+    public async Task XamlReferences_SupportResourceKeyNamedArgument()
+    {
+        var service = new XamlIntelliSenseService();
+        const string xaml = """
+            <UserControl xmlns="https://github.com/avaloniaui">
+              <UserControl.Resources>
+                <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+              </UserControl.Resources>
+              <Border Background="{StaticResource ResourceKey=AccentBrush}" />
+            </UserControl>
+            """;
+
+        var position = xaml.LastIndexOf("AccentBrush", StringComparison.Ordinal) + 2;
+        var result = await service.GetReferencesAsync(xaml, position, CancellationToken.None);
+
+        Assert.Contains(result, reference => reference.IsDefinition);
+        Assert.Contains(result, reference => !reference.IsDefinition);
+    }
+
+    [Fact]
+    public async Task XamlReferences_IgnoresPlainAttributeValues()
+    {
+        var service = new XamlIntelliSenseService();
+        const string xaml = """
+            <UserControl xmlns="https://github.com/avaloniaui">
+              <UserControl.Resources>
+                <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+              </UserControl.Resources>
+              <Button HotKey="AccentBrush" />
+            </UserControl>
+            """;
+
+        var position = xaml.LastIndexOf("AccentBrush", StringComparison.Ordinal) + 2;
+        var result = await service.GetReferencesAsync(xaml, position, CancellationToken.None);
+
+        Assert.Empty(result);
     }
 }
