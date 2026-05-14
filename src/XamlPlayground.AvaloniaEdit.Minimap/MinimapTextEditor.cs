@@ -1,8 +1,10 @@
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using AvaloniaEdit;
+using XamlPlayground.Editor.Minimap.Inline;
 
 namespace XamlPlayground.Editor.Minimap;
 
@@ -87,8 +89,19 @@ public class MinimapTextEditor : TextEditor
     public static readonly StyledProperty<IBrush?> MinimapSectionHeaderSeparatorBrushProperty =
         AvaloniaProperty.Register<MinimapTextEditor, IBrush?>(nameof(MinimapSectionHeaderSeparatorBrush));
 
+    public static readonly StyledProperty<bool> InlineFeaturesEnabledProperty =
+        AvaloniaProperty.Register<MinimapTextEditor, bool>(nameof(InlineFeaturesEnabled), true);
+
+    private readonly EditorInlineFeatureHost _inlineFeatureHost;
     private TextEditorMinimap? _leftMinimap;
     private TextEditorMinimap? _rightMinimap;
+    private Panel? _inlineOverlayLayer;
+
+    public MinimapTextEditor()
+    {
+        _inlineFeatureHost = new EditorInlineFeatureHost(this);
+        _inlineFeatureHost.Attach();
+    }
 
     public bool MinimapEnabled
     {
@@ -240,6 +253,84 @@ public class MinimapTextEditor : TextEditor
         set => SetValue(MinimapSectionHeaderSeparatorBrushProperty, value);
     }
 
+    public bool InlineFeaturesEnabled
+    {
+        get => GetValue(InlineFeaturesEnabledProperty);
+        set => SetValue(InlineFeaturesEnabledProperty, value);
+    }
+
+    public IList<EditorViewZone> InlineViewZones => _inlineFeatureHost.ViewZones;
+
+    public IList<EditorInlineControl> InlineControls => _inlineFeatureHost.InlineControls;
+
+    public IList<EditorCodeAnnotation> InlineAnnotations => _inlineFeatureHost.Annotations;
+
+    public IList<IEditorInlineExtension> InlineExtensions => _inlineFeatureHost.Extensions;
+
+    public EditorViewZone ShowInlinePeek(
+        int lineNumber,
+        string title,
+        string? subtitle,
+        string text,
+        string? language = null,
+        double height = 240)
+    {
+        return _inlineFeatureHost.ShowPeek(lineNumber, title, subtitle, text, language, height);
+    }
+
+    public void CloseInlinePeek()
+    {
+        _inlineFeatureHost.ClosePeek();
+    }
+
+    public EditorViewZone AddInlineViewZone(
+        int lineNumber,
+        EditorInlinePlacement placement,
+        double height,
+        Control content,
+        EditorInlineZoneKind kind = EditorInlineZoneKind.Custom)
+    {
+        var zone = new EditorViewZone
+        {
+            LineNumber = lineNumber,
+            Placement = placement,
+            Height = height,
+            Kind = kind,
+            Content = content
+        };
+
+        InlineViewZones.Add(zone);
+        return zone;
+    }
+
+    public EditorInlineControl AddInlineControl(int offset, Control control)
+    {
+        var inlineControl = new EditorInlineControl
+        {
+            Offset = offset,
+            Control = control
+        };
+
+        InlineControls.Add(inlineControl);
+        return inlineControl;
+    }
+
+    public EditorCodeAnnotation AddInlineAnnotation(
+        int lineNumber,
+        string text,
+        double priority = 0)
+    {
+        var annotation = new EditorCodeAnnotation
+        {
+            LineNumber = lineNumber,
+            Text = text,
+            Priority = priority
+        };
+
+        InlineAnnotations.Add(annotation);
+        return annotation;
+    }
+
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
         if (_leftMinimap is not null)
@@ -252,10 +343,13 @@ public class MinimapTextEditor : TextEditor
             _rightMinimap.Editor = null;
         }
 
+        _inlineFeatureHost.SetOverlayLayer(null);
+
         base.OnApplyTemplate(e);
 
         _leftMinimap = e.NameScope.Find<TextEditorMinimap>("PART_LeftMinimap");
         _rightMinimap = e.NameScope.Find<TextEditorMinimap>("PART_RightMinimap");
+        _inlineOverlayLayer = e.NameScope.Find<Panel>("PART_InlineOverlayLayer");
 
         if (_leftMinimap is not null)
         {
@@ -267,6 +361,7 @@ public class MinimapTextEditor : TextEditor
             _rightMinimap.Editor = this;
         }
 
+        _inlineFeatureHost.SetOverlayLayer(_inlineOverlayLayer);
         UpdateMinimapSide();
     }
 
@@ -278,6 +373,18 @@ public class MinimapTextEditor : TextEditor
             change.Property == MinimapEnabledProperty)
         {
             UpdateMinimapSide();
+        }
+
+        if (change.Property == InlineFeaturesEnabledProperty)
+        {
+            if (InlineFeaturesEnabled)
+            {
+                _inlineFeatureHost.Attach();
+            }
+            else
+            {
+                _inlineFeatureHost.Detach();
+            }
         }
     }
 
