@@ -1,9 +1,11 @@
 ﻿using System;
 using System.ComponentModel;
 using System.Linq;
+using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -17,7 +19,9 @@ using AvaloniaEdit.Folding;
 using AvaloniaEdit.Highlighting;
 using TextMateSharp.Grammars;
 using XamlPlayground;
+using XamlPlayground.Editor.Minimap;
 using XamlPlayground.Services.Editing;
+using XamlPlayground.Services.Editing.InlineFeatures;
 using XamlPlayground.Services.IntelliSense;
 
 namespace XamlPlayground.Behaviors;
@@ -40,6 +44,9 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private AvaloniaEdit.TextMate.TextMate.Installation? _textMateInstallation;
     private RegistryOptions? _textMateRegistryOptions;
     private TextDocument? _subscribedDocument;
+    private ContextMenu? _editorContextMenu;
+    private int? _contextMenuOffset;
+    private bool _ownsEditorContextMenu;
     private bool _isApplyingXamlEdit;
     private int _completionRequestVersion;
     private int _quickInfoRequestVersion;
@@ -77,6 +84,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         _textEditor.PropertyChanged += TextEditorOnPropertyChanged;
         _textEditor.TextChanged += TextEditorOnTextChanged;
         _textEditor.DocumentChanged += TextEditorOnDocumentChanged;
+        _textEditor.PointerPressed += TextEditorOnPointerPressed;
         _textEditor.PointerHover += TextEditorOnPointerHover;
         _textEditor.PointerHoverStopped += TextEditorOnPointerHoverStopped;
         SubscribeToDocument(_textEditor.Document);
@@ -87,6 +95,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
 
         ApplyExtensionMode();
         ApplyEditorTheme();
+        InstallContextMenu(_textEditor);
     }
 
     protected override void OnDetaching()
@@ -99,6 +108,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
             textEditor.PropertyChanged -= TextEditorOnPropertyChanged;
             textEditor.TextChanged -= TextEditorOnTextChanged;
             textEditor.DocumentChanged -= TextEditorOnDocumentChanged;
+            textEditor.PointerPressed -= TextEditorOnPointerPressed;
             textEditor.PointerHover -= TextEditorOnPointerHover;
             textEditor.PointerHoverStopped -= TextEditorOnPointerHoverStopped;
         }
@@ -115,6 +125,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         CloseCompletionWindow();
         CloseInsightWindow();
         CloseQuickInfo();
+        UninstallContextMenu();
         DisposeTextMateInstallation();
 
         _foldingTimer = null;
@@ -123,6 +134,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         _csharpFoldingStrategy = null;
         _intelliSenseService = null;
         _subscribedDocument = null;
+        _contextMenuOffset = null;
         _textEditor = null;
 
         base.OnDetaching();
@@ -211,6 +223,13 @@ public class TextEditorBehavior : Behavior<TextEditor>
             CloseCompletionWindow();
             CloseInsightWindow();
             CloseQuickInfo();
+            if (_textEditor is MinimapTextEditor minimapTextEditor &&
+                minimapTextEditor.InlineViewZones.Count > 0)
+            {
+                minimapTextEditor.CloseInlinePeek();
+                e.Handled = true;
+            }
+
             return;
         }
 
@@ -330,6 +349,484 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private void TextEditorOnPointerHoverStopped(object? sender, PointerEventArgs e)
     {
         CloseQuickInfo();
+    }
+
+    private void TextEditorOnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_textEditor?.Document is null)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(_textEditor);
+        if (!point.Properties.IsRightButtonPressed)
+        {
+            return;
+        }
+
+        if (TryGetOffsetFromPoint(e.GetPosition(_textEditor), out var offset))
+        {
+            _contextMenuOffset = offset;
+            if (!IsOffsetInsideSelection(offset))
+            {
+                _textEditor.Select(offset, 0);
+                _textEditor.CaretOffset = offset;
+            }
+        }
+        else
+        {
+            _contextMenuOffset = _textEditor.CaretOffset;
+        }
+    }
+
+    private void InstallContextMenu(TextEditor textEditor)
+    {
+        if (textEditor.ContextMenu is not null)
+        {
+            return;
+        }
+
+        _editorContextMenu = new ContextMenu();
+        _editorContextMenu.Opening += EditorContextMenuOnOpening;
+        textEditor.ContextMenu = _editorContextMenu;
+        _ownsEditorContextMenu = true;
+    }
+
+    private void UninstallContextMenu()
+    {
+        if (_editorContextMenu is not null)
+        {
+            _editorContextMenu.Opening -= EditorContextMenuOnOpening;
+        }
+
+        if (_ownsEditorContextMenu &&
+            _textEditor is not null &&
+            ReferenceEquals(_textEditor.ContextMenu, _editorContextMenu))
+        {
+            _textEditor.ContextMenu = null;
+        }
+
+        _editorContextMenu = null;
+        _ownsEditorContextMenu = false;
+    }
+
+    private void EditorContextMenuOnOpening(object? sender, CancelEventArgs e)
+    {
+        if (_editorContextMenu is null || _textEditor?.Document is null)
+        {
+            return;
+        }
+
+        var offset = Math.Clamp(_contextMenuOffset ?? _textEditor.CaretOffset, 0, _textEditor.Document.TextLength);
+        var hasSelection = _textEditor.SelectionLength > 0;
+        var isEditable = !_textEditor.IsReadOnly;
+        var canUseIntelliSense = _intelliSenseService is not null;
+        var canResolveResource = _textEditor is MinimapTextEditor minimapTextEditor &&
+                                 PlaygroundEditorContextActions.CanResolveResourceAt(minimapTextEditor, offset);
+
+        var menu = _editorContextMenu;
+        menu.Items.Clear();
+
+        AddMenuItem("Cut", async () => await CutSelectionAsync(), isEditable && hasSelection);
+        AddMenuItem("Copy", async () => await CopySelectionAsync(), hasSelection);
+        AddMenuItem("Paste", async () => await PasteAsync(), isEditable);
+        AddSeparator();
+        AddMenuItem("Peek Definition", () => TryPeekDefinition(offset), canResolveResource);
+        AddMenuItem("Go to Definition", () => TryGoToDefinition(offset), canResolveResource);
+        AddMenuItem("Peek References", () => TryPeekReferences(offset), canResolveResource);
+        AddMenuItem("Close Peek", CloseInlinePeek, _textEditor is MinimapTextEditor { InlineViewZones.Count: > 0 });
+        AddSeparator();
+        AddMenuItem("Show Suggestions", async () => await ShowCompletionAsync(explicitInvocation: true, triggerCharacter: null), canUseIntelliSense);
+        AddMenuItem("Parameter Hints", async () => await ShowSignatureHelpAsync(), canUseIntelliSense);
+        AddMenuItem("Quick Info", async () => await ShowQuickInfoAtOffsetAsync(offset), canUseIntelliSense);
+        AddSeparator();
+        AddMenuItem("Format Document", FormatDocument, isEditable && IsXmlExtension(Extension));
+        AddMenuItem("Toggle Line Comment", ToggleLineComment, isEditable && (IsXmlExtension(Extension) || IsCSharpExtension(Extension)));
+        AddMenuItem("Indent Selection", () => IndentSelection(outdent: false), isEditable);
+        AddMenuItem("Outdent Selection", () => IndentSelection(outdent: true), isEditable);
+        AddSeparator();
+        AddMenuItem("Fold", () => SetCurrentFold(isFolded: true), _foldingManager?.AllFoldings.Any(static folding => !folding.IsFolded) == true);
+        AddMenuItem("Unfold", () => SetCurrentFold(isFolded: false), _foldingManager?.AllFoldings.Any(static folding => folding.IsFolded) == true);
+        AddMenuItem("Fold All", () => SetAllFoldings(isFolded: true), _foldingManager?.AllFoldings.Any(static folding => !folding.IsFolded) == true);
+        AddMenuItem("Unfold All", () => SetAllFoldings(isFolded: false), _foldingManager?.AllFoldings.Any(static folding => folding.IsFolded) == true);
+        AddSeparator();
+        AddMenuItem("Select All", () => _textEditor.SelectAll(), _textEditor.Document.TextLength > 0);
+        return;
+
+        void AddMenuItem(string header, System.Action action, bool isEnabled = true)
+        {
+            var item = new MenuItem
+            {
+                Header = header,
+                IsEnabled = isEnabled
+            };
+            item.Click += (_, _) => action();
+            menu.Items.Add(item);
+        }
+
+        void AddSeparator()
+        {
+            menu.Items.Add(new Separator());
+        }
+    }
+
+    private bool TryGetOffsetFromPoint(Point point, out int offset)
+    {
+        offset = 0;
+        if (_textEditor?.Document is not { } document)
+        {
+            return false;
+        }
+
+        var position = _textEditor.GetPositionFromPoint(point);
+        if (position is null)
+        {
+            return false;
+        }
+
+        var lineNumber = Math.Clamp(position.Value.Line, 1, document.LineCount);
+        var line = document.GetLineByNumber(lineNumber);
+        var column = Math.Clamp(position.Value.Column, 1, line.Length + 1);
+        offset = Math.Clamp(document.GetOffset(lineNumber, column), 0, document.TextLength);
+        return true;
+    }
+
+    private bool IsOffsetInsideSelection(int offset)
+    {
+        if (_textEditor is null || _textEditor.SelectionLength <= 0)
+        {
+            return false;
+        }
+
+        var selectionStart = Math.Min(_textEditor.SelectionStart, _textEditor.SelectionStart + _textEditor.SelectionLength);
+        var selectionEnd = Math.Max(_textEditor.SelectionStart, _textEditor.SelectionStart + _textEditor.SelectionLength);
+        return offset >= selectionStart && offset <= selectionEnd;
+    }
+
+    private async System.Threading.Tasks.Task CopySelectionAsync()
+    {
+        if (_textEditor is null || _textEditor.SelectionLength <= 0)
+        {
+            return;
+        }
+
+        var clipboard = TopLevel.GetTopLevel(_textEditor)?.Clipboard;
+        if (clipboard is not null)
+        {
+            await clipboard.SetTextAsync(_textEditor.SelectedText);
+        }
+    }
+
+    private async System.Threading.Tasks.Task CutSelectionAsync()
+    {
+        if (_textEditor?.Document is null || _textEditor.IsReadOnly || _textEditor.SelectionLength <= 0)
+        {
+            return;
+        }
+
+        await CopySelectionAsync();
+        ReplaceSelection(string.Empty);
+    }
+
+    private async System.Threading.Tasks.Task PasteAsync()
+    {
+        if (_textEditor?.Document is null || _textEditor.IsReadOnly)
+        {
+            return;
+        }
+
+        var clipboard = TopLevel.GetTopLevel(_textEditor)?.Clipboard;
+        var text = clipboard is null ? null : await clipboard.TryGetTextAsync();
+        if (!string.IsNullOrEmpty(text))
+        {
+            ReplaceSelection(text);
+        }
+    }
+
+    private void ReplaceSelection(string text)
+    {
+        if (_textEditor?.Document is not { } document)
+        {
+            return;
+        }
+
+        var start = Math.Clamp(_textEditor.SelectionStart, 0, document.TextLength);
+        var length = Math.Clamp(_textEditor.SelectionLength, 0, document.TextLength - start);
+        document.Replace(start, length, text);
+        var caretOffset = Math.Clamp(start + text.Length, 0, document.TextLength);
+        _textEditor.Select(caretOffset, 0);
+        _textEditor.CaretOffset = caretOffset;
+    }
+
+    private async System.Threading.Tasks.Task ShowQuickInfoAtOffsetAsync(int offset)
+    {
+        if (_textEditor?.Document is null || _intelliSenseService is null)
+        {
+            return;
+        }
+
+        var requestVersion = ++_quickInfoRequestVersion;
+        try
+        {
+            var quickInfo = await _intelliSenseService.GetQuickInfoAsync(
+                _textEditor.Document.Text,
+                Math.Clamp(offset, 0, _textEditor.Document.TextLength),
+                default);
+
+            if (requestVersion != _quickInfoRequestVersion || quickInfo is null || _textEditor is null)
+            {
+                return;
+            }
+
+            ToolTip.SetTip(_textEditor, quickInfo.Text);
+            ToolTip.SetIsOpen(_textEditor, true);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+    }
+
+    private void TryPeekDefinition(int offset)
+    {
+        if (_textEditor is MinimapTextEditor minimapTextEditor)
+        {
+            PlaygroundEditorContextActions.TryShowResourceDefinitionPeek(minimapTextEditor, offset);
+        }
+    }
+
+    private void TryGoToDefinition(int offset)
+    {
+        if (_textEditor is MinimapTextEditor minimapTextEditor)
+        {
+            PlaygroundEditorContextActions.TryGoToResourceDefinition(minimapTextEditor, offset);
+        }
+    }
+
+    private void TryPeekReferences(int offset)
+    {
+        if (_textEditor is MinimapTextEditor minimapTextEditor)
+        {
+            PlaygroundEditorContextActions.TryShowResourceReferencesPeek(minimapTextEditor, offset);
+        }
+    }
+
+    private void CloseInlinePeek()
+    {
+        if (_textEditor is MinimapTextEditor minimapTextEditor)
+        {
+            minimapTextEditor.CloseInlinePeek();
+        }
+    }
+
+    private void FormatDocument()
+    {
+        if (_textEditor?.Document is not { } document ||
+            _textEditor.IsReadOnly ||
+            !IsXmlExtension(Extension))
+        {
+            return;
+        }
+
+        try
+        {
+            var formatted = XDocument.Parse(document.Text, LoadOptions.PreserveWhitespace).ToString(SaveOptions.None);
+            document.Replace(0, document.TextLength, formatted);
+            _textEditor.CaretOffset = Math.Clamp(_textEditor.CaretOffset, 0, document.TextLength);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+        }
+    }
+
+    private void ToggleLineComment()
+    {
+        if (_textEditor?.Document is null || _textEditor.IsReadOnly)
+        {
+            return;
+        }
+
+        if (IsXmlExtension(Extension))
+        {
+            ToggleXmlComment();
+            return;
+        }
+
+        if (IsCSharpExtension(Extension))
+        {
+            ToggleLineComment("//");
+        }
+    }
+
+    private void ToggleXmlComment()
+    {
+        if (_textEditor?.Document is not { } document)
+        {
+            return;
+        }
+
+        var (start, length) = GetSelectedOrCurrentLineRange();
+        var selected = document.GetText(start, length);
+        var trimmed = selected.Trim();
+        if (trimmed.StartsWith("<!--", StringComparison.Ordinal) &&
+            trimmed.EndsWith("-->", StringComparison.Ordinal))
+        {
+            var commentStart = selected.IndexOf("<!--", StringComparison.Ordinal);
+            var commentEnd = selected.LastIndexOf("-->", StringComparison.Ordinal);
+            if (commentStart >= 0 && commentEnd >= commentStart)
+            {
+                var uncommented = selected.Remove(commentEnd, 3).Remove(commentStart, 4);
+                document.Replace(start, length, uncommented);
+                _textEditor.Select(start, uncommented.Length);
+            }
+
+            return;
+        }
+
+        var commented = $"<!--{selected}-->";
+        document.Replace(start, length, commented);
+        _textEditor.Select(start, commented.Length);
+    }
+
+    private void ToggleLineComment(string marker)
+    {
+        if (_textEditor?.Document is not { } document)
+        {
+            return;
+        }
+
+        var (startLine, endLine) = GetSelectedLineRange();
+        var lines = Enumerable.Range(startLine, endLine - startLine + 1)
+            .Select(document.GetLineByNumber)
+            .ToArray();
+        var uncomment = lines
+            .Where(line => line.Length > 0)
+            .All(line => document.GetText(line.Offset, line.Length).TrimStart().StartsWith(marker, StringComparison.Ordinal));
+
+        for (var i = lines.Length - 1; i >= 0; i--)
+        {
+            var line = lines[i];
+            var lineText = document.GetText(line.Offset, line.Length);
+            var indent = lineText.Length - lineText.TrimStart().Length;
+            if (uncomment)
+            {
+                var markerOffset = lineText.IndexOf(marker, StringComparison.Ordinal);
+                if (markerOffset >= 0)
+                {
+                    document.Remove(line.Offset + markerOffset, marker.Length);
+                }
+            }
+            else
+            {
+                document.Insert(line.Offset + indent, marker);
+            }
+        }
+    }
+
+    private void IndentSelection(bool outdent)
+    {
+        if (_textEditor?.Document is not { } document || _textEditor.IsReadOnly)
+        {
+            return;
+        }
+
+        var (startLine, endLine) = GetSelectedLineRange();
+        for (var lineNumber = endLine; lineNumber >= startLine; lineNumber--)
+        {
+            var line = document.GetLineByNumber(lineNumber);
+            if (outdent)
+            {
+                if (line.Length > 0 && document.GetCharAt(line.Offset) == '\t')
+                {
+                    document.Remove(line.Offset, 1);
+                    continue;
+                }
+
+                var remove = 0;
+                while (remove < Math.Min(4, line.Length) && document.GetCharAt(line.Offset + remove) == ' ')
+                {
+                    remove++;
+                }
+
+                if (remove > 0)
+                {
+                    document.Remove(line.Offset, remove);
+                }
+            }
+            else
+            {
+                document.Insert(line.Offset, "    ");
+            }
+        }
+    }
+
+    private (int Start, int Length) GetSelectedOrCurrentLineRange()
+    {
+        if (_textEditor?.Document is not { } document)
+        {
+            return (0, 0);
+        }
+
+        if (_textEditor.SelectionLength > 0)
+        {
+            var start = Math.Clamp(_textEditor.SelectionStart, 0, document.TextLength);
+            var length = Math.Clamp(_textEditor.SelectionLength, 0, document.TextLength - start);
+            return (start, length);
+        }
+
+        var line = document.GetLineByOffset(Math.Clamp(_textEditor.CaretOffset, 0, document.TextLength));
+        return (line.Offset, line.Length);
+    }
+
+    private (int StartLine, int EndLine) GetSelectedLineRange()
+    {
+        if (_textEditor?.Document is not { } document)
+        {
+            return (1, 1);
+        }
+
+        var startOffset = Math.Clamp(_textEditor.SelectionStart, 0, document.TextLength);
+        var endOffset = _textEditor.SelectionLength > 0
+            ? Math.Clamp(_textEditor.SelectionStart + _textEditor.SelectionLength, 0, document.TextLength)
+            : Math.Clamp(_textEditor.CaretOffset, 0, document.TextLength);
+        if (endOffset > startOffset && endOffset < document.TextLength)
+        {
+            endOffset--;
+        }
+
+        return (
+            document.GetLineByOffset(startOffset).LineNumber,
+            document.GetLineByOffset(Math.Max(startOffset, endOffset)).LineNumber);
+    }
+
+    private void SetCurrentFold(bool isFolded)
+    {
+        if (_textEditor is null || _foldingManager is null)
+        {
+            return;
+        }
+
+        var caretOffset = Math.Clamp(_textEditor.CaretOffset, 0, _textEditor.Document?.TextLength ?? 0);
+        var folding = _foldingManager.GetFoldingsContaining(caretOffset).FirstOrDefault(fold => fold.IsFolded != isFolded) ??
+                      _foldingManager.GetNextFolding(caretOffset);
+        if (folding is not null)
+        {
+            folding.IsFolded = isFolded;
+        }
+    }
+
+    private void SetAllFoldings(bool isFolded)
+    {
+        if (_foldingManager is null)
+        {
+            return;
+        }
+
+        foreach (var folding in _foldingManager.AllFoldings)
+        {
+            folding.IsFolded = isFolded;
+        }
     }
 
     private void TextEditorOnTextChanged(object? sender, EventArgs e)
