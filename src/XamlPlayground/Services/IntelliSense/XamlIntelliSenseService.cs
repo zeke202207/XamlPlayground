@@ -16,7 +16,9 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
     private const string AvaloniaXmlns = "https://github.com/avaloniaui";
     private const string XamlXmlns = "http://schemas.microsoft.com/winfx/2006/xaml";
 
-    private static readonly Lazy<XamlTypeCatalog> s_catalog = new(BuildCatalog);
+    private static readonly object s_catalogLock = new();
+    private static readonly HashSet<string> s_workspaceAssemblyNames = new(StringComparer.OrdinalIgnoreCase);
+    private static XamlTypeCatalog? s_catalog;
 
     private static readonly string[] s_commonColorValues =
     [
@@ -75,7 +77,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         }
 
         var namespaces = GetXmlNamespaces(text);
-        var catalog = s_catalog.Value;
+        var catalog = GetCatalog();
 
         if (context.Kind is XamlCompletionContextKind.ElementName or XamlCompletionContextKind.ClosingTag &&
             ResolveType(token, namespaces, catalog) is { } type)
@@ -108,6 +110,36 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         return Task.FromResult<EditorSignatureHelp?>(null);
     }
 
+    public static void RegisterWorkspaceAssemblies(IEnumerable<Assembly> assemblies)
+    {
+        lock (s_catalogLock)
+        {
+            var changed = false;
+            foreach (var assembly in assemblies.Where(static assembly => !assembly.IsDynamic))
+            {
+                var name = assembly.GetName().Name;
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    s_workspaceAssemblyNames.Add(name);
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                s_catalog = null;
+            }
+        }
+    }
+
+    private static XamlTypeCatalog GetCatalog()
+    {
+        lock (s_catalogLock)
+        {
+            return s_catalog ??= BuildCatalog();
+        }
+    }
+
     private static EditorCompletionResult? GetClosingTagCompletions(
         string text,
         int position,
@@ -135,7 +167,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         int position,
         XamlCompletionContext context)
     {
-        var catalog = s_catalog.Value;
+        var catalog = GetCatalog();
         var namespaces = GetXmlNamespaces(text);
         var prefix = GetPrefix(context.CurrentToken);
         var xmlNamespace = namespaces.GetValueOrDefault(prefix);
@@ -178,7 +210,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         string text,
         XamlCompletionContext context)
     {
-        var catalog = s_catalog.Value;
+        var catalog = GetCatalog();
         var namespaces = GetXmlNamespaces(text);
         if (context.TagName is null || ResolveType(context.TagName, namespaces, catalog) is not { } ownerType)
         {
@@ -245,7 +277,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
             return null;
         }
 
-        var catalog = s_catalog.Value;
+        var catalog = GetCatalog();
         var namespaces = GetXmlNamespaces(text);
         if (ResolveType(context.TagName, namespaces, catalog) is not { } ownerType)
         {
@@ -592,13 +624,16 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
                type.Assembly.GetName().Name is { } assemblyName &&
                (assemblyName.StartsWith("Avalonia", StringComparison.Ordinal) ||
                 assemblyName.StartsWith("Xaml.Behaviors", StringComparison.Ordinal) ||
-                assemblyName.StartsWith("XamlPlayground", StringComparison.Ordinal));
+                assemblyName.StartsWith("XamlPlayground", StringComparison.Ordinal) ||
+                s_workspaceAssemblyNames.Contains(assemblyName));
     }
 
     private static bool IsAvaloniaNamespace(Type type)
     {
         return type.Namespace?.StartsWith("Avalonia", StringComparison.Ordinal) == true ||
-               type.Namespace?.StartsWith("XamlPlayground", StringComparison.Ordinal) == true;
+               type.Namespace?.StartsWith("XamlPlayground", StringComparison.Ordinal) == true ||
+               type.Assembly.GetName().Name is { } assemblyName &&
+               s_workspaceAssemblyNames.Contains(assemblyName);
     }
 
     private static string GetXamlTypeName(Type type)

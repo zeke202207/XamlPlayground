@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Diagnostics;
@@ -16,6 +18,7 @@ using Dock.Avalonia.Themes.Fluent;
 using Dock.Model.Controls;
 using Dock.Model.Core;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using XamlPlayground.Controls;
 using XamlPlayground.Views.Docking;
 using XamlPlayground.Services;
@@ -404,6 +407,213 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void RuntimePreviewLoader_LoadsWorkspaceXClassWithPrivateRuntimeLoader()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var assemblyName = "PreviewWorkspace" + Guid.NewGuid().ToString("N");
+        var assemblyImage = CompileTestAssemblyImage(
+            assemblyName,
+            $$"""
+            using System;
+            using Avalonia.Controls;
+            using Avalonia.Interactivity;
+
+            namespace {{assemblyName}}
+            {
+                public sealed class AddDeleteRowsPage : UserControl
+                {
+                    public AddDeleteRowsPage()
+                    {
+                        ConstructorRan = true;
+                        DataContext = new ViewModels.AddDeleteRowsViewModel();
+                    }
+
+                    public bool ConstructorRan { get; }
+
+                    public void OnPreviewLoaded(object? sender, RoutedEventArgs e)
+                    {
+                    }
+
+                }
+            }
+
+            namespace {{assemblyName}}.ViewModels
+            {
+                public sealed class AddDeleteRowsViewModel
+                {
+                    public string Title { get; } = "Editable workspace preview";
+                }
+            }
+            """,
+            new[]
+            {
+                MetadataReference.CreateFromFile(typeof(Control).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(AvaloniaObject).Assembly.Location)
+            });
+        var runtimeReference = WorkspaceAssemblyReference.FromPath(
+            typeof(AvaloniaRuntimeXamlLoader).Assembly.Location,
+            isRuntimeAssembly: true);
+        Assert.NotNull(runtimeReference);
+        var context = new WorkspaceAssemblyLoadContext(
+            "WorkspaceRuntimeXamlLoaderTest",
+            new[] { runtimeReference },
+            privateAssemblyNames: new[] { assemblyName });
+        var runtimeAssembly = context.LoadAssemblyReference(runtimeReference);
+        Assert.NotNull(runtimeAssembly);
+        Assert.NotSame(typeof(AvaloniaRuntimeXamlLoader).Assembly, runtimeAssembly);
+
+        using var assemblyStream = new MemoryStream(assemblyImage, writable: false);
+        var assembly = context.LoadFromStream(assemblyStream);
+
+        try
+        {
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                var xaml = $$"""
+                             <UserControl xmlns="https://github.com/avaloniaui"
+                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                          xmlns:viewModels="clr-namespace:{{assemblyName}}.ViewModels;assembly={{assemblyName}}"
+                                          x:Class="{{assemblyName}}.AddDeleteRowsPage"
+                                      x:DataType="viewModels:AddDeleteRowsViewModel"
+                                      Loaded="OnPreviewLoaded">
+                           <TextBlock Text="{Binding Title}" />
+                         </UserControl>
+                         """;
+                var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+                var control = RuntimeXamlPreviewLoader.LoadControl(
+                    xaml,
+                    assembly,
+                    fallbackRootTypeName: "AddDeleteRowsPage",
+                    documentName: "Pages/AddDeleteRowsPage.axaml",
+                    diagnostics: diagnostics,
+                    documentAssemblyName: assemblyName);
+
+                var userControl = Assert.IsAssignableFrom<UserControl>(control);
+                Assert.Equal(assembly.GetType(assemblyName + ".AddDeleteRowsPage"), userControl.GetType());
+                Assert.Same(context, AssemblyLoadContext.GetLoadContext(userControl.GetType().Assembly));
+                Assert.True((bool)userControl.GetType().GetProperty("ConstructorRan")!.GetValue(userControl)!);
+                Assert.Equal(assemblyName + ".ViewModels.AddDeleteRowsViewModel", userControl.DataContext?.GetType().FullName);
+                Assert.DoesNotContain(diagnostics, static diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+            });
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    [Fact]
+    public void RuntimePreviewLoader_CanInstantiateInternalWorkspaceControls()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var dependencyName = "WorkspaceInternalControls" + Guid.NewGuid().ToString("N");
+        var appName = "WorkspaceInternalPreview" + Guid.NewGuid().ToString("N");
+        var dependencyImage = CompileTestAssemblyImage(
+            dependencyName,
+            $$"""
+            using Avalonia.Controls;
+
+            namespace {{dependencyName}}
+            {
+                internal sealed class InternalPreviewControl : UserControl
+                {
+                    public InternalPreviewControl()
+                    {
+                        Content = new TextBlock { Text = "Internal workspace control" };
+                    }
+                }
+            }
+            """,
+            new[]
+            {
+                MetadataReference.CreateFromFile(typeof(Control).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(AvaloniaObject).Assembly.Location)
+            });
+        var appImage = CompileTestAssemblyImage(
+            appName,
+            $$"""
+            using Avalonia.Controls;
+
+            namespace {{appName}}
+            {
+                public sealed class PreviewPage : UserControl
+                {
+                    public PreviewPage()
+                    {
+                        ConstructorRan = true;
+                    }
+
+                    public bool ConstructorRan { get; }
+                }
+            }
+            """,
+            new[]
+            {
+                MetadataReference.CreateFromFile(typeof(Control).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(AvaloniaObject).Assembly.Location),
+                MetadataReference.CreateFromImage(dependencyImage)
+            });
+        var runtimeReference = WorkspaceAssemblyReference.FromPath(
+            typeof(AvaloniaRuntimeXamlLoader).Assembly.Location,
+            isRuntimeAssembly: true);
+        var dependencyReference = WorkspaceAssemblyReference.FromImage(
+            dependencyName + ".dll",
+            dependencyImage,
+            isRuntimeAssembly: true);
+        Assert.NotNull(runtimeReference);
+        Assert.NotNull(dependencyReference);
+
+        var context = new WorkspaceAssemblyLoadContext(
+            "WorkspaceInternalControlPreviewTest",
+            new[] { runtimeReference, dependencyReference },
+            privateAssemblyNames: new[] { appName, dependencyName });
+        _ = context.LoadAssemblyReference(runtimeReference);
+        var dependencyAssembly = context.LoadAssemblyReference(dependencyReference);
+        Assert.NotNull(dependencyAssembly);
+        using var appStream = new MemoryStream(appImage, writable: false);
+        var appAssembly = context.LoadFromStream(appStream);
+
+        try
+        {
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                var xaml = $$"""
+                             <UserControl xmlns="https://github.com/avaloniaui"
+                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                          xmlns:controls="clr-namespace:{{dependencyName}};assembly={{dependencyName}}"
+                                          x:Class="{{appName}}.PreviewPage">
+                               <controls:InternalPreviewControl />
+                             </UserControl>
+                             """;
+                var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+                var control = RuntimeXamlPreviewLoader.LoadControl(
+                    xaml,
+                    appAssembly,
+                    fallbackRootTypeName: "PreviewPage",
+                    documentName: "Views/PreviewPage.axaml",
+                    diagnostics: diagnostics,
+                    documentAssemblyName: appName);
+
+                var userControl = Assert.IsAssignableFrom<UserControl>(control);
+                Assert.Equal(appAssembly.GetType(appName + ".PreviewPage"), userControl.GetType());
+                Assert.True((bool)userControl.GetType().GetProperty("ConstructorRan")!.GetValue(userControl)!);
+                var internalControl = Assert.IsAssignableFrom<UserControl>(userControl.Content);
+                Assert.Equal(dependencyName + ".InternalPreviewControl", internalControl.GetType().FullName);
+                Assert.Same(context, AssemblyLoadContext.GetLoadContext(internalControl.GetType().Assembly));
+                Assert.DoesNotContain(diagnostics, static diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+            });
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    [Fact]
     public void SolutionStorage_RoundTripsFullSolution()
     {
         var changedFiles = new List<string>();
@@ -482,6 +692,310 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void InMemoryProject_PreservesAbsoluteProjectFilePath()
+    {
+        var absoluteProjectPath = Path.Combine(
+            Path.GetTempPath(),
+            "XamlPlaygroundAbsoluteProject",
+            "App.csproj");
+        var project = new InMemoryProject("App", "App", "msbuild", absoluteProjectPath);
+
+        Assert.Equal(absoluteProjectPath.Replace('\\', '/').TrimEnd('/'), project.ProjectFilePath);
+    }
+
+    [Fact]
+    public void InMemoryProject_RepairsMissingUnixRootForExistingAbsoluteProjectFilePath()
+    {
+        if (Path.DirectorySeparatorChar != '/')
+        {
+            return;
+        }
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundAbsoluteProject-{Guid.NewGuid():N}");
+        var absoluteProjectPath = Path.Combine(root, "App.csproj");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(absoluteProjectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            var project = new InMemoryProject(
+                "App",
+                "App",
+                "msbuild",
+                absoluteProjectPath.TrimStart('/'));
+
+            Assert.Equal(absoluteProjectPath.Replace('\\', '/').TrimEnd('/'), project.ProjectFilePath);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void RemotePreviewStartInfo_RepairsMissingUnixRootForWorkingDirectory()
+    {
+        if (Path.DirectorySeparatorChar != '/')
+        {
+            return;
+        }
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewHost-{Guid.NewGuid():N}");
+        var hostPath = Path.Combine(root, "XamlPlayground.PreviewerHost.dll");
+        var targetPath = Path.Combine(root, "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllBytes(hostPath, Array.Empty<byte>());
+            File.WriteAllBytes(targetPath, Array.Empty<byte>());
+            var method = typeof(WorkspaceRemotePreviewService).GetMethod(
+                "BuildStartInfo",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var startInfo = Assert.IsType<System.Diagnostics.ProcessStartInfo>(method.Invoke(
+                null,
+                new object[] { hostPath, targetPath, 12345, root.TrimStart('/') }));
+
+            Assert.Equal(root.Replace('\\', '/'), startInfo.WorkingDirectory.Replace('\\', '/'));
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void RemotePreviewStartInfo_PrefersTargetDepsForIsolatedWorkspace()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewDeps-{Guid.NewGuid():N}");
+        var hostDirectory = Path.Combine(root, "host");
+        var targetDirectory = Path.Combine(root, "target");
+        var hostPath = Path.Combine(hostDirectory, "XamlPlayground.PreviewerHost.dll");
+        var targetPath = Path.Combine(targetDirectory, "SampleApp.dll");
+        var hostRuntimeConfig = Path.ChangeExtension(hostPath, ".runtimeconfig.json");
+        var hostDeps = Path.ChangeExtension(hostPath, ".deps.json");
+        var targetDeps = Path.Combine(targetDirectory, "SampleApp.deps.json");
+        try
+        {
+            Directory.CreateDirectory(hostDirectory);
+            Directory.CreateDirectory(targetDirectory);
+            File.WriteAllBytes(hostPath, Array.Empty<byte>());
+            File.WriteAllBytes(targetPath, Array.Empty<byte>());
+            File.WriteAllText(hostRuntimeConfig, "{}");
+            File.WriteAllText(hostDeps, "{}");
+            File.WriteAllText(targetDeps, "{}");
+            var method = typeof(WorkspaceRemotePreviewService).GetMethod(
+                "BuildStartInfo",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var startInfo = Assert.IsType<System.Diagnostics.ProcessStartInfo>(method.Invoke(
+                null,
+                new object[] { hostPath, targetPath, 12345, targetDirectory }));
+
+            Assert.Contains($"--runtimeconfig \"{hostRuntimeConfig}\"", startInfo.Arguments, StringComparison.Ordinal);
+            Assert.Contains($"--depsfile \"{targetDeps}\"", startInfo.Arguments, StringComparison.Ordinal);
+            Assert.DoesNotContain($"--depsfile \"{hostDeps}\"", startInfo.Arguments, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void WorkspaceRemotePreviewService_StopWaitsForKilledProcessToExit()
+    {
+        static System.Diagnostics.Process StartLongRunningProcess()
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            if (OperatingSystem.IsWindows())
+            {
+                startInfo.FileName = "cmd";
+                startInfo.ArgumentList.Add("/c");
+                startInfo.ArgumentList.Add("ping -n 30 127.0.0.1 > nul");
+            }
+            else
+            {
+                startInfo.FileName = "/bin/sh";
+                startInfo.ArgumentList.Add("-c");
+                startInfo.ArgumentList.Add("sleep 30");
+            }
+
+            var process = System.Diagnostics.Process.Start(startInfo);
+            Assert.NotNull(process);
+            return process;
+        }
+
+        static bool IsProcessRunning(int processId)
+        {
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(processId);
+                return !process.HasExited;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        var service = new WorkspaceRemotePreviewService();
+        var process = StartLongRunningProcess();
+        var processId = process.Id;
+        var field = typeof(WorkspaceRemotePreviewService).GetField(
+            "_process",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        field.SetValue(service, process);
+
+        try
+        {
+            service.Stop();
+
+            Assert.False(IsProcessRunning(processId));
+        }
+        finally
+        {
+            if (IsProcessRunning(processId))
+            {
+                using var runningProcess = System.Diagnostics.Process.GetProcessById(processId);
+                runningProcess.Kill(entireProcessTree: true);
+                runningProcess.WaitForExit(5000);
+            }
+        }
+    }
+
+    [Fact]
+    public void PreviewerHostProject_ReferencesAvaloniaPackageForDesignerSupport()
+    {
+        var projectPath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "XamlPlayground.PreviewerHost",
+            "XamlPlayground.PreviewerHost.csproj");
+        var document = XDocument.Load(projectPath);
+        var packageReference = document
+            .Descendants("PackageReference")
+            .SingleOrDefault(static element =>
+                string.Equals((string?)element.Attribute("Include"), "Avalonia", StringComparison.Ordinal));
+
+        Assert.NotNull(packageReference);
+        Assert.Equal("$(AvaloniaVersion)", (string?)packageReference.Attribute("Version"));
+    }
+
+    [Fact]
+    public void PreviewerHostResolver_PrefersTargetAssemblyAndFallsBackToHostDirectory()
+    {
+        static string NormalizeResolvedPath(string path)
+        {
+            var normalized = Path.GetFullPath(path).Replace('\\', '/');
+            return OperatingSystem.IsMacOS() && normalized.StartsWith("/private/var/", StringComparison.Ordinal)
+                ? normalized["/private".Length..]
+                : normalized;
+        }
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewerResolver-{Guid.NewGuid():N}");
+        var hostDirectory = Path.Combine(root, "host");
+        var targetDirectory = Path.Combine(root, "target");
+        var hostPath = Path.Combine(hostDirectory, "XamlPlayground.PreviewerHost.dll");
+        var targetPath = Path.Combine(targetDirectory, "SampleApp.dll");
+        var targetDesignerSupportPath = Path.Combine(targetDirectory, "Avalonia.DesignerSupport.dll");
+        var hostDesignerSupportPath = Path.Combine(hostDirectory, "Avalonia.DesignerSupport.dll");
+        try
+        {
+            Directory.CreateDirectory(hostDirectory);
+            Directory.CreateDirectory(targetDirectory);
+            File.WriteAllBytes(hostPath, Array.Empty<byte>());
+            File.WriteAllBytes(targetPath, CompileTestAssemblyImage("SampleApp", "public sealed class SampleAppType { }"));
+            File.WriteAllBytes(
+                targetDesignerSupportPath,
+                CompileTestAssemblyImage("Avalonia.DesignerSupport", "public sealed class TargetDesignerSupport { }"));
+            File.WriteAllBytes(
+                hostDesignerSupportPath,
+                CompileTestAssemblyImage("Avalonia.DesignerSupport", "public sealed class HostDesignerSupport { }"));
+            var resolverType = typeof(XamlPlayground.PreviewerHost.Program).GetNestedType(
+                "TargetAssemblyResolver",
+                BindingFlags.NonPublic);
+            Assert.NotNull(resolverType);
+            var resolver = Activator.CreateInstance(
+                resolverType,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                args: new object[] { targetPath, hostPath },
+                culture: null);
+            Assert.NotNull(resolver);
+            var method = resolverType.GetMethod(
+                "ResolveAssemblyPath",
+                BindingFlags.Instance | BindingFlags.Public);
+            Assert.NotNull(method);
+
+            var targetResolved = Assert.IsType<string>(method.Invoke(
+                resolver,
+                new object[] { new AssemblyName("Avalonia.DesignerSupport") }));
+            File.Delete(targetDesignerSupportPath);
+            var hostResolved = Assert.IsType<string>(method.Invoke(
+                resolver,
+                new object[] { new AssemblyName("Avalonia.DesignerSupport") }));
+
+            Assert.Equal(NormalizeResolvedPath(targetDesignerSupportPath), NormalizeResolvedPath(targetResolved));
+            Assert.Equal(NormalizeResolvedPath(hostDesignerSupportPath), NormalizeResolvedPath(hostResolved));
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void PreviewerHost_FileAssetLoaderReturnsTargetAssemblyForTemporaryXaml()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewerAsset-{Guid.NewGuid():N}");
+        var targetPath = Path.Combine(root, "PreviewTarget.dll");
+        var xamlPath = Path.Combine(root, "Preview.axaml");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllBytes(targetPath, CompileTestAssemblyImage("PreviewTarget", "public sealed class PreviewTargetType { }"));
+            File.WriteAllText(xamlPath, "<UserControl />");
+            var targetAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(targetPath);
+            var registrarType = typeof(XamlPlayground.PreviewerHost.Program).Assembly.GetType(
+                "XamlPlayground.PreviewerHost.RuntimeXamlLoaderRegistrar",
+                throwOnError: true);
+            Assert.NotNull(registrarType);
+            registrarType.GetMethod("Configure", BindingFlags.Static | BindingFlags.Public)
+                ?.Invoke(null, new object[] { targetPath });
+            var proxyType = registrarType.GetNestedType("AssetLoaderProxy", BindingFlags.NonPublic);
+            Assert.NotNull(proxyType);
+            var method = proxyType.GetMethod(
+                "CreateOpenAndGetAssemblyResult",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var result = method.Invoke(null, new object[] { typeof(ValueTuple<Stream, Assembly>), xamlPath });
+            var tuple = Assert.IsType<ValueTuple<Stream, Assembly>>(result);
+
+            tuple.Item1.Dispose();
+            Assert.Same(targetAssembly, tuple.Item2);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
     public void StandardSolutionStorage_PreservesImportedProjectPathOnExport()
     {
         var solution = new InMemorySolution("StandardApp");
@@ -502,6 +1016,47 @@ public sealed class MainViewModelTests
 
         Assert.Equal("src/StandardApp/StandardApp.csproj", slnEntry.Path);
         Assert.Equal("src/StandardApp/StandardApp.csproj", slnxEntry.Path);
+    }
+
+    [Fact]
+    public async Task InMemoryProjectFile_SaveToStorageFailsWhenTruncationIsUnsupported()
+    {
+        var storageFile = NonTruncatingStorageFileProxy.Create(
+            "Shorter.axaml",
+            "previous longer content",
+            out var storageFileProxy);
+        var file = new InMemoryProjectFile(
+            "Shorter.axaml",
+            "previous longer content",
+            ProjectFileKind.Xaml,
+            sourceStorageFile: storageFile)
+        {
+            Text = "short"
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(file.SaveToSourceAsync);
+
+        Assert.Contains("does not support truncating", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("previous longer content", storageFileProxy.Text);
+        Assert.True(file.IsDirty);
+    }
+
+    [Fact]
+    public async Task InMemoryProjectFile_SaveToStorageKeepsDirtyWhenFlushFails()
+    {
+        var storageFile = FailingFlushStorageFileProxy.Create("Flush.axaml");
+        var file = new InMemoryProjectFile(
+            "Flush.axaml",
+            "previous content",
+            ProjectFileKind.Xaml,
+            sourceStorageFile: storageFile)
+        {
+            Text = "changed content"
+        };
+
+        await Assert.ThrowsAsync<IOException>(file.SaveToSourceAsync);
+
+        Assert.True(file.IsDirty);
     }
 
     [Fact]
@@ -637,6 +1192,621 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void MsBuildWorkspaceLoader_IgnoresRootBuildAndSourceControlPaths()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsIgnoredProjectPath",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.True((bool)method.Invoke(null, new object[] { "bin/Debug/Generated.cs" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { "obj/project.assets.json" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { ".git/config" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { ".vs/config/applicationhost.config" })!);
+        Assert.False((bool)method.Invoke(null, new object[] { "src/Bindable/View.cs" })!);
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_ClassifiesBuildOutputFoldersForStorageEnumeration()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsBuildOutputDirectoryName",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.True((bool)method.Invoke(null, new object[] { "bin" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { "obj" })!);
+        Assert.False((bool)method.Invoke(null, new object[] { "src" })!);
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_IncludesRootStorageBinAssemblies()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsStorageProjectAssemblyReferencePath",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.True((bool)method.Invoke(null, new object[] { "bin/Debug/net10.0/App.dll" })!);
+        Assert.True((bool)method.Invoke(null, new object[] { "src/App/bin/Debug/net10.0/App.dll" })!);
+        Assert.False((bool)method.Invoke(null, new object[] { "obj/Debug/net10.0/App.dll" })!);
+        Assert.False((bool)method.Invoke(null, new object[] { "src/App/binary/App.dll" })!);
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_ExcludesSiblingProjectFoldersFromRootStorageProject()
+    {
+        var excludeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "GetExcludedStorageProjectFolders",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        var scopeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsStorageProjectFileInScope",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(excludeMethod);
+        Assert.NotNull(scopeMethod);
+
+        var excludedFolders = Assert.IsAssignableFrom<IEnumerable<string>>(excludeMethod.Invoke(
+            null,
+            new object[] { string.Empty, new[] { string.Empty, "Lib", "Samples/Controls" } }));
+        var excluded = excludedFolders.ToArray();
+
+        Assert.Contains("Lib", excluded);
+        Assert.Contains("Samples/Controls", excluded);
+        Assert.True((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "App.axaml", excluded })!);
+        Assert.True((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "ViewModels/AppViewModel.cs", excluded })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "Lib/LibView.axaml", excluded })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "Samples/Controls/Demo.cs", excluded })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { string.Empty, "Lib/bin/Debug/net10.0/Lib.dll", excluded })!);
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_AllowsNestedProjectToExcludeItsChildProjectsOnly()
+    {
+        var excludeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "GetExcludedStorageProjectFolders",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        var scopeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "IsStorageProjectFileInScope",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(excludeMethod);
+        Assert.NotNull(scopeMethod);
+
+        var parentExcluded = Assert.IsAssignableFrom<IEnumerable<string>>(excludeMethod.Invoke(
+            null,
+            new object[] { "src/App", new[] { string.Empty, "src/App", "src/App/Plugin", "src/Lib" } }));
+        var parentExcludedArray = parentExcluded.ToArray();
+        var childExcluded = Assert.IsAssignableFrom<IEnumerable<string>>(excludeMethod.Invoke(
+            null,
+            new object[] { "src/App/Plugin", new[] { string.Empty, "src/App", "src/App/Plugin", "src/Lib" } }));
+        var childExcludedArray = childExcluded.ToArray();
+
+        Assert.Contains("src/App/Plugin", parentExcludedArray);
+        Assert.Contains("src/Lib", parentExcludedArray);
+        Assert.True((bool)scopeMethod.Invoke(null, new object[] { "src/App", "src/App/MainView.axaml", parentExcludedArray })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { "src/App", "src/App/Plugin/PluginView.axaml", parentExcludedArray })!);
+
+        Assert.DoesNotContain("src/App", childExcludedArray);
+        Assert.Contains("src/Lib", childExcludedArray);
+        Assert.True((bool)scopeMethod.Invoke(null, new object[] { "src/App/Plugin", "src/App/Plugin/PluginView.axaml", childExcludedArray })!);
+        Assert.False((bool)scopeMethod.Invoke(null, new object[] { "src/App/Plugin", "src/App/MainView.axaml", childExcludedArray })!);
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_ExcludesSiblingProjectFoldersFromLocalRootProject()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundLocalProjectScope-{Guid.NewGuid():N}");
+        var libRoot = Path.Combine(root, "Lib");
+        var sampleRoot = Path.Combine(root, "Samples", "Controls");
+        try
+        {
+            Directory.CreateDirectory(libRoot);
+            Directory.CreateDirectory(sampleRoot);
+            File.WriteAllText(Path.Combine(root, "App.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(Path.Combine(root, "App.axaml"), "<UserControl />");
+            File.WriteAllText(Path.Combine(libRoot, "Lib.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(Path.Combine(libRoot, "LibView.axaml"), "<UserControl />");
+            File.WriteAllText(Path.Combine(sampleRoot, "Demo.axaml"), "<UserControl />");
+
+            var excludeMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "GetExcludedLocalProjectFolders",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            var enumerateMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "EnumerateProjectFiles",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(excludeMethod);
+            Assert.NotNull(enumerateMethod);
+
+            var excluded = Assert.IsAssignableFrom<IEnumerable<string>>(excludeMethod.Invoke(
+                null,
+                new object[] { root, new[] { root, libRoot, sampleRoot } }));
+            var files = Assert.IsAssignableFrom<IEnumerable<string>>(enumerateMethod.Invoke(
+                    null,
+                    new object[] { root, Path.Combine(root, "App.csproj"), excluded }))
+                .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+                .ToArray();
+
+            Assert.Contains("App.axaml", files);
+            Assert.DoesNotContain("Lib/LibView.axaml", files);
+            Assert.DoesNotContain("Samples/Controls/Demo.axaml", files);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_SkipsIgnoredLocalDirectoriesDuringProjectFileEnumeration()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundLocalIgnoredPaths-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Views"));
+            Directory.CreateDirectory(Path.Combine(root, "bin", "Debug"));
+            Directory.CreateDirectory(Path.Combine(root, "obj", "Debug"));
+            Directory.CreateDirectory(Path.Combine(root, ".git", "objects"));
+            Directory.CreateDirectory(Path.Combine(root, ".vs", "config"));
+            File.WriteAllText(Path.Combine(root, "App.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(Path.Combine(root, "Views", "MainView.axaml"), "<UserControl />");
+            File.WriteAllText(Path.Combine(root, "bin", "Debug", "Generated.axaml"), "<UserControl />");
+            File.WriteAllText(Path.Combine(root, "obj", "Debug", "Generated.cs"), "public sealed class Generated { }");
+            File.WriteAllText(Path.Combine(root, ".git", "objects", "Loose.cs"), "public sealed class Loose { }");
+            File.WriteAllText(Path.Combine(root, ".vs", "config", "State.axaml"), "<UserControl />");
+
+            var skipMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "ShouldSkipLocalProjectDirectory",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            var enumerateMethod = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "EnumerateProjectFiles",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(skipMethod);
+            Assert.NotNull(enumerateMethod);
+
+            Assert.True((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, "bin"), Array.Empty<string>() })!);
+            Assert.True((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, "obj"), Array.Empty<string>() })!);
+            Assert.True((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, ".git"), Array.Empty<string>() })!);
+            Assert.True((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, ".vs"), Array.Empty<string>() })!);
+            Assert.False((bool)skipMethod.Invoke(null, new object[] { Path.Combine(root, "Views"), Array.Empty<string>() })!);
+
+            var files = Assert.IsAssignableFrom<IEnumerable<string>>(enumerateMethod.Invoke(
+                    null,
+                    new object[] { root, Path.Combine(root, "App.csproj"), Array.Empty<string>() }))
+                .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+                .ToArray();
+
+            Assert.Contains("Views/MainView.axaml", files);
+            Assert.DoesNotContain("bin/Debug/Generated.axaml", files);
+            Assert.DoesNotContain("obj/Debug/Generated.cs", files);
+            Assert.DoesNotContain(".git/objects/Loose.cs", files);
+            Assert.DoesNotContain(".vs/config/State.axaml", files);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task MsBuildWorkspaceLoader_WiresStorageProjectReferencesFromSiblingSource()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("StorageWorkspace");
+        var coreProject = new InMemoryProject("Core", "Core", "browser.storage", "Core/Core.csproj")
+        {
+            AssemblyName = "Core"
+        };
+        coreProject.AddFile(new InMemoryProjectFile(
+            "Core.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            ProjectFileKind.ProjectFile));
+        coreProject.AddFile(new InMemoryProjectFile(
+            "CoreValue.cs",
+            """
+            namespace Core;
+
+            public sealed class CoreValue
+            {
+                public string Name => "Core";
+            }
+            """,
+            ProjectFileKind.CSharp));
+        var libProject = new InMemoryProject("Lib", "Lib", "browser.storage", "Lib/Lib.csproj")
+        {
+            AssemblyName = "Lib"
+        };
+        libProject.AddFile(new InMemoryProjectFile(
+            "Lib.csproj",
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <ProjectReference Include="..\Core\Core.csproj" />
+              </ItemGroup>
+            </Project>
+            """,
+            ProjectFileKind.ProjectFile));
+        libProject.AddFile(new InMemoryProjectFile(
+            "LibValue.cs",
+            """
+            using Core;
+
+            namespace Lib;
+
+            public sealed class LibValue
+            {
+                public CoreValue Value { get; } = new();
+            }
+            """,
+            ProjectFileKind.CSharp));
+        var appProject = new InMemoryProject("App", "App", "browser.storage", "App/App.csproj")
+        {
+            AssemblyName = "App"
+        };
+        appProject.AddFile(new InMemoryProjectFile(
+            "App.csproj",
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <ProjectReference Include="..\Lib\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """,
+            ProjectFileKind.ProjectFile));
+        appProject.AddFile(new InMemoryProjectFile(
+            "AppViewModel.cs",
+            """
+            using Lib;
+
+            namespace App;
+
+            public sealed class AppViewModel
+            {
+                public string Name => new LibValue().Value.Name;
+            }
+            """,
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(appProject);
+        solution.Projects.Add(libProject);
+        solution.Projects.Add(coreProject);
+
+        await AddStorageProjectReferencesForTestAsync(solution);
+
+        Assert.Contains(appProject.AssemblyReferences, reference => reference.Name == "Lib" && reference.Image is { Length: > 0 });
+        Assert.Contains(appProject.AssemblyReferences, reference => reference.Name == "Core" && reference.Image is { Length: > 0 });
+        var result = await CompilerService.GetProjectAssembly(
+            appProject.AssemblyName,
+            appProject.GetCSharpFileSnapshot(),
+            appProject.AssemblyReferences);
+
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+    }
+
+    [Fact]
+    public async Task MsBuildWorkspaceLoader_EmitsStorageProjectReferenceWithGeneratedXamlPartial()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("StorageWorkspace");
+        var libProject = new InMemoryProject("Lib", "Lib", "browser.storage", "Lib/Lib.csproj")
+        {
+            AssemblyName = "Lib"
+        };
+        libProject.AddFile(new InMemoryProjectFile(
+            "Lib.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            ProjectFileKind.ProjectFile));
+        libProject.AddFile(new InMemoryProjectFile(
+            "Views/LibView.axaml",
+            """
+            <UserControl
+                x:Class="Lib.LibView"
+                xmlns="https://github.com/avaloniaui"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />
+            """,
+            ProjectFileKind.Xaml));
+        libProject.AddFile(new InMemoryProjectFile(
+            "Views/LibView.axaml.cs",
+            """
+            using Avalonia.Controls;
+
+            namespace Lib;
+
+            public partial class LibView : UserControl
+            {
+                public LibView()
+                {
+                    InitializeComponent();
+                }
+            }
+            """,
+            ProjectFileKind.CSharp));
+        var appProject = new InMemoryProject("App", "App", "browser.storage", "App/App.csproj")
+        {
+            AssemblyName = "App"
+        };
+        appProject.AddFile(new InMemoryProjectFile(
+            "App.csproj",
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <ProjectReference Include="..\Lib\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """,
+            ProjectFileKind.ProjectFile));
+        appProject.AddFile(new InMemoryProjectFile(
+            "AppViewModel.cs",
+            """
+            using Lib;
+
+            namespace App;
+
+            public sealed class AppViewModel
+            {
+                public string ViewName => typeof(LibView).Name;
+            }
+            """,
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(appProject);
+        solution.Projects.Add(libProject);
+
+        await AddStorageProjectReferencesForTestAsync(solution);
+
+        Assert.Contains(appProject.AssemblyReferences, reference => reference.Name == "Lib" && reference.Image is { Length: > 0 });
+        var result = await CompilerService.GetProjectAssembly(
+            appProject.AssemblyName,
+            appProject.GetCSharpFileSnapshot(),
+            appProject.AssemblyReferences);
+
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+    }
+
+    [Fact]
+    public async Task MsBuildWorkspaceLoader_WiresLocalTransitiveProjectReferences()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var workspace = new AdhocWorkspace();
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundLocalProjectReferences-{Guid.NewGuid():N}");
+        var coreDirectory = Path.Combine(root, "Core");
+        var libDirectory = Path.Combine(root, "Lib");
+        var appDirectory = Path.Combine(root, "App");
+        var coreOutputPath = Path.Combine(coreDirectory, "bin", "Debug", "net10.0", "Core.dll");
+        var libOutputPath = Path.Combine(libDirectory, "bin", "Debug", "net10.0", "Lib.dll");
+        var coreSourcePath = Path.Combine(coreDirectory, "CoreValue.cs");
+        var libSourcePath = Path.Combine(libDirectory, "LibValue.cs");
+        var appProjectPath = Path.Combine(appDirectory, "App.csproj");
+        var reference = MetadataReference.CreateFromFile(GetNetCoreReferenceAssemblyPath("System.Runtime"));
+        var coreId = ProjectId.CreateNewId("Core");
+        var libId = ProjectId.CreateNewId("Lib");
+        var appId = ProjectId.CreateNewId("App");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(coreOutputPath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(libOutputPath)!);
+            Directory.CreateDirectory(appDirectory);
+            var coreImage = CompileTestAssemblyImage(
+                "Core",
+                "namespace Core; public sealed class CoreValue { public string Name => \"Core\"; }");
+            File.WriteAllBytes(coreOutputPath, coreImage);
+            File.WriteAllBytes(
+                libOutputPath,
+                CompileTestAssemblyImage(
+                    "Lib",
+                    "using Core; namespace Lib; public sealed class LibValue { public CoreValue Value { get; } = new(); }",
+                    new[] { MetadataReference.CreateFromImage(coreImage) }));
+            File.WriteAllText(coreSourcePath, "namespace Core; public sealed class CoreValue { public string Name => \"Core\"; }");
+            File.WriteAllText(libSourcePath, "using Core; namespace Lib; public sealed class LibValue { public CoreValue Value { get; } = new(); }");
+            var outputTime = DateTime.UtcNow;
+            File.SetLastWriteTimeUtc(coreOutputPath, outputTime);
+            File.SetLastWriteTimeUtc(libOutputPath, outputTime);
+            File.SetLastWriteTimeUtc(coreSourcePath, outputTime.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(libSourcePath, outputTime.AddMinutes(-10));
+
+            var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
+                coreId,
+                VersionStamp.Create(),
+                "Core",
+                "Core",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(coreDirectory, "Core.csproj"),
+                outputFilePath: coreOutputPath,
+                metadataReferences: new[] { reference }));
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(coreId),
+                "CoreValue.cs",
+                Microsoft.CodeAnalysis.Text.SourceText.From(
+                    "namespace Core; public sealed class CoreValue { public string Name => \"Core\"; }"),
+                filePath: coreSourcePath);
+            solution = solution.AddProject(ProjectInfo.Create(
+                libId,
+                VersionStamp.Create(),
+                "Lib",
+                "Lib",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(libDirectory, "Lib.csproj"),
+                outputFilePath: libOutputPath,
+                metadataReferences: new[] { reference }));
+            solution = solution.AddProjectReference(libId, new ProjectReference(coreId));
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(libId),
+                "LibValue.cs",
+                Microsoft.CodeAnalysis.Text.SourceText.From(
+                    "using Core; namespace Lib; public sealed class LibValue { public CoreValue Value { get; } = new(); }"),
+                filePath: libSourcePath);
+            solution = solution.AddProject(ProjectInfo.Create(
+                appId,
+                VersionStamp.Create(),
+                "App",
+                "App",
+                LanguageNames.CSharp,
+                filePath: appProjectPath,
+                outputFilePath: Path.Combine(appDirectory, "bin", "Debug", "net10.0", "App.dll"),
+                metadataReferences: new[] { reference }));
+            solution = solution.AddProjectReference(appId, new ProjectReference(libId));
+            Assert.True(workspace.TryApplyChanges(solution));
+            var appRoslynProject = workspace.CurrentSolution.GetProject(appId);
+            Assert.NotNull(appRoslynProject);
+            var appProject = new InMemoryProject("App", "App", "msbuild", appProjectPath)
+            {
+                AssemblyName = "App"
+            };
+
+            await AddRoslynReferencesForTestAsync(appProject, appRoslynProject);
+
+            Assert.Contains(appProject.AssemblyReferences, assemblyReference => assemblyReference.Name == "Lib" && assemblyReference.FilePath == libOutputPath);
+            Assert.Contains(appProject.AssemblyReferences, assemblyReference => assemblyReference.Name == "Core" && assemblyReference.FilePath == coreOutputPath);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task MsBuildWorkspaceLoader_PrefersStorageProjectReferenceSourceOverStaleBinOutput()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("StorageWorkspace");
+        var staleLibReference = WorkspaceAssemblyReference.FromImage(
+            "Lib/bin/Debug/net8.0/Lib.dll",
+            CompileTestAssemblyImage(
+                "Lib",
+                """
+                namespace Lib;
+
+                public sealed class LibValue
+                {
+                    public string OldValue => "stale";
+                }
+                """),
+            isRuntimeAssembly: true);
+        Assert.NotNull(staleLibReference);
+
+        var libProject = new InMemoryProject("Lib", "Lib", "browser.storage", "Lib/Lib.csproj")
+        {
+            AssemblyName = "Lib"
+        };
+        libProject.AddFile(new InMemoryProjectFile(
+            "Lib.csproj",
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            ProjectFileKind.ProjectFile));
+        libProject.AddFile(new InMemoryProjectFile(
+            "LibValue.cs",
+            """
+            namespace Lib;
+
+            public sealed class LibValue
+            {
+                public string NewValue => "fresh";
+            }
+            """,
+            ProjectFileKind.CSharp));
+        libProject.AssemblyReferences.Add(staleLibReference);
+
+        var appProject = new InMemoryProject("App", "App", "browser.storage", "App/App.csproj")
+        {
+            AssemblyName = "App"
+        };
+        appProject.AddFile(new InMemoryProjectFile(
+            "App.csproj",
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <ProjectReference Include="..\Lib\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """,
+            ProjectFileKind.ProjectFile));
+        appProject.AddFile(new InMemoryProjectFile(
+            "AppViewModel.cs",
+            """
+            using Lib;
+
+            namespace App;
+
+            public sealed class AppViewModel
+            {
+                public string Name => new LibValue().NewValue;
+            }
+            """,
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(appProject);
+        solution.Projects.Add(libProject);
+
+        await AddStorageProjectReferencesForTestAsync(solution);
+
+        var libReferences = appProject.AssemblyReferences
+            .Where(static reference => string.Equals(reference.Name, "Lib", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var libReference = Assert.Single(libReferences);
+        Assert.Equal("Lib.dll", libReference.FilePath);
+        Assert.NotNull(libReference.Image);
+        var result = await CompilerService.GetProjectAssembly(
+            appProject.AssemblyName,
+            appProject.GetCSharpFileSnapshot(),
+            appProject.AssemblyReferences);
+
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_ResolvesNestedStorageSolutionProjectPaths()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "ResolveStorageSolutionProjectPath",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.Equal(
+            "src/App/App.csproj",
+            method.Invoke(null, new object[] { "src/App.slnx", "App/App.csproj" }));
+        Assert.Equal(
+            "src/App/App.csproj",
+            method.Invoke(null, new object[] { "src/Solutions/App.sln", "../App/App.csproj" }));
+        Assert.Equal(
+            "App/App.csproj",
+            method.Invoke(null, new object[] { "App.sln", "App/App.csproj" }));
+    }
+
+    [Fact]
+    public void InMemoryProject_GetCSharpFiles_ExcludesEditableNonCompilationFiles()
+    {
+        var project = new InMemoryProject("ImportedApp", "ImportedApp", "msbuild");
+        var compileFile = project.AddFile(new InMemoryProjectFile(
+            "Main.cs",
+            "namespace ImportedApp; public sealed class Main { }",
+            ProjectFileKind.CSharp));
+        project.AddFile(new InMemoryProjectFile(
+            "Extra.cs",
+            "namespace ImportedApp; public sealed class Extra { }",
+            ProjectFileKind.CSharp,
+            includeInCompilation: false));
+        project.AddFile(new InMemoryProjectFile(
+            "Main.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+
+        Assert.Same(compileFile, Assert.Single(project.GetCSharpFiles()));
+    }
+
+    [Fact]
     public void StandardSolutionStorage_ResolvesStorageExplicitIncludesInsideSolutionRoot()
     {
         var method = typeof(StandardSolutionStorage).GetMethod(
@@ -692,6 +1862,630 @@ public sealed class MainViewModelTests
         Assert.True((bool)method.Invoke(null, new object[] { ".sln" })!);
         Assert.True((bool)method.Invoke(null, new object[] { ".slnx" })!);
         Assert.False((bool)method.Invoke(null, new object[] { ".xamlsln" })!);
+    }
+
+    [Fact]
+    public void LoadSolution_SelectsFirstPreviewableProject()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var buildProject = new InMemoryProject("_build", "_build", "msbuild");
+        buildProject.AddFile(new InMemoryProjectFile(
+            "Build.cs",
+            "using Nuke.Common; class Build : NukeBuild { }",
+            ProjectFileKind.CSharp));
+        var appProject = new InMemoryProject("App", "App", "msbuild");
+        var xamlFile = appProject.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        solution.Projects.Add(buildProject);
+        solution.Projects.Add(appProject);
+        var viewModel = new MainViewModel(null);
+        var method = typeof(MainViewModel).GetMethod(
+            "LoadSolution",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        method.Invoke(viewModel, new object[] { solution });
+
+        Assert.Same(appProject, viewModel.ActiveProject);
+        Assert.Same(xamlFile, viewModel.ActiveXamlFile);
+    }
+
+    [Fact]
+    public void LoadSolution_ResetsEditorDocumentsForCodeOnlyWorkspace()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var buildProject = new InMemoryProject("_build", "_build", "msbuild");
+        var buildFile = buildProject.AddFile(new InMemoryProjectFile(
+            "Build.cs",
+            "using Nuke.Common; class Build : NukeBuild { }",
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(buildProject);
+        var viewModel = new MainViewModel(null);
+
+        LoadSolutionIntoViewModel(viewModel, solution);
+
+        var root = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        var editorDock = Assert.Single(Enumerate(root).OfType<IDocumentDock>(), static dock => dock.Id == "Editors");
+        var document = Assert.Single(editorDock.VisibleDockables!.OfType<WorkspaceFileDocumentDockViewModel>());
+        Assert.Same(buildFile, document.File);
+        Assert.Same(buildProject, viewModel.ActiveProject);
+        Assert.Same(buildFile, viewModel.ActiveWorkspaceFile);
+        Assert.Same(buildFile, viewModel.ActiveCodeFile);
+        Assert.Null(viewModel.ActiveXamlFile);
+    }
+
+    [Fact]
+    public void LoadSolution_CollapsesSolutionExplorerBelowRootChildren()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var appProject = new InMemoryProject("App", "App", "msbuild");
+        appProject.AddFile(new InMemoryProjectFile(
+            "App.axaml",
+            "<Application xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        appProject.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        appProject.AddFile(new InMemoryProjectFile(
+            "Views/Nested/DetailsView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        solution.Projects.Add(appProject);
+        var viewModel = new MainViewModel(null);
+        var method = typeof(MainViewModel).GetMethod(
+            "LoadSolution",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        method.Invoke(viewModel, new object[] { solution });
+
+        var solutionNode = Assert.Single(viewModel.SolutionExplorerNodes);
+        var projectNode = Assert.Single(solutionNode.Children);
+        var viewsNode = Assert.Single(projectNode.Children, static node => node.Title == "Views");
+        var nestedNode = Assert.Single(viewsNode.Children, static node => node.Title == "Nested");
+
+        Assert.True(solutionNode.IsExpanded);
+        Assert.True(projectNode.IsExpanded);
+        Assert.False(viewsNode.IsExpanded);
+        Assert.False(nestedNode.IsExpanded);
+    }
+
+    [Fact]
+    public void RemotePreviewProjectPath_UsesProjectRelativeWorkspaceFilePath()
+    {
+        var projectDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"XamlPlaygroundRemotePath-{Guid.NewGuid():N}",
+            "samples",
+            "DataGridSample");
+        var xamlFilePath = Path.Combine(projectDirectory, "Pages", "AddDeleteRowsPage.axaml");
+        var method = typeof(MainViewModel).GetMethod(
+            "BuildRemotePreviewXamlProjectPath",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var relative = Assert.IsType<string>(method.Invoke(
+            null,
+            new object?[] { "Pages/AddDeleteRowsPage.axaml", projectDirectory }));
+        var absolute = Assert.IsType<string>(method.Invoke(
+            null,
+            new object?[]
+            {
+                xamlFilePath,
+                projectDirectory
+            }));
+
+        Assert.Equal("/Pages/AddDeleteRowsPage.axaml", relative);
+        Assert.Equal("/Pages/AddDeleteRowsPage.axaml", absolute);
+    }
+
+    [Fact]
+    public void WorkspacePreviewTargetAssemblyResolution_FindsPreferredBinOutputWhenRoslynPathIsMissing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewTarget-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var net8Output = Path.Combine(projectDirectory, "bin", "Debug", "net8.0", "SampleApp.dll");
+        var net10Output = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(net8Output)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(net10Output)!);
+            File.WriteAllBytes(net8Output, CompileTestAssemblyImage("SampleApp", "public sealed class Older { }"));
+            File.WriteAllBytes(net10Output, CompileTestAssemblyImage("SampleApp", "public sealed class Preferred { }"));
+            var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                TargetFramework = null,
+                IsMsBuildWorkspace = true
+            };
+            var method = typeof(MainViewModel).GetMethod(
+                "ResolveWorkspaceTargetAssemblyPath",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var resolved = Assert.IsType<string>(method.Invoke(null, new object[] { project, true, false }));
+
+            Assert.Equal(net10Output, resolved);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void WorkspacePreviewTargetAssemblyResolution_PrefersNewestOutputWhenCachedPathIsIgnored()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundPreviewTargetRefresh-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var oldOutput = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        var newOutput = Path.Combine(projectDirectory, "bin", "Debug", "net8.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(oldOutput)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(newOutput)!);
+            File.WriteAllBytes(oldOutput, CompileTestAssemblyImage("SampleApp", "public sealed class OldOutput { }"));
+            File.WriteAllBytes(newOutput, CompileTestAssemblyImage("SampleApp", "public sealed class NewOutput { }"));
+            var oldTime = DateTime.UtcNow.AddMinutes(-10);
+            var newTime = DateTime.UtcNow.AddMinutes(10);
+            File.SetLastWriteTimeUtc(oldOutput, oldTime);
+            File.SetLastWriteTimeUtc(newOutput, newTime);
+
+            var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                OutputAssemblyPath = oldOutput,
+                TargetFramework = "net10.0",
+                IsMsBuildWorkspace = true
+            };
+            var method = typeof(MainViewModel).GetMethod(
+                "ResolveWorkspaceTargetAssemblyPath",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var cached = Assert.IsType<string>(method.Invoke(null, new object[] { project, true, false }));
+            var refreshed = Assert.IsType<string>(method.Invoke(null, new object[] { project, false, true }));
+
+            Assert.Equal(oldOutput, cached);
+            Assert.Equal(newOutput, refreshed);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void RemotePreviewDecision_UsesWorkspaceRuntimeReferencesWhenOutputIsMissing()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundRemoteReferenceDecision-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        var workspaceControlsPath = Path.Combine(root, "packages", "Avalonia.Controls.dll");
+        try
+        {
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(Path.GetDirectoryName(workspaceControlsPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllBytes(
+                workspaceControlsPath,
+                CompileTestAssemblyImage("Avalonia.Controls", "public sealed class WorkspaceAvaloniaControlsMarker { }"));
+
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                IsMsBuildWorkspace = true
+            };
+            var reference = WorkspaceAssemblyReference.FromPath(workspaceControlsPath, isRuntimeAssembly: true);
+            Assert.NotNull(reference);
+            project.AssemblyReferences.Add(reference);
+            var method = typeof(MainViewModel).GetMethod(
+                "ShouldUseRemoteWorkspacePreview",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object?[] { project })!);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void WorkspaceOutputAssemblyFreshness_DetectsSourceNewerThanOutput()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundOutputFreshness-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        var sourcePath = Path.Combine(projectDirectory, "ViewModel.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(sourcePath, "public sealed class ViewModel { }");
+            File.WriteAllText(outputPath, "not a real assembly");
+
+            var oldTime = DateTime.UtcNow.AddMinutes(-10);
+            var newTime = DateTime.UtcNow.AddMinutes(10);
+            File.SetLastWriteTimeUtc(outputPath, oldTime);
+            File.SetLastWriteTimeUtc(sourcePath, newTime);
+
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                OutputAssemblyPath = outputPath,
+                IsMsBuildWorkspace = true
+            };
+            project.AddFile(new InMemoryProjectFile(
+                "ViewModel.cs",
+                "public sealed class ViewModel { }",
+                ProjectFileKind.CSharp,
+                sourcePath: sourcePath));
+            var method = typeof(MainViewModel).GetMethod(
+                "ShouldBuildWorkspaceProjectBeforeUsingOutput",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object[] { project })!);
+
+            File.SetLastWriteTimeUtc(sourcePath, oldTime.AddMinutes(-1));
+
+            Assert.False((bool)method.Invoke(null, new object[] { project })!);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WorkspaceOutputAssemblyFreshness_DoesNotTreatDirtyBuffersAsBuildableStaleness()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundDirtyOutputFreshness-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        var sourcePath = Path.Combine(projectDirectory, "ViewModel.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(sourcePath, "public sealed class ViewModel { }");
+            File.WriteAllText(outputPath, "not a real assembly");
+
+            var outputTime = DateTime.UtcNow.AddMinutes(10);
+            var sourceTime = DateTime.UtcNow.AddMinutes(-10);
+            File.SetLastWriteTimeUtc(outputPath, outputTime);
+            File.SetLastWriteTimeUtc(sourcePath, sourceTime);
+
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                OutputAssemblyPath = outputPath,
+                IsMsBuildWorkspace = true
+            };
+            var codeFile = project.AddFile(new InMemoryProjectFile(
+                "ViewModel.cs",
+                "public sealed class ViewModel { }",
+                ProjectFileKind.CSharp,
+                sourcePath: sourcePath));
+            var method = typeof(MainViewModel).GetMethod(
+                "ShouldBuildWorkspaceProjectBeforeUsingOutput",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            codeFile.IsDirty = true;
+            Assert.False((bool)method.Invoke(null, new object[] { project })!);
+
+            codeFile.MarkClean();
+            Assert.False((bool)method.Invoke(null, new object[] { project })!);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public async Task WorkspaceOutputFallback_DoesNotBuildFromDirtyBuffers()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundDirtyOutputFallback-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        try
+        {
+            Directory.CreateDirectory(projectDirectory);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                IsMsBuildWorkspace = true
+            };
+            var xamlFile = project.AddFile(new InMemoryProjectFile(
+                "MainWindow.axaml",
+                "<Window xmlns=\"https://github.com/avaloniaui\" />",
+                ProjectFileKind.Xaml));
+            var codeFile = project.AddFile(new InMemoryProjectFile(
+                "MainWindow.axaml.cs",
+                "public partial class MainWindow { }",
+                ProjectFileKind.CSharp,
+                sourcePath: Path.Combine(projectDirectory, "MainWindow.axaml.cs")));
+            codeFile.IsDirty = true;
+            var viewModel = new MainViewModel(null);
+            var method = typeof(MainViewModel).GetMethod(
+                "TryUseWorkspaceOutputAssemblyFallbackAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var task = Assert.IsAssignableFrom<Task>(method.Invoke(
+                viewModel,
+                new object?[]
+                {
+                    project,
+                    Array.Empty<WorkspaceAssemblyReference>(),
+                    "compile failed",
+                    xamlFile
+                }));
+            await task;
+            var result = task.GetType().GetProperty("Result")?.GetValue(task);
+            Assert.NotNull(result);
+            var success = Assert.IsType<bool>(result.GetType().GetProperty("Success")?.GetValue(result));
+            var diagnosticsMessage = Assert.IsType<string>(
+                result.GetType().GetProperty("DiagnosticsMessage")?.GetValue(result));
+
+            Assert.False(success);
+            Assert.Contains("Save MainWindow.axaml.cs", diagnosticsMessage, StringComparison.Ordinal);
+            Assert.Contains("Unsaved code, project, or resource changes", diagnosticsMessage, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void WorkspaceDirtyBuildInputDetection_IgnoresActiveXamlButFindsDirtyCode()
+    {
+        var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", "SampleApp.csproj")
+        {
+            IsMsBuildWorkspace = true
+        };
+        var xamlFile = project.AddFile(new InMemoryProjectFile(
+            "MainWindow.axaml",
+            "<Window xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        var codeFile = project.AddFile(new InMemoryProjectFile(
+            "MainWindow.axaml.cs",
+            "public partial class MainWindow { }",
+            ProjectFileKind.CSharp));
+        var method = typeof(MainViewModel).GetMethod(
+            "TryGetDirtyWorkspaceBuildInput",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        xamlFile.IsDirty = true;
+        var activeXamlOnly = new object?[] { project, xamlFile, null };
+        Assert.False((bool)method.Invoke(null, activeXamlOnly)!);
+        Assert.Null(activeXamlOnly[2]);
+
+        codeFile.IsDirty = true;
+        var dirtyCode = new object?[] { project, xamlFile, null };
+        Assert.True((bool)method.Invoke(null, dirtyCode)!);
+        Assert.Same(codeFile, dirtyCode[2]);
+    }
+
+    [Fact]
+    public void WorkspaceBuildRestoreRequirement_DetectsProjectFileNewerThanOutput()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundBuildRestore-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        var sourcePath = Path.Combine(projectDirectory, "ViewModel.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(sourcePath, "public sealed class ViewModel { }");
+            File.WriteAllText(outputPath, "not a real assembly");
+
+            var oldTime = DateTime.UtcNow.AddMinutes(-10);
+            var newTime = DateTime.UtcNow.AddMinutes(10);
+            File.SetLastWriteTimeUtc(outputPath, oldTime);
+            File.SetLastWriteTimeUtc(projectPath, newTime);
+            File.SetLastWriteTimeUtc(sourcePath, newTime);
+
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                OutputAssemblyPath = outputPath,
+                IsMsBuildWorkspace = true
+            };
+            project.AddFile(new InMemoryProjectFile(
+                "SampleApp.csproj",
+                "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+                ProjectFileKind.ProjectFile,
+                sourcePath: projectPath));
+            project.AddFile(new InMemoryProjectFile(
+                "ViewModel.cs",
+                "public sealed class ViewModel { }",
+                ProjectFileKind.CSharp,
+                sourcePath: sourcePath));
+            var method = typeof(MainViewModel).GetMethod(
+                "ShouldRestoreWorkspaceProjectBeforeBuild",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object[] { project })!);
+
+            File.SetLastWriteTimeUtc(projectPath, oldTime.AddMinutes(-1));
+
+            Assert.False((bool)method.Invoke(null, new object[] { project })!);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void DotNetBuildStartInfo_OmitsNoRestoreWhenRestoreIsRequired()
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "CreateDotNetBuildStartInfo",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var noRestore = Assert.IsType<System.Diagnostics.ProcessStartInfo>(
+            method.Invoke(null, new object[] { "App.csproj", true }));
+        var restore = Assert.IsType<System.Diagnostics.ProcessStartInfo>(
+            method.Invoke(null, new object[] { "App.csproj", false }));
+
+        Assert.Contains("--no-restore", noRestore.ArgumentList);
+        Assert.DoesNotContain("--no-restore", restore.ArgumentList);
+    }
+
+    [Fact]
+    public void RemotePreview_DisablesLocalVisualEditorOverlay()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null)
+        {
+            VisualEditorDesignerMode = true
+        };
+
+        Assert.True(viewModel.IsVisualEditorOverlayActive);
+
+        viewModel.IsRemotePreviewActive = true;
+
+        Assert.False(viewModel.IsVisualEditorOverlayActive);
+        Assert.False(viewModel.VisualEditorPreviewContentHitTestVisible);
+    }
+
+    [Fact]
+    public void LoadSolution_StopsRemotePreviewState()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var project = new InMemoryProject("App", "App", "msbuild");
+        project.AddFile(new InMemoryProjectFile(
+            "Main.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        solution.Projects.Add(project);
+        var viewModel = new MainViewModel(null)
+        {
+            IsRemotePreviewActive = true
+        };
+
+        LoadSolutionIntoViewModel(viewModel, solution);
+
+        Assert.False(viewModel.IsRemotePreviewActive);
+        Assert.Null(viewModel.RemotePreviewBitmap);
+    }
+
+    [Fact]
+    public void LoadSolution_UnloadsPreviousInProcessPreviewAndClearsDiagnosticsRoot()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var project = new InMemoryProject("Build", "Build", "msbuild");
+        project.AddFile(new InMemoryProjectFile(
+            "Build.cs",
+            "public sealed class Build { }",
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(project);
+        var viewModel = new MainViewModel(null)
+        {
+            Control = new Button(),
+            EnableAutoRun = false
+        };
+        viewModel.DiagnosticsRoot = viewModel.Control;
+        var context = new AssemblyLoadContext("PreviousPreviewTest", isCollectible: true);
+        var scopeType = typeof(MainViewModel).GetNestedType(
+            "WorkspacePreviewAssemblyScope",
+            BindingFlags.NonPublic);
+        Assert.NotNull(scopeType);
+        var scope = Activator.CreateInstance(
+            scopeType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null,
+            args: new object?[] { null, context, Array.Empty<Assembly>() },
+            culture: null);
+        Assert.NotNull(scope);
+        var previousField = typeof(MainViewModel).GetField(
+            "_previous",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(previousField);
+        previousField.SetValue(viewModel, scope);
+
+        LoadSolutionIntoViewModel(viewModel, solution);
+
+        Assert.Null(previousField.GetValue(viewModel));
+        Assert.Null(viewModel.Control);
+        Assert.Null(viewModel.DiagnosticsRoot);
+    }
+
+    [Fact]
+    public void ActivateWorkspaceFileFromDocument_DoesNotPreviewPreviousProjectXamlAgainstCodeOnlyProject()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var appProject = new InMemoryProject("App", "App", "msbuild");
+        var xamlFile = appProject.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        var buildProject = new InMemoryProject("_build", "_build", "msbuild");
+        var buildFile = buildProject.AddFile(new InMemoryProjectFile(
+            "Build.cs",
+            "using Nuke.Common; class Build : NukeBuild { }",
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(appProject);
+        solution.Projects.Add(buildProject);
+        var viewModel = new MainViewModel(null);
+        var method = typeof(MainViewModel).GetMethod(
+            "LoadSolution",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method.Invoke(viewModel, new object[] { solution });
+        Assert.Same(xamlFile, viewModel.ActiveXamlFile);
+
+        var activateMethod = typeof(MainViewModel).GetMethod(
+            "ActivateWorkspaceFileFromDocument",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(activateMethod);
+        activateMethod.Invoke(viewModel, new object[] { buildFile });
+
+        Assert.Same(buildProject, viewModel.ActiveProject);
+        Assert.Same(buildFile, viewModel.ActiveCodeFile);
+        Assert.Null(viewModel.ActiveXamlFile);
     }
 
     [Fact]
@@ -792,6 +2586,391 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task CompilerService_UsesWorkspaceReferenceAssembliesWithoutRuntimeReferenceMixing()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var systemRuntimeReference = WorkspaceAssemblyReference.FromPath(
+            GetNetCoreReferenceAssemblyPath("System.Runtime"),
+            isRuntimeAssembly: true);
+        Assert.NotNull(systemRuntimeReference);
+        Assert.True(systemRuntimeReference.IsReferenceAssembly);
+
+        const string code = """
+            using System.Reflection;
+
+            [assembly: AssemblyTitle("WorkspaceCompile")]
+
+            public sealed class WorkspaceType
+            {
+                public string Name { get; } = "Demo";
+            }
+            """;
+
+        var result = await CompilerService.GetProjectAssembly(
+            "WorkspaceCompile",
+            new[] { ("WorkspaceType.cs", code) },
+            new[] { systemRuntimeReference },
+            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp12),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                .WithNullableContextOptions(NullableContextOptions.Enable));
+
+        Assert.DoesNotContain(result.Diagnostics, static diagnostic =>
+            diagnostic.Id is "CS0433" or "CS0518" or "CS8021" or "CS8632");
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+    }
+
+    [Fact]
+    public async Task CompilerService_LoadsWorkspaceRuntimeReferencesInIsolatedContext()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var dependencyName = "WorkspaceDependency" + Guid.NewGuid().ToString("N");
+        var consumerName = "WorkspaceConsumer" + Guid.NewGuid().ToString("N");
+        var dependencyImage = CompileTestAssemblyImage(
+            dependencyName,
+            """
+            namespace WorkspaceDependency;
+
+            public sealed class WorkspaceDependencyType
+            {
+                public string Value { get; } = "Isolated";
+            }
+            """);
+        var dependencyReference = WorkspaceAssemblyReference.FromImage(
+            dependencyName + ".dll",
+            dependencyImage,
+            isRuntimeAssembly: true);
+        Assert.NotNull(dependencyReference);
+
+        var result = await CompilerService.GetProjectAssembly(
+            consumerName,
+            new[]
+            {
+                (Path: "Consumer.cs", Text: """
+                    using WorkspaceDependency;
+
+                    public sealed class WorkspaceConsumerType
+                    {
+                        public WorkspaceDependencyType Dependency { get; } = new();
+                    }
+                    """)
+            },
+            new[] { dependencyReference },
+            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp12),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+        Assert.NotNull(result.Context);
+        Assert.NotSame(AssemblyLoadContext.Default, result.Context);
+
+        var dependencyAssembly = Assert.Single(
+            result.LoadedAssemblies,
+            assembly => string.Equals(assembly.GetName().Name, dependencyName, StringComparison.Ordinal));
+        Assert.Same(result.Context, AssemblyLoadContext.GetLoadContext(dependencyAssembly));
+        Assert.DoesNotContain(AssemblyLoadContext.Default.Assemblies, assembly =>
+            string.Equals(assembly.GetName().Name, dependencyName, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WorkspaceAssemblyLoadContext_SharesAvaloniaAssembliesWithHost()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var avaloniaControlsReference = WorkspaceAssemblyReference.FromPath(
+            typeof(Control).Assembly.Location,
+            isRuntimeAssembly: true);
+        Assert.NotNull(avaloniaControlsReference);
+        var context = new WorkspaceAssemblyLoadContext(
+            "WorkspaceIsolationTest",
+            new[] { avaloniaControlsReference });
+
+        var loadedAssembly = context.LoadAssemblyReference(avaloniaControlsReference);
+
+        Assert.Same(typeof(Control).Assembly, loadedAssembly);
+        context.Unload();
+    }
+
+    [Fact]
+    public void WorkspaceAssemblyLoadContext_DoesNotShareAvaloniaNamedPrivateAssembliesWithHost()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var hostDataGridAssembly = typeof(DataGrid).Assembly;
+        Assert.Equal("Avalonia.Controls.DataGrid", hostDataGridAssembly.GetName().Name);
+        Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(hostDataGridAssembly));
+
+        var workspaceImage = CompileVersionedPreviewDependencyImage(
+            "Avalonia.Controls.DataGrid",
+            "42.0.0.0",
+            "Workspace private DataGrid dependency");
+        var workspaceReference = WorkspaceAssemblyReference.FromImage(
+            "Avalonia.Controls.DataGrid.dll",
+            workspaceImage,
+            isRuntimeAssembly: true);
+        Assert.NotNull(workspaceReference);
+        var context = new WorkspaceAssemblyLoadContext(
+            "WorkspaceIsolationTest",
+            new[] { workspaceReference });
+
+        var loadedAssembly = context.LoadAssemblyReference(workspaceReference);
+
+        Assert.NotNull(loadedAssembly);
+        Assert.NotSame(hostDataGridAssembly, loadedAssembly);
+        Assert.Equal("Avalonia.Controls.DataGrid", loadedAssembly.GetName().Name);
+        Assert.Equal(new Version(42, 0, 0, 0), loadedAssembly.GetName().Version);
+        Assert.Same(context, AssemblyLoadContext.GetLoadContext(loadedAssembly));
+        context.Unload();
+    }
+
+    [Fact]
+    public async Task RuntimePreview_LoadsDifferentAvaloniaNamedDependencyVersionsPerProjectAndUpdatesDevToolsRoot()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var hostDataGridAssembly = typeof(DataGrid).Assembly;
+        Assert.Equal("Avalonia.Controls.DataGrid", hostDataGridAssembly.GetName().Name);
+        Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(hostDataGridAssembly));
+
+        var firstProject = CreateVersionedPreviewProject(
+            "WorkspacePreviewOne",
+            "Project one dependency",
+            "10.0.0.0");
+        var secondProject = CreateVersionedPreviewProject(
+            "WorkspacePreviewTwo",
+            "Project two dependency",
+            "20.0.0.0");
+        var firstResult = await CompileVersionedPreviewProjectAsync(firstProject);
+        var secondResult = await CompileVersionedPreviewProjectAsync(secondProject);
+
+        try
+        {
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                var solution = new InMemorySolution("WorkspaceIsolationIntegration");
+                solution.Projects.Add(firstProject.Project);
+                solution.Projects.Add(secondProject.Project);
+                var viewModel = new MainViewModel(null)
+                {
+                    EnableAutoRun = false
+                };
+                LoadSolutionIntoViewModel(viewModel, solution);
+
+                ActivateWorkspaceFile(viewModel, firstProject.XamlFile);
+                ShowPreviewForDevTools(viewModel, LoadVersionedPreviewControl(firstProject, firstResult));
+                var firstAssembly = AssertPreviewAndDevToolsAccess(
+                    viewModel,
+                    firstProject.ExpectedText,
+                    firstProject.ExpectedVersion);
+
+                ActivateWorkspaceFile(viewModel, secondProject.XamlFile);
+                ShowPreviewForDevTools(viewModel, LoadVersionedPreviewControl(secondProject, secondResult));
+                var secondAssembly = AssertPreviewAndDevToolsAccess(
+                    viewModel,
+                    secondProject.ExpectedText,
+                    secondProject.ExpectedVersion);
+
+                Assert.NotSame(firstAssembly, secondAssembly);
+                Assert.NotSame(
+                    AssemblyLoadContext.GetLoadContext(firstAssembly),
+                    AssemblyLoadContext.GetLoadContext(secondAssembly));
+                Assert.Same(hostDataGridAssembly, typeof(DataGrid).Assembly);
+            });
+        }
+        finally
+        {
+            firstResult.Context?.Unload();
+            secondResult.Context?.Unload();
+        }
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_EmitsProjectReferencesFromSourceWhenOutputIsMissingOrStale()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var workspace = new AdhocWorkspace();
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundProjectReference-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "Referenced");
+        var sourcePath = Path.Combine(projectDirectory, "ReferencedType.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "Referenced.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(sourcePath, "public sealed class ReferencedType { }");
+
+            var referencedId = ProjectId.CreateNewId("Referenced");
+            var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
+                referencedId,
+                VersionStamp.Create(),
+                "Referenced",
+                "Referenced",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(projectDirectory, "Referenced.csproj"),
+                outputFilePath: outputPath));
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(referencedId),
+                "ReferencedType.cs",
+                Microsoft.CodeAnalysis.Text.SourceText.From("public sealed class ReferencedType { }"),
+                filePath: sourcePath);
+            Assert.True(workspace.TryApplyChanges(solution));
+            var referencedProject = workspace.CurrentSolution.GetProject(referencedId);
+            Assert.NotNull(referencedProject);
+            var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "ShouldEmitProjectReferenceFromSource",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object[] { referencedProject })!);
+
+            File.WriteAllText(outputPath, "not a real assembly");
+            File.SetLastWriteTimeUtc(sourcePath, DateTime.UtcNow.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(outputPath, DateTime.UtcNow);
+            Assert.False((bool)method.Invoke(null, new object[] { referencedProject })!);
+
+            File.SetLastWriteTimeUtc(sourcePath, DateTime.UtcNow.AddMinutes(10));
+            Assert.True((bool)method.Invoke(null, new object[] { referencedProject })!);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_SourceEmitDuringLoadTracksMissingOrStaleOutputs()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var workspace = new AdhocWorkspace();
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundProjectReference-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "Referenced");
+        var sourcePath = Path.Combine(projectDirectory, "ReferencedType.cs");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "Referenced.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(sourcePath, "public sealed class ReferencedType { }");
+            File.WriteAllText(outputPath, "not a real assembly");
+            File.SetLastWriteTimeUtc(sourcePath, DateTime.UtcNow.AddMinutes(10));
+
+            var referencedId = ProjectId.CreateNewId("Referenced");
+            var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
+                referencedId,
+                VersionStamp.Create(),
+                "Referenced",
+                "Referenced",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(projectDirectory, "Referenced.csproj"),
+                outputFilePath: outputPath));
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(referencedId),
+                "ReferencedType.cs",
+                Microsoft.CodeAnalysis.Text.SourceText.From("public sealed class ReferencedType { }"),
+                filePath: sourcePath);
+            Assert.True(workspace.TryApplyChanges(solution));
+            var referencedProject = workspace.CurrentSolution.GetProject(referencedId);
+            Assert.NotNull(referencedProject);
+            var runtimeReference = WorkspaceAssemblyReference.FromPath(typeof(object).Assembly.Location, isRuntimeAssembly: true);
+            Assert.NotNull(runtimeReference);
+            var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "ShouldEmitProjectReferenceFromSourceDuringLoad",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            Assert.True((bool)method.Invoke(null, new object?[] { referencedProject, null })!);
+            Assert.True((bool)method.Invoke(null, new object?[] { referencedProject, runtimeReference })!);
+
+            File.SetLastWriteTimeUtc(sourcePath, DateTime.UtcNow.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(outputPath, DateTime.UtcNow);
+            Assert.False((bool)method.Invoke(null, new object?[] { referencedProject, runtimeReference })!);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_FindsExistingSiblingOutputWhenExactTargetOutputIsMissing()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var workspace = new AdhocWorkspace();
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundProjectReference-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "Referenced");
+        var requestedOutputPath = Path.Combine(projectDirectory, "bin", "Debug", "net8.0", "Referenced.dll");
+        var existingOutputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "Referenced.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(existingOutputPath)!);
+            File.WriteAllBytes(
+                existingOutputPath,
+                CompileTestAssemblyImage(
+                    "Referenced",
+                    "public sealed class ReferencedType { }"));
+
+            var referencedId = ProjectId.CreateNewId("Referenced");
+            var solution = workspace.CurrentSolution.AddProject(ProjectInfo.Create(
+                referencedId,
+                VersionStamp.Create(),
+                "Referenced",
+                "Referenced",
+                LanguageNames.CSharp,
+                filePath: Path.Combine(projectDirectory, "Referenced.csproj"),
+                outputFilePath: requestedOutputPath));
+            Assert.True(workspace.TryApplyChanges(solution));
+            var referencedProject = workspace.CurrentSolution.GetProject(referencedId);
+            Assert.NotNull(referencedProject);
+            var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+                "GetProjectOutputReference",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+
+            var reference = Assert.IsType<WorkspaceAssemblyReference>(method.Invoke(null, new object[] { referencedProject }));
+
+            Assert.Equal(existingOutputPath, reference.FilePath);
+            Assert.Equal("Referenced", reference.Name);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MsBuildWorkspaceLoader_SuppressesNuGetAuditVulnerabilityWorkspaceDiagnostics()
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "ShouldReportWorkspaceDiagnosticMessage",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        Assert.False((bool)method.Invoke(
+            null,
+            new object?[]
+            {
+                "Msbuild failed when processing the file 'App.csproj' with message: Package 'Tmds.DBus.Protocol' 0.90.3 has a known high severity vulnerability, https://github.com/advisories/GHSA-xrw6-gwf8-vvr9"
+            })!);
+        Assert.True((bool)method.Invoke(
+            null,
+            new object?[] { "Msbuild failed when processing the file 'App.csproj' with message: The SDK 'Missing.Sdk' specified could not be found." })!);
+    }
+
+    [Fact]
     public void DockLayout_CreatesExpectedWorkspacePanes()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -804,7 +2983,8 @@ public sealed class MainViewModelTests
 
         var dockables = Enumerate(root).ToList();
         var documents = dockables.OfType<WorkspaceFileDocumentDockViewModel>().ToList();
-        var solutionExplorer = Assert.Single(dockables.OfType<SolutionExplorerDockViewModel>());
+        var solutionExplorer = Assert.Single(dockables.Where(static dockable => dockable.GetType() == typeof(SolutionExplorerDockViewModel)).Cast<SolutionExplorerDockViewModel>());
+        var msBuildWorkspace = Assert.Single(dockables.OfType<MsBuildWorkspaceDockViewModel>());
         var visualStructure = Assert.Single(dockables.OfType<VisualStructureDockViewModel>());
         var visualProperties = Assert.Single(dockables.OfType<VisualPropertiesDockViewModel>());
         var visualToolbox = Assert.Single(dockables.OfType<VisualToolboxDockViewModel>());
@@ -829,6 +3009,7 @@ public sealed class MainViewModelTests
                 Assert.Equal("Main.axaml.cs", document.File.Path);
             });
         Assert.Same(viewModel, solutionExplorer.Shell);
+        Assert.Same(viewModel, msBuildWorkspace.Shell);
         Assert.Same(viewModel, visualStructure.Shell);
         Assert.Same(viewModel, visualProperties.Shell);
         Assert.Same(viewModel, visualToolbox.Shell);
@@ -856,6 +3037,7 @@ public sealed class MainViewModelTests
         Assert.NotNull(factory.ContextLocator);
         var contextLocator = factory.ContextLocator;
         Assert.Same(solutionExplorer, contextLocator["SolutionExplorer"]());
+        Assert.Same(msBuildWorkspace, contextLocator["MsBuildWorkspace"]());
         Assert.Same(visualStructure, contextLocator["VisualStructure"]());
         Assert.Same(visualProperties, contextLocator["VisualProperties"]());
         Assert.Same(visualToolbox, contextLocator["VisualToolbox"]());
@@ -2191,6 +4373,95 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void ProjectResources_LoadRelativeMergeResourceIncludesWithDocumentUri()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            const string paletteXaml = """
+                                       <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                           xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                         <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+                                       </ResourceDictionary>
+                                       """;
+            const string resourcesXaml = """
+                                         <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                           <ResourceDictionary.MergedDictionaries>
+                                             <MergeResourceInclude Source="Palette.axaml" />
+                                           </ResourceDictionary.MergedDictionaries>
+                                         </ResourceDictionary>
+                                         """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+            try
+            {
+                RuntimeXamlPreviewLoader.ApplyProjectResources(
+                    new[]
+                    {
+                        ("Themes/Resources.axaml", resourcesXaml),
+                        ("Themes/Palette.axaml", paletteXaml)
+                    },
+                    localAssembly: null,
+                    diagnostics,
+                    documentAssemblyName: "DemoApp");
+
+                Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+            }
+            finally
+            {
+                RuntimeXamlPreviewLoader.ApplyProjectResources(
+                    Array.Empty<(string Path, string Text)>(),
+                    localAssembly: null,
+                    new List<RuntimeXamlDiagnostic>());
+            }
+        });
+    }
+
+    [Fact]
+    public void RuntimePreview_LoadsControlWithRelativeResourceIncludeFromWorkspaceResources()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            const string colorsXaml = """
+                                      <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                        <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+                                      </ResourceDictionary>
+                                      """;
+            const string viewXaml = """
+                                    <UserControl xmlns="https://github.com/avaloniaui"
+                                                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                      <UserControl.Resources>
+                                        <ResourceDictionary>
+                                          <ResourceDictionary.MergedDictionaries>
+                                            <ResourceInclude Source="Resources/Colors.axaml" />
+                                          </ResourceDictionary.MergedDictionaries>
+                                        </ResourceDictionary>
+                                      </UserControl.Resources>
+                                      <Border Name="RootBorder" Background="{StaticResource AccentBrush}" />
+                                    </UserControl>
+                                    """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+
+            var preview = RuntimeXamlPreviewLoader.LoadControl(
+                viewXaml,
+                localAssembly: null,
+                fallbackRootTypeName: null,
+                documentName: "Views/MainView.axaml",
+                diagnostics,
+                resourceFiles: new[] { ("Views/Resources/Colors.axaml", colorsXaml) },
+                documentAssemblyName: "DemoApp");
+
+            Assert.NotNull(preview);
+            Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+        });
+    }
+
+    [Fact]
     public void CreateCustomControlThemeCommand_CreatesThemeFromSelectedFluentTemplateWithoutPreviewSelection()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -2929,6 +5200,217 @@ public sealed class MainViewModelTests
         return new ThemeProjectSource(project, "Material-like source", SourceRoot: null);
     }
 
+    private static VersionedPreviewProject CreateVersionedPreviewProject(
+        string projectName,
+        string expectedText,
+        string dependencyVersion)
+    {
+        var dependencyImage = CompileVersionedPreviewDependencyImage(
+            "Avalonia.Controls.DataGrid",
+            dependencyVersion,
+            expectedText);
+        var dependencyReference = WorkspaceAssemblyReference.FromImage(
+            "Avalonia.Controls.DataGrid.dll",
+            dependencyImage,
+            isRuntimeAssembly: true);
+        Assert.NotNull(dependencyReference);
+
+        var project = new InMemoryProject(projectName, projectName, "integration")
+        {
+            AssemblyName = projectName,
+            CSharpParseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp12),
+            CSharpCompilationOptions = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        };
+        project.AssemblyReferences.Add(dependencyReference);
+        var xamlFile = project.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            """
+            <UserControl xmlns="https://github.com/avaloniaui"
+                         xmlns:collision="clr-namespace:WorkspaceCollisionControls;assembly=Avalonia.Controls.DataGrid">
+              <collision:VersionedTextBlock />
+            </UserControl>
+            """,
+            ProjectFileKind.Xaml));
+        project.AddFile(new InMemoryProjectFile(
+            "PreviewReference.cs",
+            """
+            using WorkspaceCollisionControls;
+
+            namespace WorkspacePreview;
+
+            public static class PreviewReference
+            {
+                public static string Text => VersionedTextBlock.VersionText;
+            }
+            """,
+            ProjectFileKind.CSharp));
+
+        return new VersionedPreviewProject(
+            project,
+            xamlFile,
+            expectedText,
+            Version.Parse(dependencyVersion));
+    }
+
+    private static byte[] CompileVersionedPreviewDependencyImage(
+        string assemblyName,
+        string version,
+        string text)
+    {
+        var escapedText = text.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+        return CompileTestAssemblyImage(
+            assemblyName,
+            $$"""
+            using System.Reflection;
+            using Avalonia.Controls;
+
+            [assembly: AssemblyVersion("{{version}}")]
+
+            namespace WorkspaceCollisionControls;
+
+            public sealed class VersionedTextBlock : TextBlock
+            {
+                public VersionedTextBlock()
+                {
+                    Text = VersionText;
+                }
+
+                public static string VersionText => "{{escapedText}}";
+            }
+            """,
+            new[]
+            {
+                MetadataReference.CreateFromFile(typeof(Control).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(AvaloniaObject).Assembly.Location)
+            });
+    }
+
+    private static void LoadSolutionIntoViewModel(MainViewModel viewModel, InMemorySolution solution)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "LoadSolution",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method.Invoke(viewModel, new object[] { solution });
+    }
+
+    private static async Task AddStorageProjectReferencesForTestAsync(InMemorySolution solution)
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "AddStorageProjectReferencesAsync",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = Assert.IsAssignableFrom<Task>(method.Invoke(
+            null,
+            new object?[] { solution, null, CancellationToken.None }));
+        await task;
+    }
+
+    private static async Task AddRoslynReferencesForTestAsync(InMemoryProject inMemoryProject, Project project)
+    {
+        var method = typeof(MsBuildWorkspaceLoader).GetMethod(
+            "AddRoslynReferencesAsync",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = Assert.IsAssignableFrom<Task>(method.Invoke(
+            null,
+            new object?[] { inMemoryProject, project, null, CancellationToken.None }));
+        await task;
+    }
+
+    private static void ActivateWorkspaceFile(MainViewModel viewModel, InMemoryProjectFile file)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "ActivateWorkspaceFileFromDocument",
+            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(method);
+        method.Invoke(viewModel, new object[] { file });
+    }
+
+    private static async Task<ScriptCompilationResult> CompileVersionedPreviewProjectAsync(
+        VersionedPreviewProject project)
+    {
+        var result = await CompilerService.GetProjectAssembly(
+            project.Project.AssemblyName,
+            project.Project.GetCSharpFileSnapshot(),
+            project.Project.AssemblyReferences,
+            project.Project.CSharpParseOptions,
+            project.Project.CSharpCompilationOptions);
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+        Assert.NotNull(result.Assembly);
+        Assert.Contains(result.LoadedAssemblies, assembly =>
+            string.Equals(assembly.GetName().Name, "Avalonia.Controls.DataGrid", StringComparison.Ordinal) &&
+            assembly.GetName().Version == project.ExpectedVersion);
+        return result;
+    }
+
+    private static Control LoadVersionedPreviewControl(
+        VersionedPreviewProject project,
+        ScriptCompilationResult compilation)
+    {
+        var diagnostics = new List<RuntimeXamlDiagnostic>();
+        var control = RuntimeXamlPreviewLoader.LoadControl(
+            project.XamlFile.Text,
+            compilation.Assembly,
+            fallbackRootTypeName: null,
+            documentName: project.XamlFile.Path,
+            diagnostics: diagnostics,
+            documentAssemblyName: project.Project.AssemblyName);
+
+        Assert.NotNull(control);
+        Assert.DoesNotContain(diagnostics, static diagnostic => diagnostic.Severity >= RuntimeXamlDiagnosticSeverity.Error);
+        return control;
+    }
+
+    private static void ShowPreviewForDevTools(MainViewModel viewModel, Control control)
+    {
+        var root = new Border
+        {
+            Name = "GeneratedSampleScope",
+            Child = control
+        };
+        viewModel.Control = root;
+        viewModel.DiagnosticsRoot = root;
+    }
+
+    private static Assembly AssertPreviewAndDevToolsAccess(
+        MainViewModel viewModel,
+        string expectedText,
+        Version expectedVersion)
+    {
+        var root = Assert.IsType<Border>(viewModel.DiagnosticsRoot);
+        Assert.Same(root, viewModel.Control);
+        var preview = Assert.IsType<UserControl>(root.Child);
+        var versionedTextBlock = Assert.IsAssignableFrom<TextBlock>(preview.Content);
+        Assert.Equal(expectedText, versionedTextBlock.Text);
+
+        var previewAssembly = versionedTextBlock.GetType().Assembly;
+        Assert.Equal("Avalonia.Controls.DataGrid", previewAssembly.GetName().Name);
+        Assert.Equal(expectedVersion, previewAssembly.GetName().Version);
+        var previewContext = AssemblyLoadContext.GetLoadContext(previewAssembly);
+        Assert.NotNull(previewContext);
+        Assert.NotSame(AssemblyLoadContext.Default, previewContext);
+
+        var rootDock = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        var diagnosticTreeTools = Enumerate(rootDock).OfType<DiagnosticTreeDockViewModel>().ToArray();
+        Assert.NotEmpty(diagnosticTreeTools);
+        Assert.All(diagnosticTreeTools, tool =>
+        {
+            Assert.Same(root, tool.Session.Root);
+            Assert.All(
+                Enumerate(tool.DockLayout).OfType<DiagnosticSegmentDockViewModel>(),
+                segment => Assert.Same(root, segment.Session.Root));
+        });
+
+        var diagnosticTools = Enumerate(rootDock).OfType<DiagnosticToolDockViewModel>().ToArray();
+        Assert.NotEmpty(diagnosticTools);
+        Assert.All(diagnosticTools, tool => Assert.Same(root, tool.Shell.DiagnosticsRoot));
+
+        return previewAssembly;
+    }
+
     private static void PumpLayout(Window window)
     {
         Dispatcher.UIThread.RunJobs(DispatcherPriority.Loaded);
@@ -3067,6 +5549,11 @@ public sealed class MainViewModelTests
         }
     }
 
+    private static string GetRepositoryRoot([CallerFilePath] string sourcePath = "")
+    {
+        return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
+    }
+
     private static SolutionExplorerNodeViewModel? FindNode(
         IEnumerable<SolutionExplorerNodeViewModel> nodes,
         string title)
@@ -3100,6 +5587,230 @@ public sealed class MainViewModelTests
             }
         }
     }
+
+    private static string GetNetCoreReferenceAssemblyPath(string assemblyName)
+    {
+        var runtimeDirectory = new DirectoryInfo(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory());
+        var dotnetRoot = runtimeDirectory.Parent?.Parent?.Parent;
+        Assert.NotNull(dotnetRoot);
+
+        var referencePackRoot = Path.Combine(dotnetRoot.FullName, "packs", "Microsoft.NETCore.App.Ref");
+        Assert.True(Directory.Exists(referencePackRoot), $"Missing .NET reference pack directory: {referencePackRoot}");
+
+        var targetFrameworkFolder = $"ref/net{Environment.Version.Major}.0";
+        var path = Directory
+            .EnumerateFiles(referencePackRoot, assemblyName + ".dll", SearchOption.AllDirectories)
+            .Where(candidate => candidate.Replace('\\', '/').Contains(targetFrameworkFolder, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(static candidate => candidate, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        Assert.NotNull(path);
+        return path;
+    }
+
+    private static byte[] CompileTestAssemblyImage(
+        string assemblyName,
+        string code,
+        IEnumerable<MetadataReference>? additionalReferences = null)
+    {
+        var syntaxTree = SyntaxFactory.ParseSyntaxTree(
+            code,
+            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp12),
+            assemblyName + ".cs");
+        var references = new List<MetadataReference>
+        {
+            MetadataReference.CreateFromFile(GetNetCoreReferenceAssemblyPath("System.Runtime"))
+        };
+        if (additionalReferences is not null)
+        {
+            references.AddRange(additionalReferences);
+        }
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName,
+            new[] { syntaxTree },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        using var stream = new MemoryStream();
+        var result = compilation.Emit(stream);
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+        return stream.ToArray();
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch (UnauthorizedAccessException) when (OperatingSystem.IsWindows())
+        {
+        }
+        catch (IOException) when (OperatingSystem.IsWindows())
+        {
+        }
+    }
+
+    private class NonTruncatingStorageFileProxy : DispatchProxy
+    {
+        private NonTruncatingMemoryStream _stream = null!;
+        private string _name = string.Empty;
+        private string _text = string.Empty;
+        private Uri _path = new("file:///storage.axaml");
+
+        public static Avalonia.Platform.Storage.IStorageFile Create(
+            string name,
+            string text,
+            out NonTruncatingStorageFileProxy proxy)
+        {
+            var storageFile = DispatchProxy.Create<Avalonia.Platform.Storage.IStorageFile, NonTruncatingStorageFileProxy>();
+            proxy = (NonTruncatingStorageFileProxy)(object)storageFile;
+            proxy.Initialize(name, text);
+            return storageFile;
+        }
+
+        public string Text
+        {
+            get => _text;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            return targetMethod?.Name switch
+            {
+                "get_Name" => _name,
+                "get_Path" => _path,
+                "get_CanBookmark" => false,
+                "OpenReadAsync" => OpenReadAsync(),
+                "OpenWriteAsync" => OpenWriteAsync(),
+                "GetBasicPropertiesAsync" => Task.FromResult(new Avalonia.Platform.Storage.StorageItemProperties()),
+                "SaveBookmarkAsync" => Task.FromResult<string?>(null),
+                "GetParentAsync" => Task.FromResult<Avalonia.Platform.Storage.IStorageFolder?>(null),
+                "DeleteAsync" => Task.CompletedTask,
+                "MoveAsync" => Task.FromResult<Avalonia.Platform.Storage.IStorageItem?>(null),
+                "Dispose" => null,
+                _ => GetDefaultValue(targetMethod?.ReturnType)
+            };
+        }
+
+        private void Initialize(string name, string text)
+        {
+            _name = name;
+            _text = text;
+            _path = new Uri("file:///" + name);
+            _stream = new NonTruncatingMemoryStream();
+            using var writer = new StreamWriter(_stream, leaveOpen: true);
+            writer.Write(text);
+            writer.Flush();
+            _stream.Position = 0;
+        }
+
+        private Task<Stream> OpenReadAsync()
+        {
+            _stream.Position = 0;
+            return Task.FromResult<Stream>(_stream);
+        }
+
+        private Task<Stream> OpenWriteAsync()
+        {
+            _stream.Position = 0;
+            return Task.FromResult<Stream>(_stream);
+        }
+
+        private static object? GetDefaultValue(Type? type)
+        {
+            if (type is null || type == typeof(void))
+            {
+                return null;
+            }
+
+            return type.IsValueType ? Activator.CreateInstance(type) : null;
+        }
+    }
+
+    private sealed class NonTruncatingMemoryStream : MemoryStream
+    {
+        public override void SetLength(long value)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    private class FailingFlushStorageFileProxy : DispatchProxy
+    {
+        private string _name = string.Empty;
+        private Uri _path = new("file:///storage.axaml");
+
+        public static Avalonia.Platform.Storage.IStorageFile Create(string name)
+        {
+            var storageFile = DispatchProxy.Create<Avalonia.Platform.Storage.IStorageFile, FailingFlushStorageFileProxy>();
+            var proxy = (FailingFlushStorageFileProxy)(object)storageFile;
+            proxy.Initialize(name);
+            return storageFile;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            return targetMethod?.Name switch
+            {
+                "get_Name" => _name,
+                "get_Path" => _path,
+                "get_CanBookmark" => false,
+                "OpenReadAsync" => Task.FromResult<Stream>(new MemoryStream()),
+                "OpenWriteAsync" => Task.FromResult<Stream>(new FailingFlushMemoryStream()),
+                "GetBasicPropertiesAsync" => Task.FromResult(new Avalonia.Platform.Storage.StorageItemProperties()),
+                "SaveBookmarkAsync" => Task.FromResult<string?>(null),
+                "GetParentAsync" => Task.FromResult<Avalonia.Platform.Storage.IStorageFolder?>(null),
+                "DeleteAsync" => Task.CompletedTask,
+                "MoveAsync" => Task.FromResult<Avalonia.Platform.Storage.IStorageItem?>(null),
+                "Dispose" => null,
+                _ => GetDefaultValue(targetMethod?.ReturnType)
+            };
+        }
+
+        private void Initialize(string name)
+        {
+            _name = name;
+            _path = new Uri("file:///" + name);
+        }
+
+        private static object? GetDefaultValue(Type? type)
+        {
+            if (type is null || type == typeof(void))
+            {
+                return null;
+            }
+
+            return type.IsValueType ? Activator.CreateInstance(type) : null;
+        }
+    }
+
+    private sealed class FailingFlushMemoryStream : MemoryStream
+    {
+        public override void Flush()
+        {
+            throw new IOException("flush failed");
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            throw new IOException("flush failed");
+        }
+    }
+
+    private sealed record VersionedPreviewProject(
+        InMemoryProject Project,
+        InMemoryProjectFile XamlFile,
+        string ExpectedText,
+        Version ExpectedVersion);
 }
 
 public static class RuntimePreviewDesignData

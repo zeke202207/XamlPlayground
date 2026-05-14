@@ -18,6 +18,7 @@ public partial class ViewLocator : IDataTemplate
 
         return data switch
         {
+            MsBuildWorkspaceDockViewModel => new SolutionExplorerDockView(),
             WorkspaceFileDocumentDockViewModel => new WorkspaceFileEditorDockView(),
             SolutionExplorerDockViewModel => new SolutionExplorerDockView(),
             VisualStructureDockViewModel => new VisualStructureDockView(),

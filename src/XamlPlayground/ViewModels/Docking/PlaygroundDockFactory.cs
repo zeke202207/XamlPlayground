@@ -20,6 +20,7 @@ public sealed class PlaygroundDockFactory : Factory
     private IRootDock? _rootDock;
     private IDocumentDock? _editorDock;
     private SolutionExplorerDockViewModel? _solutionExplorer;
+    private MsBuildWorkspaceDockViewModel? _msBuildWorkspace;
     private VisualStructureDockViewModel? _visualStructure;
     private VisualPropertiesDockViewModel? _visualProperties;
     private VisualToolboxDockViewModel? _visualToolbox;
@@ -50,6 +51,7 @@ public sealed class PlaygroundDockFactory : Factory
     public override IRootDock CreateLayout()
     {
         _solutionExplorer = new SolutionExplorerDockViewModel(_shell);
+        _msBuildWorkspace = new MsBuildWorkspaceDockViewModel(_shell);
         _visualStructure = new VisualStructureDockViewModel(_shell);
         _visualProperties = new VisualPropertiesDockViewModel(_shell);
         _visualToolbox = new VisualToolboxDockViewModel(_shell);
@@ -133,6 +135,7 @@ public sealed class PlaygroundDockFactory : Factory
         solutionDock.CanCloseLastDockable = false;
         solutionDock.VisibleDockables = CreateList<IDockable>(
             _solutionExplorer,
+            _msBuildWorkspace,
             _visualStructure,
             _visualProperties,
             _visualToolbox,
@@ -190,6 +193,7 @@ public sealed class PlaygroundDockFactory : Factory
         ContextLocator = new Dictionary<string, Func<object?>>
         {
             ["SolutionExplorer"] = () => _solutionExplorer,
+            ["MsBuildWorkspace"] = () => _msBuildWorkspace,
             ["VisualStructure"] = () => _visualStructure,
             ["VisualProperties"] = () => _visualProperties,
             ["VisualToolbox"] = () => _visualToolbox,

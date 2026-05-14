@@ -31,6 +31,18 @@
                   Height="16"
                   Data="{StaticResource SolutionImportIcon}" />
       </Button>
+      <Button Content="Open Solution"
+              Margin="0,0,4,4"
+              Command="{Binding Shell.OpenMsBuildWorkspaceCommand}" />
+      <Button Content="Open Folder"
+              Margin="0,0,4,4"
+              Command="{Binding Shell.OpenMsBuildWorkspaceFolderCommand}" />
+      <Button Content="Save"
+              Margin="0,0,4,4"
+              Command="{Binding Shell.SaveWorkspaceFileCommand}" />
+      <Button Content="Save All"
+              Margin="0,0,4,4"
+              Command="{Binding Shell.SaveAllWorkspaceFilesCommand}" />
       <Button ToolTip.Tip="Export solution"
               Margin="0,0,4,4"
               Command="{Binding Shell.ExportSolutionCommand}">
