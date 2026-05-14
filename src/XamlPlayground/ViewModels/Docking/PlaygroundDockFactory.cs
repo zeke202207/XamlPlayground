@@ -16,9 +16,56 @@ namespace XamlPlayground.ViewModels.Docking;
 
 public sealed class PlaygroundDockFactory : Factory
 {
+    public const string DefaultPerspectiveId = "Default";
+
+    public static IReadOnlyList<DockPerspectiveDescriptor> PerspectiveDescriptors { get; } =
+    [
+        new(DefaultPerspectiveId, "Default Workspace"),
+        new("Wysiwyg", "WYSIWYG Editor"),
+        new("Structure", "Structure Focus"),
+        new("Diagnostics", "Dev Tools Diagnostics"),
+        new("Animation", "Animation Editing"),
+        new("Theme", "Theme Editing"),
+        new("Bindings", "Bindings and Resources"),
+        new("Code", "Code and Errors"),
+        new("Preview", "Preview Review")
+    ];
+
+    public static IReadOnlyList<DockToolDescriptor> ToolDescriptors { get; } =
+    [
+        new("SolutionExplorer", "Solution Explorer", DockToolRegion.Left),
+        new("MsBuildWorkspace", "MSBuild Workspace", DockToolRegion.Left),
+        new("VisualStructure", "Structure", DockToolRegion.Left),
+        new("VisualToolbox", "Toolbox", DockToolRegion.Left),
+        new("Preview", "Preview", DockToolRegion.Preview),
+        new("VisualProperties", "Properties", DockToolRegion.Right),
+        new("VisualAnimations", "Animations", DockToolRegion.Right),
+        new("StylesInspector", "Styles", DockToolRegion.Right),
+        new("BindingsInspector", "Bindings", DockToolRegion.Right),
+        new("ResourcesInspector", "Resources", DockToolRegion.Right),
+        new("ControlThemes", "Themes", DockToolRegion.Right),
+        new("AnimationTimelineSheet", "Timeline", DockToolRegion.Bottom),
+        new("StyleEditor", "Style Editor", DockToolRegion.Bottom),
+        new("BindingEditor", "Binding Editor", DockToolRegion.Bottom),
+        new("ResourceEditor", "Resource Editor", DockToolRegion.Bottom),
+        new("DiagnosticsCombinedTree", "Combined Tree", DockToolRegion.Bottom),
+        new("DiagnosticsLogicalTree", "Logical Tree", DockToolRegion.Bottom),
+        new("DiagnosticsVisualTree", "Visual Tree", DockToolRegion.Bottom),
+        new("DiagnosticsEvents", "Events", DockToolRegion.Bottom),
+        new("DiagnosticsResources", "Resources", DockToolRegion.Bottom),
+        new("DiagnosticsAssets", "Assets", DockToolRegion.Bottom),
+        new("Errors", "Errors", DockToolRegion.Bottom)
+    ];
+
     private readonly MainViewModel _shell;
+    private readonly Dictionary<string, IDockable> _toolCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IToolDock> _restoreDockByToolId = new(StringComparer.Ordinal);
     private IRootDock? _rootDock;
     private IDocumentDock? _editorDock;
+    private IToolDock? _leftDock;
+    private IToolDock? _previewDock;
+    private IToolDock? _rightDock;
+    private IToolDock? _bottomDock;
     private SolutionExplorerDockViewModel? _solutionExplorer;
     private MsBuildWorkspaceDockViewModel? _msBuildWorkspace;
     private VisualStructureDockViewModel? _visualStructure;
@@ -41,140 +88,116 @@ public sealed class PlaygroundDockFactory : Factory
     private DiagnosticToolDockViewModel? _resources;
     private DiagnosticToolDockViewModel? _assets;
     private ErrorsDockViewModel? _errors;
-    private IToolDock? _bottomDock;
 
     public PlaygroundDockFactory(MainViewModel shell)
     {
         _shell = shell;
+        HideToolsOnClose = true;
     }
+
+    public string CurrentPerspectiveId { get; private set; } = DefaultPerspectiveId;
 
     public override IRootDock CreateLayout()
     {
-        _solutionExplorer = new SolutionExplorerDockViewModel(_shell);
-        _msBuildWorkspace = new MsBuildWorkspaceDockViewModel(_shell);
-        _visualStructure = new VisualStructureDockViewModel(_shell);
-        _visualProperties = new VisualPropertiesDockViewModel(_shell);
-        _visualToolbox = new VisualToolboxDockViewModel(_shell);
-        _visualAnimations = new VisualAnimationsDockViewModel(_shell);
-        _stylesInspector = new StylesInspectorDockViewModel(_shell);
-        _bindingsInspector = new BindingsInspectorDockViewModel(_shell);
-        _resourcesInspector = new ResourcesInspectorDockViewModel(_shell);
-        _controlThemes = new ControlThemesDockViewModel(_shell);
-        _preview = new PreviewDockViewModel(_shell);
-        _animationTimelineSheet = new AnimationTimelineSheetDockViewModel(_shell);
-        _styleEditor = new StyleEditorDockViewModel(_shell);
-        _bindingEditor = new BindingEditorDockViewModel(_shell);
-        _resourceEditor = new ResourceEditorDockViewModel(_shell);
-        _combinedTree = CreateDiagnosticsTreeTool("DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree);
-        _logicalTree = CreateDiagnosticsTreeTool("DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree);
-        _visualTree = CreateDiagnosticsTreeTool("DiagnosticsVisualTree", "Visual Tree", DevToolsViewKind.VisualTree);
-        _events = CreateDiagnosticsTool("DiagnosticsEvents", "Events", DevToolsViewKind.Events);
-        _resources = CreateDiagnosticsTool("DiagnosticsResources", "Resources", DevToolsViewKind.Resources);
-        _assets = CreateDiagnosticsTool("DiagnosticsAssets", "Assets", DevToolsViewKind.Assets);
-        _errors = new ErrorsDockViewModel(_shell);
+        EnsureDockables();
+        CurrentPerspectiveId = DefaultPerspectiveId;
+        return CreatePerspectiveLayoutCore(DefaultPerspectiveId);
+    }
 
-        var editorDock = CreateDocumentDock();
-        editorDock.Id = "Editors";
-        editorDock.Title = "Editors";
-        editorDock.IsCollapsable = false;
-        editorDock.CanCloseLastDockable = false;
-        editorDock.EnableWindowDrag = true;
-        editorDock.VisibleDockables = CreateList<IDockable>();
-        if (editorDock is INotifyPropertyChanged notifyEditorDock)
+    public IRootDock CreatePerspectiveLayout(string? perspectiveId)
+    {
+        EnsureDockables();
+        var id = NormalizePerspectiveId(perspectiveId);
+        CurrentPerspectiveId = id;
+        var layout = CreatePerspectiveLayoutCore(id);
+        InitLayout(layout);
+        return layout;
+    }
+
+    public bool ToggleTool(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
         {
-            notifyEditorDock.PropertyChanged += EditorDockOnPropertyChanged;
+            return false;
         }
-        _editorDock = editorDock;
 
-        var bottomDock = CreateToolDock();
-        bottomDock.Id = "Bottom";
-        bottomDock.Title = "Bottom";
-        bottomDock.Alignment = Alignment.Bottom;
-        bottomDock.Proportion = 0.28;
-        bottomDock.CanCloseLastDockable = false;
-        bottomDock.VisibleDockables = CreateList<IDockable>(
-            _animationTimelineSheet,
-            _styleEditor,
-            _bindingEditor,
-            _resourceEditor,
-            _combinedTree,
-            _logicalTree,
-            _visualTree,
-            _events,
-            _resources,
-            _assets,
-            _errors);
-        bottomDock.ActiveDockable = Utilities.IsBrowser() ? _errors : _animationTimelineSheet;
-        _bottomDock = bottomDock;
+        return IsToolVisible(id) ? HideTool(id) : ShowTool(id);
+    }
 
-        var centerDock = CreateProportionalDock();
-        centerDock.Id = "Center";
-        centerDock.Title = "Center";
-        centerDock.Orientation = Orientation.Vertical;
-        centerDock.IsCollapsable = false;
-        centerDock.VisibleDockables = CreateList<IDockable>(
-            editorDock,
-            new ProportionalDockSplitter { CanResize = true, ResizePreview = true },
-            bottomDock);
-        centerDock.ActiveDockable = editorDock;
+    public bool ShowTool(string? id)
+    {
+        return ShowTool(id, activate: true);
+    }
 
-        var previewDock = CreateToolDock();
-        previewDock.Id = "PreviewDock";
-        previewDock.Title = "Preview";
-        previewDock.Alignment = Alignment.Right;
-        previewDock.Proportion = 0.36;
-        previewDock.CanCloseLastDockable = false;
-        previewDock.VisibleDockables = CreateList<IDockable>(_preview);
-        previewDock.ActiveDockable = _preview;
+    private bool ShowTool(string? id, bool activate)
+    {
+        if (string.IsNullOrWhiteSpace(id) ||
+            _rootDock is null ||
+            !_toolCache.TryGetValue(id, out var dockable))
+        {
+            return false;
+        }
 
-        var solutionDock = CreateToolDock();
-        solutionDock.Id = "SolutionExplorerDock";
-        solutionDock.Title = "Solution Explorer";
-        solutionDock.Alignment = Alignment.Right;
-        solutionDock.Proportion = 0.22;
-        solutionDock.CanCloseLastDockable = false;
-        solutionDock.VisibleDockables = CreateList<IDockable>(
-            _solutionExplorer,
-            _msBuildWorkspace,
-            _visualStructure,
-            _visualProperties,
-            _visualToolbox,
-            _visualAnimations,
-            _stylesInspector,
-            _bindingsInspector,
-            _resourcesInspector,
-            _controlThemes);
-        solutionDock.ActiveDockable = _solutionExplorer;
+        if (IsToolVisible(id))
+        {
+            if (activate)
+            {
+                ActivateTool(dockable);
+            }
 
-        var mainDock = CreateProportionalDock();
-        mainDock.Id = "Workspace";
-        mainDock.Title = "Workspace";
-        mainDock.Orientation = Orientation.Horizontal;
-        mainDock.IsCollapsable = false;
-        mainDock.VisibleDockables = CreateList<IDockable>(
-            centerDock,
-            new ProportionalDockSplitter { CanResize = true, ResizePreview = true },
-            previewDock,
-            new ProportionalDockSplitter { CanResize = true, ResizePreview = true },
-            solutionDock);
-        mainDock.ActiveDockable = centerDock;
+            return true;
+        }
 
-        var rootDock = CreateRootDock();
-        rootDock.Id = "Root";
-        rootDock.Title = "Xaml Playground";
-        rootDock.IsCollapsable = false;
-        rootDock.ActiveDockable = mainDock;
-        rootDock.DefaultDockable = mainDock;
-        rootDock.VisibleDockables = CreateList<IDockable>(mainDock);
-        rootDock.LeftPinnedDockables = CreateList<IDockable>();
-        rootDock.RightPinnedDockables = CreateList<IDockable>();
-        rootDock.TopPinnedDockables = CreateList<IDockable>();
-        rootDock.BottomPinnedDockables = CreateList<IDockable>();
-        rootDock.FloatingWindowHostMode = DockFloatingWindowHostMode.Default;
+        if (FindHiddenRoot(dockable) is { HiddenDockables: { } hiddenDockables })
+        {
+            if (dockable.OriginalOwner is IDock originalOwner && IsDockInCurrentLayout(originalOwner))
+            {
+                RestoreDockable(dockable);
+            }
+            else
+            {
+                if (ResolveRestoreDock(id) is not { } dock)
+                {
+                    return false;
+                }
 
-        _rootDock = rootDock;
+                hiddenDockables.Remove(dockable);
+                AddToolToDock(dock, dockable);
+                OnDockableRestored(dockable);
+            }
+        }
+        else if (!AddToolToCurrentLayout(id, dockable))
+        {
+            return false;
+        }
 
-        return rootDock;
+        if (activate)
+        {
+            ActivateTool(dockable);
+        }
+
+        return true;
+    }
+
+    public bool RestoreAllTools()
+    {
+        var restored = false;
+        foreach (var descriptor in ToolDescriptors)
+        {
+            if (!IsToolVisible(descriptor.Id))
+            {
+                restored |= ShowTool(descriptor.Id, activate: false);
+            }
+        }
+
+        return restored;
+    }
+
+    public bool IsToolVisible(string id)
+    {
+        return _rootDock is not null &&
+               _toolCache.TryGetValue(id, out var dockable) &&
+               EnumerateVisibleDockables(_rootDock).Any(candidate => ReferenceEquals(candidate, dockable));
     }
 
     public override IDockWindow? CreateWindowFrom(IDockable dockable)
@@ -190,6 +213,13 @@ public sealed class PlaygroundDockFactory : Factory
 
     public override void InitLayout(IDockable layout)
     {
+        EnsureDockables();
+
+        if (layout is IRootDock rootDock)
+        {
+            _rootDock = rootDock;
+        }
+
         ContextLocator = new Dictionary<string, Func<object?>>
         {
             ["SolutionExplorer"] = () => _solutionExplorer,
@@ -220,6 +250,11 @@ public sealed class PlaygroundDockFactory : Factory
         {
             ["Root"] = () => _rootDock
         };
+        foreach (var descriptor in ToolDescriptors)
+        {
+            DockableLocator[descriptor.Id] = () =>
+                _toolCache.TryGetValue(descriptor.Id, out var dockable) ? dockable : null;
+        }
 
         HostWindowLocator = new Dictionary<string, Func<IHostWindow?>>
         {
@@ -231,10 +266,7 @@ public sealed class PlaygroundDockFactory : Factory
 
     public void ResetDocuments(IEnumerable<XamlPlayground.Workspace.InMemoryProjectFile> files)
     {
-        if (_editorDock is null)
-        {
-            return;
-        }
+        var editorDock = EnsureEditorDock();
 
         var documents = files
             .Where(static file => file.CanEdit)
@@ -243,10 +275,10 @@ public sealed class PlaygroundDockFactory : Factory
             .Cast<IDockable>()
             .ToArray();
 
-        _editorDock.VisibleDockables = CreateList<IDockable>(documents);
-        _editorDock.ActiveDockable = documents.FirstOrDefault();
+        editorDock.VisibleDockables = CreateList<IDockable>(documents);
+        editorDock.ActiveDockable = documents.FirstOrDefault();
 
-        if (_editorDock.ActiveDockable is WorkspaceFileDocumentDockViewModel document)
+        if (editorDock.ActiveDockable is WorkspaceFileDocumentDockViewModel document)
         {
             _shell.ActivateWorkspaceFileFromDocument(document.File);
         }
@@ -254,13 +286,9 @@ public sealed class PlaygroundDockFactory : Factory
 
     public void OpenDocument(XamlPlayground.Workspace.InMemoryProjectFile file)
     {
-        if (_editorDock is null)
-        {
-            return;
-        }
-
-        var visibleDockables = _editorDock.VisibleDockables ?? CreateList<IDockable>();
-        _editorDock.VisibleDockables = visibleDockables;
+        var editorDock = EnsureEditorDock();
+        var visibleDockables = editorDock.VisibleDockables ?? CreateList<IDockable>();
+        editorDock.VisibleDockables = visibleDockables;
 
         var existing = visibleDockables
             .OfType<WorkspaceFileDocumentDockViewModel>()
@@ -272,20 +300,585 @@ public sealed class PlaygroundDockFactory : Factory
             visibleDockables.Add(existing);
         }
 
-        _editorDock.ActiveDockable = existing;
+        editorDock.ActiveDockable = existing;
         _shell.ActivateWorkspaceFileFromDocument(file);
     }
 
     public void ActivateErrors()
     {
-        if (_bottomDock is null || _errors is null)
+        if (_errors is null)
         {
             return;
         }
 
-        _bottomDock.ActiveDockable = _errors;
+        ShowTool("Errors");
         _errors.NotifyLastErrorMessageChanged();
         Dispatcher.UIThread.Post(_errors.NotifyLastErrorMessageChanged, DispatcherPriority.Loaded);
+    }
+
+    private static string NormalizePerspectiveId(string? perspectiveId)
+    {
+        if (string.IsNullOrWhiteSpace(perspectiveId))
+        {
+            return DefaultPerspectiveId;
+        }
+
+        return PerspectiveDescriptors.Any(descriptor => descriptor.Id.Equals(perspectiveId, StringComparison.Ordinal))
+            ? perspectiveId
+            : DefaultPerspectiveId;
+    }
+
+    private void EnsureDockables()
+    {
+        if (_solutionExplorer is not null)
+        {
+            return;
+        }
+
+        EnsureEditorDock();
+        _solutionExplorer = RegisterTool(new SolutionExplorerDockViewModel(_shell));
+        _msBuildWorkspace = RegisterTool(new MsBuildWorkspaceDockViewModel(_shell));
+        _visualStructure = RegisterTool(new VisualStructureDockViewModel(_shell));
+        _visualProperties = RegisterTool(new VisualPropertiesDockViewModel(_shell));
+        _visualToolbox = RegisterTool(new VisualToolboxDockViewModel(_shell));
+        _visualAnimations = RegisterTool(new VisualAnimationsDockViewModel(_shell));
+        _stylesInspector = RegisterTool(new StylesInspectorDockViewModel(_shell));
+        _bindingsInspector = RegisterTool(new BindingsInspectorDockViewModel(_shell));
+        _resourcesInspector = RegisterTool(new ResourcesInspectorDockViewModel(_shell));
+        _controlThemes = RegisterTool(new ControlThemesDockViewModel(_shell));
+        _preview = RegisterTool(new PreviewDockViewModel(_shell));
+        _animationTimelineSheet = RegisterTool(new AnimationTimelineSheetDockViewModel(_shell));
+        _styleEditor = RegisterTool(new StyleEditorDockViewModel(_shell));
+        _bindingEditor = RegisterTool(new BindingEditorDockViewModel(_shell));
+        _resourceEditor = RegisterTool(new ResourceEditorDockViewModel(_shell));
+        _combinedTree = RegisterTool(CreateDiagnosticsTreeTool("DiagnosticsCombinedTree", "Combined Tree", DevToolsViewKind.CombinedTree));
+        _logicalTree = RegisterTool(CreateDiagnosticsTreeTool("DiagnosticsLogicalTree", "Logical Tree", DevToolsViewKind.LogicalTree));
+        _visualTree = RegisterTool(CreateDiagnosticsTreeTool("DiagnosticsVisualTree", "Visual Tree", DevToolsViewKind.VisualTree));
+        _events = RegisterTool(CreateDiagnosticsTool("DiagnosticsEvents", "Events", DevToolsViewKind.Events));
+        _resources = RegisterTool(CreateDiagnosticsTool("DiagnosticsResources", "Resources", DevToolsViewKind.Resources));
+        _assets = RegisterTool(CreateDiagnosticsTool("DiagnosticsAssets", "Assets", DevToolsViewKind.Assets));
+        _errors = RegisterTool(new ErrorsDockViewModel(_shell));
+    }
+
+    private TTool RegisterTool<TTool>(TTool tool)
+        where TTool : IDockable
+    {
+        if (tool.Id is null)
+        {
+            throw new InvalidOperationException("Dock tools must have stable identifiers.");
+        }
+
+        tool.CanClose = true;
+        _toolCache[tool.Id] = tool;
+        return tool;
+    }
+
+    private IDocumentDock EnsureEditorDock()
+    {
+        if (_editorDock is not null)
+        {
+            return _editorDock;
+        }
+
+        var editorDock = CreateDocumentDock();
+        editorDock.Id = "Editors";
+        editorDock.Title = "Editors";
+        editorDock.IsCollapsable = false;
+        editorDock.CanCloseLastDockable = false;
+        editorDock.EnableWindowDrag = true;
+        editorDock.VisibleDockables = CreateList<IDockable>();
+        if (editorDock is INotifyPropertyChanged notifyEditorDock)
+        {
+            notifyEditorDock.PropertyChanged += EditorDockOnPropertyChanged;
+        }
+
+        _editorDock = editorDock;
+        return editorDock;
+    }
+
+    private IRootDock CreatePerspectiveLayoutCore(string perspectiveId)
+    {
+        return perspectiveId switch
+        {
+            "Wysiwyg" => CreateWorkspacePerspective(
+                "WYSIWYG Editor",
+                ["VisualToolbox", "SolutionExplorer", "VisualStructure"],
+                "VisualToolbox",
+                ["Preview"],
+                "Preview",
+                ["VisualProperties", "VisualAnimations", "StylesInspector", "BindingsInspector", "ResourcesInspector"],
+                "VisualProperties",
+                ["AnimationTimelineSheet", "Errors"],
+                Utilities.IsBrowser() ? "Errors" : "AnimationTimelineSheet"),
+            "Structure" => CreateWorkspacePerspective(
+                "Structure Focus",
+                ["VisualStructure", "SolutionExplorer", "MsBuildWorkspace"],
+                "VisualStructure",
+                ["Preview"],
+                "Preview",
+                ["VisualProperties", "BindingsInspector", "ResourcesInspector"],
+                "VisualProperties",
+                ["DiagnosticsCombinedTree", "Errors"],
+                "DiagnosticsCombinedTree"),
+            "Diagnostics" => CreateWorkspacePerspective(
+                "Dev Tools Diagnostics",
+                ["DiagnosticsCombinedTree", "DiagnosticsLogicalTree", "DiagnosticsVisualTree"],
+                "DiagnosticsCombinedTree",
+                ["Preview"],
+                "Preview",
+                ["DiagnosticsEvents", "DiagnosticsResources", "DiagnosticsAssets"],
+                "DiagnosticsEvents",
+                ["Errors", "MsBuildWorkspace"],
+                "Errors"),
+            "Animation" => CreateWorkspacePerspective(
+                "Animation Editing",
+                ["VisualAnimations", "VisualToolbox", "VisualStructure"],
+                "VisualAnimations",
+                ["Preview"],
+                "Preview",
+                ["VisualProperties", "StylesInspector"],
+                "VisualProperties",
+                ["AnimationTimelineSheet", "StyleEditor", "Errors"],
+                "AnimationTimelineSheet"),
+            "Theme" => CreateWorkspacePerspective(
+                "Theme Editing",
+                ["ControlThemes", "StylesInspector", "SolutionExplorer"],
+                "ControlThemes",
+                ["Preview"],
+                "Preview",
+                ["ResourcesInspector", "VisualProperties", "VisualStructure"],
+                "ResourcesInspector",
+                ["StyleEditor", "ResourceEditor", "Errors"],
+                "StyleEditor"),
+            "Bindings" => CreateWorkspacePerspective(
+                "Bindings and Resources",
+                ["VisualStructure", "SolutionExplorer"],
+                "VisualStructure",
+                ["Preview"],
+                "Preview",
+                ["BindingsInspector", "ResourcesInspector", "StylesInspector", "VisualProperties"],
+                "BindingsInspector",
+                ["BindingEditor", "ResourceEditor", "DiagnosticsEvents", "Errors"],
+                "BindingEditor"),
+            "Code" => CreateWorkspacePerspective(
+                "Code and Errors",
+                ["SolutionExplorer", "MsBuildWorkspace"],
+                "SolutionExplorer",
+                ["Preview"],
+                "Preview",
+                ["VisualStructure", "BindingsInspector", "ResourcesInspector"],
+                "VisualStructure",
+                ["Errors", "DiagnosticsEvents", "DiagnosticsResources"],
+                "Errors"),
+            "Preview" => CreateWorkspacePerspective(
+                "Preview Review",
+                ["SolutionExplorer"],
+                "SolutionExplorer",
+                ["Preview"],
+                "Preview",
+                ["VisualProperties", "VisualStructure", "StylesInspector"],
+                "VisualProperties",
+                ["Errors"],
+                "Errors",
+                previewProportion: 0.48),
+            _ => CreateWorkspacePerspective(
+                "Default Workspace",
+                [],
+                null,
+                ["Preview"],
+                "Preview",
+                [
+                    "SolutionExplorer",
+                    "MsBuildWorkspace",
+                    "VisualStructure",
+                    "VisualProperties",
+                    "VisualToolbox",
+                    "VisualAnimations",
+                    "StylesInspector",
+                    "BindingsInspector",
+                    "ResourcesInspector",
+                    "ControlThemes"
+                ],
+                "SolutionExplorer",
+                [
+                    "AnimationTimelineSheet",
+                    "StyleEditor",
+                    "BindingEditor",
+                    "ResourceEditor",
+                    "DiagnosticsCombinedTree",
+                    "DiagnosticsLogicalTree",
+                    "DiagnosticsVisualTree",
+                    "DiagnosticsEvents",
+                    "DiagnosticsResources",
+                    "DiagnosticsAssets",
+                    "Errors"
+                ],
+                Utilities.IsBrowser() ? "Errors" : "AnimationTimelineSheet")
+        };
+    }
+
+    private IRootDock CreateWorkspacePerspective(
+        string title,
+        IReadOnlyList<string> leftToolIds,
+        string? leftActiveToolId,
+        IReadOnlyList<string> previewToolIds,
+        string? previewActiveToolId,
+        IReadOnlyList<string> rightToolIds,
+        string? rightActiveToolId,
+        IReadOnlyList<string> bottomToolIds,
+        string? bottomActiveToolId,
+        double leftProportion = 0.22,
+        double previewProportion = 0.36,
+        double rightProportion = 0.24,
+        double bottomProportion = 0.28)
+    {
+        var editorDock = EnsureEditorDock();
+        var visibleToolIds = new HashSet<string>(
+            leftToolIds
+                .Concat(previewToolIds)
+                .Concat(rightToolIds)
+                .Concat(bottomToolIds),
+            StringComparer.Ordinal);
+
+        _leftDock = CreateToolDockFromIds("LeftTools", "Workspace", Alignment.Left, leftProportion, leftToolIds, leftActiveToolId);
+        _previewDock = CreateToolDockFromIds("PreviewDock", "Preview", Alignment.Right, previewProportion, previewToolIds, previewActiveToolId);
+        _rightDock = CreateToolDockFromIds("RightTools", "Inspectors", Alignment.Right, rightProportion, rightToolIds, rightActiveToolId);
+        _bottomDock = CreateToolDockFromIds("Bottom", "Bottom", Alignment.Bottom, bottomProportion, bottomToolIds, bottomActiveToolId);
+        UpdateRestoreDockMap();
+
+        var centerDock = CreateProportionalDock();
+        centerDock.Id = "Center";
+        centerDock.Title = "Center";
+        centerDock.Orientation = Orientation.Vertical;
+        centerDock.IsCollapsable = false;
+        var centerDockables = CreateList<IDockable>(editorDock);
+        AddProportionalChild(centerDockables, _bottomDock);
+        centerDock.VisibleDockables = centerDockables;
+        centerDock.ActiveDockable = editorDock;
+
+        var mainDockables = CreateList<IDockable>();
+        AddProportionalChild(mainDockables, _leftDock);
+        AddProportionalChild(mainDockables, centerDock);
+        AddProportionalChild(mainDockables, _previewDock);
+        AddProportionalChild(mainDockables, _rightDock);
+
+        var mainDock = CreateProportionalDock();
+        mainDock.Id = "Workspace";
+        mainDock.Title = title;
+        mainDock.Orientation = Orientation.Horizontal;
+        mainDock.IsCollapsable = false;
+        mainDock.VisibleDockables = mainDockables;
+        mainDock.ActiveDockable = centerDock;
+
+        var hiddenDockables = ToolDescriptors
+            .Where(descriptor => !visibleToolIds.Contains(descriptor.Id))
+            .Select(descriptor => PrepareHiddenTool(descriptor.Id))
+            .ToArray();
+
+        var rootDock = CreateRootDock();
+        rootDock.Id = "Root";
+        rootDock.Title = "Xaml Playground";
+        rootDock.IsCollapsable = false;
+        rootDock.ActiveDockable = mainDock;
+        rootDock.DefaultDockable = mainDock;
+        rootDock.VisibleDockables = CreateList<IDockable>(mainDock);
+        rootDock.HiddenDockables = CreateList<IDockable>(hiddenDockables);
+        rootDock.LeftPinnedDockables = CreateList<IDockable>();
+        rootDock.RightPinnedDockables = CreateList<IDockable>();
+        rootDock.TopPinnedDockables = CreateList<IDockable>();
+        rootDock.BottomPinnedDockables = CreateList<IDockable>();
+        rootDock.FloatingWindowHostMode = DockFloatingWindowHostMode.Default;
+
+        _rootDock = rootDock;
+        return rootDock;
+    }
+
+    private IToolDock? CreateToolDockFromIds(
+        string id,
+        string title,
+        Alignment alignment,
+        double proportion,
+        IReadOnlyList<string> toolIds,
+        string? activeToolId)
+    {
+        var dockables = toolIds
+            .Select(GetTool)
+            .Distinct()
+            .ToArray();
+        if (dockables.Length == 0)
+        {
+            return null;
+        }
+
+        foreach (var dockable in dockables)
+        {
+            dockable.OriginalOwner = null;
+        }
+
+        var toolDock = CreateToolDock();
+        toolDock.Id = id;
+        toolDock.Title = title;
+        toolDock.Alignment = alignment;
+        toolDock.Proportion = proportion;
+        toolDock.CanCloseLastDockable = true;
+        toolDock.VisibleDockables = CreateList<IDockable>(dockables);
+        toolDock.ActiveDockable = activeToolId is not null &&
+                                  dockables.FirstOrDefault(dockable => dockable.Id == activeToolId) is { } active
+            ? active
+            : dockables.FirstOrDefault();
+        return toolDock;
+    }
+
+    private IDockable GetTool(string id)
+    {
+        if (_toolCache.TryGetValue(id, out var dockable))
+        {
+            return dockable;
+        }
+
+        throw new InvalidOperationException($"Unknown dock tool '{id}'.");
+    }
+
+    private IDockable PrepareHiddenTool(string id)
+    {
+        var dockable = GetTool(id);
+        dockable.OriginalOwner = ResolveRestoreDock(id);
+        return dockable;
+    }
+
+    private void UpdateRestoreDockMap()
+    {
+        _restoreDockByToolId.Clear();
+        foreach (var descriptor in ToolDescriptors)
+        {
+            if (ResolveRegionDock(descriptor.Region) is { } dock)
+            {
+                _restoreDockByToolId[descriptor.Id] = dock;
+            }
+        }
+    }
+
+    private IToolDock? ResolveRegionDock(DockToolRegion region)
+    {
+        return region switch
+        {
+            DockToolRegion.Left => _leftDock ?? _rightDock ?? _bottomDock ?? _previewDock,
+            DockToolRegion.Preview => _previewDock ?? _rightDock ?? _leftDock ?? _bottomDock,
+            DockToolRegion.Right => _rightDock ?? _leftDock ?? _bottomDock ?? _previewDock,
+            DockToolRegion.Bottom => _bottomDock ?? _rightDock ?? _leftDock ?? _previewDock,
+            _ => _rightDock ?? _leftDock ?? _bottomDock ?? _previewDock
+        };
+    }
+
+    private IToolDock? ResolveRestoreDock(string id)
+    {
+        return _restoreDockByToolId.TryGetValue(id, out var dock) ? dock : _rightDock ?? _leftDock ?? _bottomDock ?? _previewDock;
+    }
+
+    private static void AddProportionalChild(IList<IDockable> dockables, IDockable? dockable)
+    {
+        if (dockable is null)
+        {
+            return;
+        }
+
+        if (dockables.Count > 0)
+        {
+            dockables.Add(new ProportionalDockSplitter { CanResize = true, ResizePreview = true });
+        }
+
+        dockables.Add(dockable);
+    }
+
+    private bool HideTool(string id)
+    {
+        if (_rootDock is null ||
+            !_toolCache.TryGetValue(id, out var dockable) ||
+            !IsToolVisible(id) ||
+            dockable.Owner is not IDock)
+        {
+            return false;
+        }
+
+        HideDockable(dockable);
+        return true;
+    }
+
+    private bool AddToolToCurrentLayout(string id, IDockable dockable)
+    {
+        if (ResolveRestoreDock(id) is not { } dock)
+        {
+            return false;
+        }
+
+        AddToolToDock(dock, dockable);
+        return true;
+    }
+
+    private void AddToolToDock(IToolDock dock, IDockable dockable)
+    {
+        dockable.OriginalOwner = null;
+        if (dock.VisibleDockables?.Contains(dockable) != true)
+        {
+            AddDockable(dock, dockable);
+        }
+
+        dock.ActiveDockable = dockable;
+    }
+
+    private bool IsDockInCurrentLayout(IDock dock)
+    {
+        return _rootDock is not null &&
+               EnumerateVisibleDockables(_rootDock).Any(candidate => ReferenceEquals(candidate, dock));
+    }
+
+    private IRootDock? FindHiddenRoot(IDockable dockable)
+    {
+        return _rootDock is null
+            ? null
+            : EnumerateRoots(_rootDock)
+                .FirstOrDefault(root => root.HiddenDockables?.Contains(dockable) == true);
+    }
+
+    private void ActivateTool(IDockable dockable)
+    {
+        SetActiveDockable(dockable);
+        if (dockable.Owner is IDock owner)
+        {
+            owner.ActiveDockable = dockable;
+            SetFocusedDockable(owner, dockable);
+        }
+
+        ActivateWindow(dockable);
+    }
+
+    private static IEnumerable<IDockable> EnumerateVisibleDockables(IDockable dockable)
+    {
+        var visited = new HashSet<IDockable>();
+        foreach (var visibleDockable in EnumerateVisibleDockables(dockable, visited))
+        {
+            yield return visibleDockable;
+        }
+    }
+
+    private static IEnumerable<IDockable> EnumerateVisibleDockables(IDockable dockable, ISet<IDockable> visited)
+    {
+        if (!visited.Add(dockable))
+        {
+            yield break;
+        }
+
+        yield return dockable;
+
+        if (dockable is IRootDock rootDock)
+        {
+            foreach (var child in EnumerateDockableList(rootDock.LeftPinnedDockables, visited))
+            {
+                yield return child;
+            }
+
+            foreach (var child in EnumerateDockableList(rootDock.RightPinnedDockables, visited))
+            {
+                yield return child;
+            }
+
+            foreach (var child in EnumerateDockableList(rootDock.TopPinnedDockables, visited))
+            {
+                yield return child;
+            }
+
+            foreach (var child in EnumerateDockableList(rootDock.BottomPinnedDockables, visited))
+            {
+                yield return child;
+            }
+
+            if (rootDock.PinnedDock is { } pinnedDock)
+            {
+                foreach (var child in EnumerateVisibleDockables(pinnedDock, visited))
+                {
+                    yield return child;
+                }
+            }
+
+            if (rootDock.Windows is { } windows)
+            {
+                foreach (var window in windows)
+                {
+                    if (window.Layout is null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var child in EnumerateVisibleDockables(window.Layout, visited))
+                    {
+                        yield return child;
+                    }
+                }
+            }
+        }
+
+        if (dockable is IDock dock && dock.VisibleDockables is { } visibleDockables)
+        {
+            foreach (var child in EnumerateDockableList(visibleDockables, visited))
+            {
+                yield return child;
+            }
+        }
+    }
+
+    private static IEnumerable<IDockable> EnumerateDockableList(
+        IEnumerable<IDockable>? dockables,
+        ISet<IDockable> visited)
+    {
+        if (dockables is null)
+        {
+            yield break;
+        }
+
+        foreach (var dockable in dockables)
+        {
+            foreach (var child in EnumerateVisibleDockables(dockable, visited))
+            {
+                yield return child;
+            }
+        }
+    }
+
+    private static IEnumerable<IRootDock> EnumerateRoots(IRootDock rootDock)
+    {
+        var visited = new HashSet<IRootDock>();
+        foreach (var root in EnumerateRoots(rootDock, visited))
+        {
+            yield return root;
+        }
+    }
+
+    private static IEnumerable<IRootDock> EnumerateRoots(IRootDock rootDock, ISet<IRootDock> visited)
+    {
+        if (!visited.Add(rootDock))
+        {
+            yield break;
+        }
+
+        yield return rootDock;
+
+        if (rootDock.Windows is null)
+        {
+            yield break;
+        }
+
+        foreach (var window in rootDock.Windows)
+        {
+            if (window.Layout is not IRootDock childRoot)
+            {
+                continue;
+            }
+
+            foreach (var root in EnumerateRoots(childRoot, visited))
+            {
+                yield return root;
+            }
+        }
     }
 
     private static IHostWindow CreateHostWindow()
