@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XamlPlayground.Tests", "tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XamlPlayground.PreviewerHost", "src\XamlPlayground.PreviewerHost\XamlPlayground.PreviewerHost.csproj", "{C7FF5EE6-8EBF-48CE-82A4-8975FE42C879}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XamlPlayground.AvaloniaEdit.Minimap", "src\XamlPlayground.AvaloniaEdit.Minimap\XamlPlayground.AvaloniaEdit.Minimap.csproj", "{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -101,6 +103,18 @@ Global
 		{C7FF5EE6-8EBF-48CE-82A4-8975FE42C879}.Release|x64.Build.0 = Release|Any CPU
 		{C7FF5EE6-8EBF-48CE-82A4-8975FE42C879}.Release|x86.ActiveCfg = Release|Any CPU
 		{C7FF5EE6-8EBF-48CE-82A4-8975FE42C879}.Release|x86.Build.0 = Release|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Debug|x64.Build.0 = Debug|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Debug|x86.Build.0 = Debug|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Release|x64.ActiveCfg = Release|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Release|x64.Build.0 = Release|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Release|x86.ActiveCfg = Release|Any CPU
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -111,5 +125,6 @@ Global
 		{00E8340C-7F10-446C-A1B4-48C68D8F1612} = {9CF0A712-DEA1-42BC-AB3A-ED8E6DAE523C}
 		{1D42CA39-A4B7-44B5-949D-DA9AC63883A1} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{C7FF5EE6-8EBF-48CE-82A4-8975FE42C879} = {9CF0A712-DEA1-42BC-AB3A-ED8E6DAE523C}
+		{6F634DA9-B4BF-4598-AF4B-60F6AF08BD86} = {9CF0A712-DEA1-42BC-AB3A-ED8E6DAE523C}
 	EndGlobalSection
 EndGlobal
