@@ -35,7 +35,21 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Keep AOT enabled while avoiding mono-aot-cross crashes on Microsoft.Build.Locator. -->
+    <_AOT_InternalForceInterpretAssemblies Include="Microsoft.Build.Locator.dll" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\XamlPlayground\XamlPlayground.csproj" />
   </ItemGroup>
+
+  <Target Name="ExcludeMSBuildWorkspaceBuildHostFromBrowserWasm"
+          BeforeTargets="PrepareInputsForWasmBuild">
+    <ItemGroup>
+      <!-- Roslyn MSBuild workspace build-host support files are desktop helpers, not browser assemblies. -->
+      <WasmAssembliesToBundle Remove="@(WasmAssembliesToBundle)"
+                              Condition="$([System.String]::Copy('%(WasmAssembliesToBundle.Identity)').Contains('/BuildHost-')) OR $([System.String]::Copy('%(WasmAssembliesToBundle.Identity)').Contains('\BuildHost-'))" />
+    </ItemGroup>
+  </Target>
 
 </Project>
