@@ -3,7 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:XamlPlayground.ViewModels"
-             xmlns:ae="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:minimap="using:XamlPlayground.Editor.Minimap"
              xmlns:diag="using:Avalonia.Diagnostics"
              xmlns:i="clr-namespace:Avalonia.Xaml.Interactivity;assembly=Xaml.Behaviors.Interactivity"
              xmlns:behaviors="clr-namespace:XamlPlayground.Behaviors"
@@ -41,38 +41,40 @@
         </Style>
       </TabControl.Styles>
       <TabItem Header="Xaml">
-        <ae:TextEditor Margin="0"
-                       Classes="theme-aware"
-                       IsReadOnly="{OnFormFactor False, Mobile=True}"
-                       behaviors:TextEditorDocument.Document="{Binding CurrentSample.Xaml}"
-                       HorizontalScrollBarVisibility="Auto"
-                       VerticalScrollBarVisibility="Auto"
-                       FontFamily="avares://XamlPlayground/Assets/Fonts#Roboto Mono"
-                       ShowLineNumbers="True"
-                       FontWeight="Normal"
-                       FontSize="{Binding EditorFontSize}"
-                       WordWrap="False">
+        <minimap:MinimapTextEditor Margin="0"
+                                   Classes="theme-aware"
+                                   IsReadOnly="{OnFormFactor False, Mobile=True}"
+                                   behaviors:TextEditorDocument.Document="{Binding CurrentSample.Xaml}"
+                                   HorizontalScrollBarVisibility="Auto"
+                                   VerticalScrollBarVisibility="Auto"
+                                   FontFamily="avares://XamlPlayground/Assets/Fonts#Roboto Mono"
+                                   ShowLineNumbers="True"
+                                   FontWeight="Normal"
+                                   FontSize="{Binding EditorFontSize}"
+                                   WordWrap="False"
+                                   MinimapLanguage="xaml">
           <i:Interaction.Behaviors>
             <behaviors:TextEditorBehavior Extension=".xml" />
           </i:Interaction.Behaviors>
-        </ae:TextEditor>
+        </minimap:MinimapTextEditor>
       </TabItem>
       <TabItem Header="Code">
-        <ae:TextEditor Margin="0"
-                       Classes="theme-aware"
-                       IsReadOnly="{OnFormFactor False, Mobile=True}"
-                       behaviors:TextEditorDocument.Document="{Binding CurrentSample.Code}"
-                       HorizontalScrollBarVisibility="Auto"
-                       VerticalScrollBarVisibility="Auto"
-                       FontFamily="avares://XamlPlayground/Assets/Fonts#Roboto Mono"
-                       ShowLineNumbers="True"
-                       FontWeight="Normal"
-                       FontSize="{Binding EditorFontSize}"
-                       WordWrap="False">
+        <minimap:MinimapTextEditor Margin="0"
+                                   Classes="theme-aware"
+                                   IsReadOnly="{OnFormFactor False, Mobile=True}"
+                                   behaviors:TextEditorDocument.Document="{Binding CurrentSample.Code}"
+                                   HorizontalScrollBarVisibility="Auto"
+                                   VerticalScrollBarVisibility="Auto"
+                                   FontFamily="avares://XamlPlayground/Assets/Fonts#Roboto Mono"
+                                   ShowLineNumbers="True"
+                                   FontWeight="Normal"
+                                   FontSize="{Binding EditorFontSize}"
+                                   WordWrap="False"
+                                   MinimapLanguage="csharp">
           <i:Interaction.Behaviors>
             <behaviors:TextEditorBehavior Extension=".cs" />
           </i:Interaction.Behaviors>
-        </ae:TextEditor>
+        </minimap:MinimapTextEditor>
       </TabItem>
       <TabItem Header="Diagnostics">
         <diag:DevToolsView Root="{Binding DiagnosticsRoot}">

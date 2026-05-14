@@ -43,6 +43,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\XamlPlayground.AvaloniaEdit.Minimap\XamlPlayground.AvaloniaEdit.Minimap.csproj" />
     <ProjectReference Include="..\..\external\ProDataGrid\src\Avalonia.Controls.DataGrid\Avalonia.Controls.DataGrid.csproj" />
     <ProjectReference Include="..\..\external\ProDataGrid\src\ProDiagnostics\ProDiagnostics.csproj" />
   </ItemGroup>

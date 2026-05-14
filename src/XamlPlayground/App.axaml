@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="using:XamlPlayground"
              xmlns:ae="clr-namespace:AvaloniaEdit;assembly=AvaloniaEdit"
+             xmlns:minimap="using:XamlPlayground.Editor.Minimap"
              xmlns:dockCore="using:Dock.Model.Core"
              xmlns:dockFluent="using:Dock.Avalonia.Themes.Fluent"
              xmlns:dockVm="using:XamlPlayground.ViewModels.Docking"
@@ -80,6 +81,16 @@
           <SolidColorBrush x:Key="EditorSelectionForegroundBrush" Color="#000000" />
           <SolidColorBrush x:Key="EditorCaretBrush" Color="#000000" />
           <SolidColorBrush x:Key="EditorBorderBrush" Color="#D4D4D4" />
+          <SolidColorBrush x:Key="EditorMinimapBackgroundBrush" Color="#F8F8F8" />
+          <SolidColorBrush x:Key="EditorMinimapForegroundBrush" Color="#6E6E6E" />
+          <SolidColorBrush x:Key="EditorMinimapCommentBrush" Color="#008000" />
+          <SolidColorBrush x:Key="EditorMinimapKeywordBrush" Color="#0000FF" />
+          <SolidColorBrush x:Key="EditorMinimapStringBrush" Color="#A31515" />
+          <SolidColorBrush x:Key="EditorMinimapTagBrush" Color="#800000" />
+          <SolidColorBrush x:Key="EditorMinimapSliderBrush" Color="#00000024" />
+          <SolidColorBrush x:Key="EditorMinimapSliderPointerOverBrush" Color="#0000003F" />
+          <SolidColorBrush x:Key="EditorMinimapSectionHeaderForegroundBrush" Color="#0F4FA8" />
+          <SolidColorBrush x:Key="EditorMinimapSectionHeaderSeparatorBrush" Color="#0F4FA8" />
           <SolidColorBrush x:Key="ErrorPanelBackgroundBrush" Color="#FFF7F7" />
           <SolidColorBrush x:Key="ErrorPanelForegroundBrush" Color="#7A0000" />
           <SolidColorBrush x:Key="ErrorPanelBorderBrush" Color="#D14343" />
@@ -122,6 +133,16 @@
           <SolidColorBrush x:Key="EditorSelectionForegroundBrush" Color="#FFFFFF" />
           <SolidColorBrush x:Key="EditorCaretBrush" Color="#AEAFAD" />
           <SolidColorBrush x:Key="EditorBorderBrush" Color="#3C3C3C" />
+          <SolidColorBrush x:Key="EditorMinimapBackgroundBrush" Color="#252526" />
+          <SolidColorBrush x:Key="EditorMinimapForegroundBrush" Color="#858585" />
+          <SolidColorBrush x:Key="EditorMinimapCommentBrush" Color="#6A9955" />
+          <SolidColorBrush x:Key="EditorMinimapKeywordBrush" Color="#569CD6" />
+          <SolidColorBrush x:Key="EditorMinimapStringBrush" Color="#CE9178" />
+          <SolidColorBrush x:Key="EditorMinimapTagBrush" Color="#569CD6" />
+          <SolidColorBrush x:Key="EditorMinimapSliderBrush" Color="#FFFFFF24" />
+          <SolidColorBrush x:Key="EditorMinimapSliderPointerOverBrush" Color="#FFFFFF3F" />
+          <SolidColorBrush x:Key="EditorMinimapSectionHeaderForegroundBrush" Color="#DCDCAA" />
+          <SolidColorBrush x:Key="EditorMinimapSectionHeaderSeparatorBrush" Color="#DCDCAA" />
           <SolidColorBrush x:Key="ErrorPanelBackgroundBrush" Color="#3A1F23" />
           <SolidColorBrush x:Key="ErrorPanelForegroundBrush" Color="#FFCDD2" />
           <SolidColorBrush x:Key="ErrorPanelBorderBrush" Color="#8F454D" />
@@ -152,12 +173,28 @@
     <dockFluent:DockFluentTheme DensityStyle="Compact" />
     <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.v2.xaml" />
     <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+    <StyleInclude Source="avares://XamlPlayground.AvaloniaEdit.Minimap/Themes/Generic.axaml" />
     <StyleInclude Source="avares://XamlPlayground/Controls/AdaptiveControl.axaml" />
     <StyleInclude Source="avares://XamlPlayground/Controls/DesignInspectionDockStyles.axaml" />
     <Style Selector="ae|TextEditor.theme-aware">
       <Setter Property="Background" Value="{DynamicResource EditorBackgroundBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource EditorForegroundBrush}" />
       <Setter Property="LineNumbersForeground" Value="{DynamicResource EditorLineNumbersForegroundBrush}" />
+    </Style>
+    <Style Selector="minimap|MinimapTextEditor.theme-aware">
+      <Setter Property="Background" Value="{DynamicResource EditorBackgroundBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource EditorForegroundBrush}" />
+      <Setter Property="LineNumbersForeground" Value="{DynamicResource EditorLineNumbersForegroundBrush}" />
+      <Setter Property="MinimapBackground" Value="{DynamicResource EditorMinimapBackgroundBrush}" />
+      <Setter Property="MinimapForeground" Value="{DynamicResource EditorMinimapForegroundBrush}" />
+      <Setter Property="MinimapCommentBrush" Value="{DynamicResource EditorMinimapCommentBrush}" />
+      <Setter Property="MinimapKeywordBrush" Value="{DynamicResource EditorMinimapKeywordBrush}" />
+      <Setter Property="MinimapStringBrush" Value="{DynamicResource EditorMinimapStringBrush}" />
+      <Setter Property="MinimapTagBrush" Value="{DynamicResource EditorMinimapTagBrush}" />
+      <Setter Property="MinimapSliderBrush" Value="{DynamicResource EditorMinimapSliderBrush}" />
+      <Setter Property="MinimapSliderPointerOverBrush" Value="{DynamicResource EditorMinimapSliderPointerOverBrush}" />
+      <Setter Property="MinimapSectionHeaderForeground" Value="{DynamicResource EditorMinimapSectionHeaderForegroundBrush}" />
+      <Setter Property="MinimapSectionHeaderSeparatorBrush" Value="{DynamicResource EditorMinimapSectionHeaderSeparatorBrush}" />
     </Style>
     <Style Selector="DockControl">
       <Setter Property="(recycling:ControlRecyclingDataTemplate.ControlRecycling)"
