@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Linq;
 using Avalonia.Diagnostics;
 using Dock.Model.Controls;
 using Dock.Model.Core;
@@ -24,6 +25,11 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
     public MainViewModel Shell { get; }
 
     public InMemoryProjectFile File { get; }
+
+    public InMemoryProject? Project =>
+        Shell.Solution?.Projects.FirstOrDefault(project =>
+            project.Files.Any(projectFile => ReferenceEquals(projectFile, File))) ??
+        Shell.ActiveProject;
 
     public string Extension => File.Extension;
 
@@ -64,6 +70,10 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
                 break;
             case nameof(MainViewModel.VisualEditorSourceSelectionVersion):
                 OnPropertyChanged(nameof(VisualEditorSourceSelectionVersion));
+                break;
+            case nameof(MainViewModel.Solution):
+            case nameof(MainViewModel.ActiveProject):
+                OnPropertyChanged(nameof(Project));
                 break;
         }
     }
