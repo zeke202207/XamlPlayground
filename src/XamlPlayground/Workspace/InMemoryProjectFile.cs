@@ -103,6 +103,36 @@ public sealed partial class InMemoryProjectFile : ObservableObject
         }
     }
 
+    public void ApplyTextEdit(string text)
+    {
+        if (Text == text)
+        {
+            return;
+        }
+
+        try
+        {
+            Document.BeginUpdate();
+            try
+            {
+                Document.Replace(0, Document.TextLength, text);
+            }
+            finally
+            {
+                Document.EndUpdate();
+            }
+
+            _textSnapshot = text;
+        }
+        catch (InvalidOperationException)
+        {
+            _textSnapshot = text;
+            ReplaceDocument(new TextDocument { Text = text });
+            IsDirty = true;
+            _changed?.Invoke(this);
+        }
+    }
+
     public void MarkClean()
     {
         IsDirty = false;

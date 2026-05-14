@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Diagnostics;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -86,6 +87,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private readonly IDockThemeManager _dockThemeManager;
     private readonly InMemorySolutionFactory _solutionFactory;
     private readonly WorkspaceRemotePreviewService _remotePreviewService = new();
+    private IDevToolsPropertyEditHandler _diagnosticsPropertyEditHandler = null!;
     private bool _update;
     private bool _rerunRequested;
     private bool _openingSample;
@@ -96,6 +98,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private IDisposable? _solutionExplorerSearchThrottle;
     private int _solutionExplorerSearchRevision;
     private IDisposable? _timer;
+
+    public DevToolsOptions DiagnosticsDevToolsOptions { get; private set; } = null!;
 
     public MainViewModel(string? initialGist)
     {

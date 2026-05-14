@@ -14,6 +14,8 @@ using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.DataGridHierarchical;
+using Avalonia.Diagnostics;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -338,6 +340,8 @@ public partial class MainViewModel
         _controlThemeCatalog = new FluentControlThemeCatalog();
         _visualTreeSnapshotService = new AvaloniaVisualTreeSnapshotService();
         _visualSelectionService = new VisualEditorSelectionService(_visualMutationEngine, new XamlVisualTreeMapper());
+        _diagnosticsPropertyEditHandler = new DiagnosticsPropertyEditHandler(this);
+        DiagnosticsDevToolsOptions = CreateDiagnosticsDevToolsOptions(_diagnosticsPropertyEditHandler);
 
         RefreshVisualEditorCommand = new RelayCommand(() => RefreshVisualEditingModel());
         ApplyVisualEditorPropertyCommand = new RelayCommand(ApplyVisualEditorProperty);
@@ -2916,7 +2920,148 @@ public partial class MainViewModel
         return value.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
+    private static DevToolsOptions CreateDiagnosticsDevToolsOptions(IDevToolsPropertyEditHandler propertyEditHandler)
+    {
+        return new DevToolsOptions
+        {
+            ShowMenu = false,
+            ShowResourcesTab = false,
+            ShowAssetsTab = false,
+            ScopeEventsToRoot = true,
+            PropertyEditHandler = propertyEditHandler
+        };
+    }
+
+    private void ApplyDiagnosticsPropertyEdit(DevToolsPropertyEdit edit)
+    {
+        if (_isApplyingVisualEditorMutation ||
+            ActiveXamlFile is not { } xamlFile ||
+            edit.Target is not Control control ||
+            !ReferenceEquals(edit.Target, edit.InspectedObject) ||
+            string.IsNullOrWhiteSpace(edit.XamlPropertyName) ||
+            !TryFormatDiagnosticsPropertyValue(edit, out var value))
+        {
+            return;
+        }
+
+        if (!TryResolveVisualEditorPreviewControl(
+                control,
+                out _,
+                out var element,
+                out var diagnostics))
+        {
+            VisualEditorStatus = string.Join(Environment.NewLine, diagnostics);
+            return;
+        }
+
+        _visualEditorSelectedSelector = element.Selector;
+        VisualEditorPropertyName = edit.XamlPropertyName;
+        VisualEditorPropertyValue = value;
+        var result = _visualMutationEngine.SetProperty(
+            xamlFile.Text,
+            element.Selector,
+            edit.XamlPropertyName,
+            value);
+        ApplyVisualEditorMutation(result);
+
+        if (result.Success)
+        {
+            VisualEditorStatus = $"Updated {edit.XamlPropertyName} from diagnostics.";
+        }
+    }
+
+    private static bool TryFormatDiagnosticsPropertyValue(DevToolsPropertyEdit edit, out string value)
+    {
+        value = string.Empty;
+
+        switch (edit.NewValue)
+        {
+            case null:
+                return false;
+            case string text:
+                value = text;
+                return true;
+            case bool flag:
+                value = flag ? "True" : "False";
+                return true;
+            case double number when double.IsNaN(number) || double.IsInfinity(number):
+                return false;
+            case double number:
+                value = FormatDiagnosticsDouble(number);
+                return true;
+            case float number when float.IsNaN(number) || float.IsInfinity(number):
+                return false;
+            case float number:
+                value = number.ToString("R", CultureInfo.InvariantCulture);
+                return true;
+            case decimal number:
+                value = number.ToString(CultureInfo.InvariantCulture);
+                return true;
+            case int or long or short or byte or uint or ulong or ushort or sbyte:
+                value = ((IFormattable)edit.NewValue).ToString(null, CultureInfo.InvariantCulture);
+                return true;
+            case Enum enumValue:
+                value = enumValue.ToString();
+                return true;
+            case Color color:
+                value = color.ToString();
+                return true;
+            case ISolidColorBrush solidColorBrush:
+                value = solidColorBrush.Color.ToString();
+                return true;
+            case Thickness thickness:
+                value = string.Join(
+                    ",",
+                    FormatDiagnosticsDouble(thickness.Left),
+                    FormatDiagnosticsDouble(thickness.Top),
+                    FormatDiagnosticsDouble(thickness.Right),
+                    FormatDiagnosticsDouble(thickness.Bottom));
+                return true;
+            case CornerRadius cornerRadius:
+                value = string.Join(
+                    ",",
+                    FormatDiagnosticsDouble(cornerRadius.TopLeft),
+                    FormatDiagnosticsDouble(cornerRadius.TopRight),
+                    FormatDiagnosticsDouble(cornerRadius.BottomRight),
+                    FormatDiagnosticsDouble(cornerRadius.BottomLeft));
+                return true;
+        }
+
+        if (edit.NewValueText is not { } valueText)
+        {
+            return false;
+        }
+
+        if (valueText.Length == 0 && edit.PropertyType != typeof(string))
+        {
+            return false;
+        }
+
+        value = valueText;
+        return true;
+    }
+
+    private static string FormatDiagnosticsDouble(double value)
+    {
+        return value.ToString("R", CultureInfo.InvariantCulture);
+    }
+
     private readonly record struct DesignerThickness(double Left, double Top, double Right, double Bottom);
+
+    private sealed class DiagnosticsPropertyEditHandler : IDevToolsPropertyEditHandler
+    {
+        private readonly MainViewModel _owner;
+
+        public DiagnosticsPropertyEditHandler(MainViewModel owner)
+        {
+            _owner = owner;
+        }
+
+        public void OnPropertyEdited(DevToolsPropertyEdit edit)
+        {
+            _owner.ApplyDiagnosticsPropertyEdit(edit);
+        }
+    }
 
     private sealed record ThemeEditScope(
         InMemoryProjectFile OwnerFile,
@@ -5770,7 +5915,7 @@ public partial class MainViewModel
         try
         {
             _isApplyingVisualEditorMutation = true;
-            ActiveXamlFile.Text = result.Text;
+            ActiveXamlFile.ApplyTextEdit(result.Text);
             _visualEditorDocument = result.Snapshot;
             _visualEditorSelectedSelector = selectedSelector;
             RefreshVisualEditingModel();

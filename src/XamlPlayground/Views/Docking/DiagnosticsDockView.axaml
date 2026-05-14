@@ -8,13 +8,6 @@
              x:Class="XamlPlayground.Views.Docking.DiagnosticsDockView"
              x:CompileBindings="True" x:DataType="vm:DiagnosticToolDockViewModel">
   <diag:DevToolsView Root="{Binding Shell.DiagnosticsRoot}"
-                     ViewKind="{Binding ViewKind}">
-    <diag:DevToolsView.Options>
-      <diag:DevToolsOptions ShowMenu="False"
-                            ShowResourcesTab="False"
-                            ShowAssetsTab="False"
-                            ShowEventsTab="False"
-                            ScopeEventsToRoot="True" />
-    </diag:DevToolsView.Options>
-  </diag:DevToolsView>
+                     ViewKind="{Binding ViewKind}"
+                     Options="{Binding Options}" />
 </UserControl>
