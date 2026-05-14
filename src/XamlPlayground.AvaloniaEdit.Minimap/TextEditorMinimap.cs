@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Globalization;
@@ -12,6 +13,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
+using AvaloniaEdit.Folding;
 using AvaloniaEdit.Rendering;
 
 namespace XamlPlayground.Editor.Minimap;
@@ -683,15 +685,19 @@ public class TextEditorMinimap : Control
         var scrollHeight = Math.Max(viewportHeight, scrollable.Extent.Height);
         var scrollTop = Math.Clamp(scrollable.Offset.Y, 0, Math.Max(0, scrollHeight - viewportHeight));
         var lineCount = Math.Max(1, document.LineCount);
+        var foldedLineMap = CreateFoldedLineMap(editor, document);
+        var visibleLineCount = foldedLineMap.VisibleLineCount;
         var documentHeight = Math.Max(editorLineHeight, textView.DocumentHeight);
         var viewportStartLine = GetDocumentLineByVisualTop(textView, scrollTop, lineCount);
         var viewportEndLine = GetDocumentLineByVisualTop(textView, scrollTop + viewportHeight, lineCount);
         var viewportStartTop = GetVisualTopByDocumentLine(textView, viewportStartLine);
         var extraLinesAtBottom = Math.Max(0, (scrollHeight - documentHeight) / editorLineHeight);
-        var lineHeight = GetMinimapLineHeight(lineCount, minimapHeight, editorLineHeight, extraLinesAtBottom, out var heightIsEditorHeight);
+        var lineHeight = GetMinimapLineHeight(visibleLineCount, minimapHeight, editorLineHeight, extraLinesAtBottom, out var heightIsEditorHeight);
 
         return new MinimapMetrics(
             LineCount: lineCount,
+            VisibleLineCount: visibleLineCount,
+            FoldedLineMap: foldedLineMap,
             EditorLineHeight: editorLineHeight,
             MinimapLineHeight: lineHeight,
             MinimapHeight: minimapHeight,
@@ -700,6 +706,8 @@ public class TextEditorMinimap : Control
             ScrollTop: scrollTop,
             ViewportStartLineNumber: viewportStartLine,
             ViewportEndLineNumber: viewportEndLine,
+            ViewportStartVisibleLineIndex: foldedLineMap.GetVisibleIndexOrNearest(viewportStartLine),
+            ViewportEndVisibleLineIndex: foldedLineMap.GetVisibleIndexOrNearest(viewportEndLine),
             ViewportStartLineTop: viewportStartTop,
             ExtraLinesAtBottom: extraLinesAtBottom,
             HeightIsEditorHeight: heightIsEditorHeight);
@@ -752,12 +760,18 @@ public class TextEditorMinimap : Control
         var sliderRatio = GetSliderRatio(maxSliderTop, metrics);
         var sliderTop = Math.Clamp(metrics.ScrollTop * sliderRatio, 0, maxSliderTop);
         var maxLinesFitting = Math.Max(1, (int)Math.Floor(metrics.MinimapHeight / metrics.MinimapLineHeight));
-        var isSampling = maxLinesFitting < metrics.LineCount;
+        var isSampling = maxLinesFitting < metrics.VisibleLineCount;
+        var endVisibleLineIndex = isSampling
+            ? metrics.VisibleLineCount - 1
+            : Math.Min(metrics.VisibleLineCount - 1, maxLinesFitting - 1);
 
         return new MinimapLayout(
             metrics.MinimapLineHeight,
-            1,
-            isSampling ? metrics.LineCount : Math.Min(metrics.LineCount, maxLinesFitting),
+            metrics.FoldedLineMap.GetLineNumberAtVisibleIndex(0),
+            metrics.FoldedLineMap.GetLineNumberAtVisibleIndex(endVisibleLineIndex),
+            metrics.FoldedLineMap,
+            0,
+            endVisibleLineIndex,
             0,
             maxSliderTop > 0,
             sliderTop,
@@ -775,20 +789,23 @@ public class TextEditorMinimap : Control
             1,
             metrics.MinimapHeight);
         var maxSliderTop = metrics.ExtraLinesAtBottom > 0
-            ? (metrics.LineCount + metrics.ExtraLinesAtBottom - expectedViewportLineCount - 1) * metrics.MinimapLineHeight
-            : Math.Max(0, metrics.LineCount * metrics.MinimapLineHeight - sliderHeight);
+            ? (metrics.VisibleLineCount + metrics.ExtraLinesAtBottom - expectedViewportLineCount - 1) * metrics.MinimapLineHeight
+            : Math.Max(0, metrics.VisibleLineCount * metrics.MinimapLineHeight - sliderHeight);
 
         maxSliderTop = Math.Clamp(maxSliderTop, 0, Math.Max(0, metrics.MinimapHeight - sliderHeight));
         var sliderRatio = GetSliderRatio(maxSliderTop, metrics);
         var sliderTop = Math.Clamp(metrics.ScrollTop * sliderRatio, 0, maxSliderTop);
         var minimapLinesFitting = Math.Max(1, (int)Math.Floor(metrics.MinimapHeight / metrics.MinimapLineHeight));
 
-        if (minimapLinesFitting >= metrics.LineCount + metrics.ExtraLinesAtBottom)
+        if (minimapLinesFitting >= metrics.VisibleLineCount + metrics.ExtraLinesAtBottom)
         {
             return new MinimapLayout(
                 metrics.MinimapLineHeight,
-                1,
-                metrics.LineCount,
+                metrics.FoldedLineMap.GetLineNumberAtVisibleIndex(0),
+                metrics.FoldedLineMap.GetLineNumberAtVisibleIndex(metrics.VisibleLineCount - 1),
+                metrics.FoldedLineMap,
+                0,
+                metrics.VisibleLineCount - 1,
                 0,
                 maxSliderTop > 0,
                 sliderTop,
@@ -798,24 +815,27 @@ public class TextEditorMinimap : Control
                 0);
         }
 
-        var consideringStartLineNumber = metrics.ViewportStartLineNumber > 1
-            ? metrics.ViewportStartLineNumber
-            : Math.Max(1, metrics.ScrollTop / metrics.EditorLineHeight);
-        var startLineNumber = Math.Clamp(
-            (int)Math.Floor(consideringStartLineNumber - sliderTop / metrics.MinimapLineHeight),
-            1,
-            metrics.LineCount);
-        var endLineNumber = Math.Min(metrics.LineCount, startLineNumber + minimapLinesFitting - 1);
+        var consideringStartVisibleLineIndex = metrics.ViewportStartVisibleLineIndex >= 0
+            ? metrics.ViewportStartVisibleLineIndex
+            : Math.Max(0, metrics.ScrollTop / metrics.EditorLineHeight);
+        var startVisibleLineIndex = Math.Clamp(
+            (int)Math.Floor(consideringStartVisibleLineIndex - sliderTop / metrics.MinimapLineHeight),
+            0,
+            metrics.VisibleLineCount - 1);
+        var endVisibleLineIndex = Math.Min(metrics.VisibleLineCount - 1, startVisibleLineIndex + minimapLinesFitting - 1);
         var partialLine = (metrics.ScrollTop - metrics.ViewportStartLineTop) / metrics.EditorLineHeight;
         var sliderTopAligned = Math.Clamp(
-            (metrics.ViewportStartLineNumber - startLineNumber + partialLine) * metrics.MinimapLineHeight,
+            (metrics.ViewportStartVisibleLineIndex - startVisibleLineIndex + partialLine) * metrics.MinimapLineHeight,
             0,
             Math.Max(0, metrics.MinimapHeight - sliderHeight));
 
         return new MinimapLayout(
             metrics.MinimapLineHeight,
-            startLineNumber,
-            endLineNumber,
+            metrics.FoldedLineMap.GetLineNumberAtVisibleIndex(startVisibleLineIndex),
+            metrics.FoldedLineMap.GetLineNumberAtVisibleIndex(endVisibleLineIndex),
+            metrics.FoldedLineMap,
+            startVisibleLineIndex,
+            endVisibleLineIndex,
             0,
             true,
             sliderTopAligned,
@@ -856,6 +876,118 @@ public class TextEditorMinimap : Control
         }
     }
 
+    private static FoldedLineMap CreateFoldedLineMap(TextEditor editor, TextDocument document)
+    {
+        var hiddenRanges = GetHiddenLineRanges(editor, document);
+        return CreateFoldedLineMap(document.LineCount, hiddenRanges);
+    }
+
+    private static FoldedLineMap CreateFoldedLineMap(int lineCount, IEnumerable<HiddenLineRange> hiddenRanges)
+    {
+        var mergedRanges = MergeHiddenLineRanges(hiddenRanges, lineCount);
+        var visibleLineNumbers = new List<int>(lineCount);
+        var lineToVisibleIndex = Enumerable.Repeat(-1, lineCount + 1).ToArray();
+        var rangeIndex = 0;
+
+        for (var lineNumber = 1; lineNumber <= lineCount; lineNumber++)
+        {
+            while (rangeIndex < mergedRanges.Count && lineNumber > mergedRanges[rangeIndex].EndLineNumber)
+            {
+                rangeIndex++;
+            }
+
+            var isHidden = rangeIndex < mergedRanges.Count &&
+                           lineNumber >= mergedRanges[rangeIndex].StartLineNumber &&
+                           lineNumber <= mergedRanges[rangeIndex].EndLineNumber;
+            if (isHidden)
+            {
+                continue;
+            }
+
+            lineToVisibleIndex[lineNumber] = visibleLineNumbers.Count;
+            visibleLineNumbers.Add(lineNumber);
+        }
+
+        if (visibleLineNumbers.Count == 0)
+        {
+            visibleLineNumbers.Add(1);
+            lineToVisibleIndex[1] = 0;
+        }
+
+        return new FoldedLineMap(visibleLineNumbers.ToArray(), lineToVisibleIndex);
+    }
+
+    private static IReadOnlyList<HiddenLineRange> GetHiddenLineRanges(TextEditor editor, TextDocument document)
+    {
+        var foldingManager = GetFoldingManager(editor);
+        if (foldingManager is null)
+        {
+            return [];
+        }
+
+        var ranges = new List<HiddenLineRange>();
+        foreach (var folding in foldingManager.AllFoldings)
+        {
+            if (!folding.IsFolded)
+            {
+                continue;
+            }
+
+            var startLine = document.GetLineByOffset(folding.StartOffset).LineNumber;
+            var endOffset = Math.Max(folding.StartOffset, folding.EndOffset - 1);
+            var endLine = document.GetLineByOffset(endOffset).LineNumber;
+            var hiddenStartLine = Math.Min(document.LineCount, startLine + 1);
+            var hiddenEndLine = Math.Min(document.LineCount, Math.Max(hiddenStartLine - 1, endLine));
+            if (hiddenStartLine <= hiddenEndLine)
+            {
+                ranges.Add(new HiddenLineRange(hiddenStartLine, hiddenEndLine));
+            }
+        }
+
+        return ranges;
+    }
+
+    private static FoldingManager? GetFoldingManager(TextEditor editor)
+    {
+        return editor.TextArea.TextView.ElementGenerators
+            .OfType<FoldingElementGenerator>()
+            .Select(static generator => generator.FoldingManager)
+            .FirstOrDefault(manager => manager is not null);
+    }
+
+    private static List<HiddenLineRange> MergeHiddenLineRanges(IEnumerable<HiddenLineRange> ranges, int lineCount)
+    {
+        var orderedRanges = ranges
+            .Select(range => new HiddenLineRange(
+                Math.Clamp(range.StartLineNumber, 1, lineCount),
+                Math.Clamp(range.EndLineNumber, 1, lineCount)))
+            .Where(static range => range.StartLineNumber <= range.EndLineNumber)
+            .OrderBy(static range => range.StartLineNumber)
+            .ToList();
+        if (orderedRanges.Count <= 1)
+        {
+            return orderedRanges;
+        }
+
+        var mergedRanges = new List<HiddenLineRange>();
+        var current = orderedRanges[0];
+        for (var i = 1; i < orderedRanges.Count; i++)
+        {
+            var next = orderedRanges[i];
+            if (next.StartLineNumber <= current.EndLineNumber + 1)
+            {
+                current = new HiddenLineRange(current.StartLineNumber, Math.Max(current.EndLineNumber, next.EndLineNumber));
+                continue;
+            }
+
+            mergedRanges.Add(current);
+            current = next;
+        }
+
+        mergedRanges.Add(current);
+        return mergedRanges;
+    }
+
     private void DrawDocument(DrawingContext context, TextDocument document, MinimapLayout layout)
     {
         var width = Math.Max(0, Bounds.Width - 3);
@@ -868,9 +1000,10 @@ public class TextEditorMinimap : Control
 
         var renderedLines = 0;
 
-        for (var lineNumber = layout.StartLineNumber; lineNumber <= layout.EndLineNumber; lineNumber++)
+        for (var visibleLineIndex = layout.StartVisibleLineIndex; visibleLineIndex <= layout.EndVisibleLineIndex; visibleLineIndex++)
         {
-            var y = layout.GetY(lineNumber);
+            var lineNumber = layout.GetLineNumberAtVisibleIndex(visibleLineIndex);
+            var y = layout.GetYForVisibleLineIndex(visibleLineIndex);
             if (y > Bounds.Height)
             {
                 break;
@@ -1010,7 +1143,7 @@ public class TextEditorMinimap : Control
             }
 
             var y = layout.GetY(decoration.LineNumber);
-            if (y > Bounds.Height || y + decoration.Thickness < 0)
+            if (double.IsNaN(y) || y > Bounds.Height || y + decoration.Thickness < 0)
             {
                 continue;
             }
@@ -1294,6 +1427,8 @@ public class TextEditorMinimap : Control
 
     private readonly record struct MinimapMetrics(
         int LineCount,
+        int VisibleLineCount,
+        FoldedLineMap FoldedLineMap,
         double EditorLineHeight,
         double MinimapLineHeight,
         double MinimapHeight,
@@ -1302,6 +1437,8 @@ public class TextEditorMinimap : Control
         double ScrollTop,
         int ViewportStartLineNumber,
         int ViewportEndLineNumber,
+        int ViewportStartVisibleLineIndex,
+        int ViewportEndVisibleLineIndex,
         double ViewportStartLineTop,
         double ExtraLinesAtBottom,
         bool HeightIsEditorHeight);
@@ -1310,6 +1447,9 @@ public class TextEditorMinimap : Control
         double LineHeight,
         int StartLineNumber,
         int EndLineNumber,
+        FoldedLineMap FoldedLineMap,
+        int StartVisibleLineIndex,
+        int EndVisibleLineIndex,
         int TopPaddingLineCount,
         bool SliderNeeded,
         double SliderTop,
@@ -1320,29 +1460,95 @@ public class TextEditorMinimap : Control
     {
         public double GetY(int lineNumber)
         {
+            var visibleLineIndex = FoldedLineMap.GetVisibleIndex(lineNumber);
+            if (visibleLineIndex < 0)
+            {
+                return double.NaN;
+            }
+
+            return GetYForVisibleLineIndex(visibleLineIndex);
+        }
+
+        public double GetYForVisibleLineIndex(int visibleLineIndex)
+        {
             if (IsSampling)
             {
                 var rowCount = Math.Max(1, SampleRowCount);
-                var lineCount = Math.Max(1, EndLineNumber - StartLineNumber + 1);
-                return Math.Floor((lineNumber - StartLineNumber) * rowCount / (double)lineCount) * LineHeight;
+                var visibleLineCount = Math.Max(1, EndVisibleLineIndex - StartVisibleLineIndex + 1);
+                return Math.Floor((visibleLineIndex - StartVisibleLineIndex) * rowCount / (double)visibleLineCount) * LineHeight;
             }
 
-            return (lineNumber - StartLineNumber + TopPaddingLineCount) * LineHeight;
+            return (visibleLineIndex - StartVisibleLineIndex + TopPaddingLineCount) * LineHeight;
+        }
+
+        public int GetLineNumberAtVisibleIndex(int visibleLineIndex)
+        {
+            return FoldedLineMap.GetLineNumberAtVisibleIndex(visibleLineIndex);
         }
 
         public int GetLineNumberForSampleRow(int row)
         {
             var rowCount = Math.Max(1, SampleRowCount);
-            var lineCount = Math.Max(1, EndLineNumber - StartLineNumber + 1);
-            if (rowCount == 1 || lineCount == 1)
+            var visibleLineCount = Math.Max(1, EndVisibleLineIndex - StartVisibleLineIndex + 1);
+            if (rowCount == 1 || visibleLineCount == 1)
             {
-                return StartLineNumber;
+                return FoldedLineMap.GetLineNumberAtVisibleIndex(StartVisibleLineIndex);
             }
 
-            var lineOffset = (int)Math.Round(row * (lineCount - 1) / (double)(rowCount - 1));
-            return Math.Clamp(StartLineNumber + lineOffset, StartLineNumber, EndLineNumber);
+            var visibleLineOffset = (int)Math.Round(row * (visibleLineCount - 1) / (double)(rowCount - 1));
+            return FoldedLineMap.GetLineNumberAtVisibleIndex(
+                Math.Clamp(StartVisibleLineIndex + visibleLineOffset, StartVisibleLineIndex, EndVisibleLineIndex));
         }
     }
+
+    private sealed class FoldedLineMap
+    {
+        private readonly int[] _visibleLineNumbers;
+        private readonly int[] _lineToVisibleIndex;
+
+        public FoldedLineMap(int[] visibleLineNumbers, int[] lineToVisibleIndex)
+        {
+            _visibleLineNumbers = visibleLineNumbers;
+            _lineToVisibleIndex = lineToVisibleIndex;
+        }
+
+        public int VisibleLineCount => _visibleLineNumbers.Length;
+
+        public int GetVisibleIndex(int lineNumber)
+        {
+            return lineNumber >= 0 && lineNumber < _lineToVisibleIndex.Length
+                ? _lineToVisibleIndex[lineNumber]
+                : -1;
+        }
+
+        public int GetVisibleIndexOrNearest(int lineNumber)
+        {
+            var visibleIndex = GetVisibleIndex(lineNumber);
+            if (visibleIndex >= 0)
+            {
+                return visibleIndex;
+            }
+
+            var nearestLine = Math.Clamp(lineNumber, 1, _lineToVisibleIndex.Length - 1);
+            for (var line = nearestLine; line >= 1; line--)
+            {
+                visibleIndex = GetVisibleIndex(line);
+                if (visibleIndex >= 0)
+                {
+                    return visibleIndex;
+                }
+            }
+
+            return 0;
+        }
+
+        public int GetLineNumberAtVisibleIndex(int visibleLineIndex)
+        {
+            return _visibleLineNumbers[Math.Clamp(visibleLineIndex, 0, _visibleLineNumbers.Length - 1)];
+        }
+    }
+
+    private readonly record struct HiddenLineRange(int StartLineNumber, int EndLineNumber);
 
     private readonly record struct SectionHeader(string Text, TextMinimapSectionHeaderStyle Style);
 }
