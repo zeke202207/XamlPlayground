@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.DataGridDragDrop;
 using Avalonia.Controls.DataGridHierarchical;
 using Avalonia.Controls.Primitives;
+using Avalonia.Diagnostics;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -1363,6 +1364,93 @@ public sealed class VisualEditingTests
                 row => row.Element.TypeName == "Button");
             viewModel.SelectedVisualEditorStructureRow = buttonRow;
             Assert.Equal(buttonRow.Node, viewModel.SelectedVisualEditorNode);
+        });
+    }
+
+    [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsMutateXamlWithUndoRedo()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <Button x:Name="Action" Content="Run" />
+                                             </StackPanel>
+                                             """;
+            var root = Assert.IsAssignableFrom<StackPanel>(
+                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+            var button = Assert.IsType<Button>(root.Children.Single());
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+            Assert.True(viewModel.DiagnosticsDevToolsOptions.ShowEventsTab);
+            var handler = viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!;
+
+            handler.OnPropertyEdited(new DevToolsPropertyEdit(
+                button,
+                button,
+                "Content",
+                "Content",
+                typeof(object),
+                typeof(ContentControl),
+                "Run",
+                "Apply",
+                "Run",
+                "Apply",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Content=\"Apply\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.True(viewModel.ActiveXamlFile.Document.UndoStack.CanUndo);
+
+            viewModel.ActiveXamlFile.Document.UndoStack.Undo();
+            Assert.Contains("Content=\"Run\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Content=\"Apply\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+
+            viewModel.ActiveXamlFile.Document.UndoStack.Redo();
+            Assert.Contains("Content=\"Apply\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsPreserveNumericPrecision()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <Button x:Name="Action" Width="24" />
+                                             </StackPanel>
+                                             """;
+            var root = Assert.IsAssignableFrom<StackPanel>(
+                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+            var button = Assert.IsType<Button>(root.Children.Single());
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+            var handler = viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!;
+
+            handler.OnPropertyEdited(new DevToolsPropertyEdit(
+                button,
+                button,
+                "Width",
+                "Width",
+                typeof(double),
+                typeof(Layoutable),
+                24d,
+                12.345678912345d,
+                "24",
+                "12.345678912345",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Width=\"12.345678912345\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
         });
     }
 
