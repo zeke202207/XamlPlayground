@@ -6,6 +6,8 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml;
+using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Media;
 
@@ -110,6 +112,211 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         return Task.FromResult<EditorSignatureHelp?>(null);
     }
 
+    public Task<IReadOnlyList<EditorDiagnostic>> GetDiagnosticsAsync(
+        string text,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var diagnostics = new List<EditorDiagnostic>();
+        try
+        {
+            _ = XDocument.Parse(text, LoadOptions.PreserveWhitespace);
+        }
+        catch (XmlException exception)
+        {
+            diagnostics.Add(CreateXmlExceptionDiagnostic(text, exception));
+            return Task.FromResult<IReadOnlyList<EditorDiagnostic>>(diagnostics);
+        }
+        catch (Exception exception)
+        {
+            diagnostics.Add(new EditorDiagnostic(
+                0,
+                Math.Min(1, text.Length),
+                exception.Message,
+                EditorDiagnosticSeverity.Error));
+            return Task.FromResult<IReadOnlyList<EditorDiagnostic>>(diagnostics);
+        }
+
+        var catalog = GetCatalog();
+        var namespaces = GetXmlNamespaces(text);
+        foreach (Match match in ElementRegex().Matches(text))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (match.Groups["closing"].Success)
+            {
+                continue;
+            }
+
+            var tagName = match.Groups["name"].Value;
+            if (IsPropertyElement(tagName))
+            {
+                continue;
+            }
+
+            var resolvedType = ResolveType(tagName, namespaces, catalog);
+            if (resolvedType is null)
+            {
+                diagnostics.Add(new EditorDiagnostic(
+                    match.Groups["name"].Index,
+                    match.Groups["name"].Index + tagName.Length,
+                    $"Unknown XAML type '{tagName}'.",
+                    EditorDiagnosticSeverity.Warning,
+                    "XAML1001"));
+                continue;
+            }
+
+            var rest = match.Groups["rest"];
+            foreach (Match attributeMatch in AttributeRegex().Matches(rest.Value))
+            {
+                var attributeName = attributeMatch.Groups["name"].Value;
+                if (ShouldSkipAttributeDiagnostic(attributeName))
+                {
+                    continue;
+                }
+
+                if (ResolveMember(resolvedType.Type, attributeName, catalog) is null)
+                {
+                    var start = rest.Index + attributeMatch.Groups["name"].Index;
+                    diagnostics.Add(new EditorDiagnostic(
+                        start,
+                        start + attributeName.Length,
+                        $"Unknown member '{attributeName}' on '{tagName}'.",
+                        EditorDiagnosticSeverity.Warning,
+                        "XAML1002"));
+                }
+            }
+        }
+
+        return Task.FromResult<IReadOnlyList<EditorDiagnostic>>(diagnostics);
+    }
+
+    public Task<EditorLocation?> GetDefinitionAsync(
+        string text,
+        int position,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        position = ClampPosition(text, position);
+        var token = GetXmlNameSpan(text, position);
+        if (token.Start == token.End)
+        {
+            return Task.FromResult<EditorLocation?>(null);
+        }
+
+        var tokenText = text[token.Start..token.End];
+        var key = TryReadResourceKeyAt(text, token.Start, token.End);
+        if (key is not null && FindResourceDefinition(text, key) is { } definition)
+        {
+            return Task.FromResult<EditorLocation?>(definition);
+        }
+
+        var context = XamlCompletionContext.Create(text, position);
+        if (context is null)
+        {
+            return Task.FromResult<EditorLocation?>(null);
+        }
+
+        var namespaces = GetXmlNamespaces(text);
+        var catalog = GetCatalog();
+        if (context.Kind is XamlCompletionContextKind.ElementName or XamlCompletionContextKind.ClosingTag &&
+            ResolveType(tokenText, namespaces, catalog) is { } type)
+        {
+            return Task.FromResult<EditorLocation?>(CreateMetadataLocation(type.Type.FullName ?? type.Name));
+        }
+
+        var ownerElementName = context.TagName ?? GetOpenElementStack(text, position).LastOrDefault();
+        if (ownerElementName is not null &&
+            ResolveType(ownerElementName, namespaces, catalog) is { } ownerType &&
+            ResolveMember(ownerType.Type, tokenText, catalog) is { } member)
+        {
+            return Task.FromResult<EditorLocation?>(CreateMetadataLocation(member.Description));
+        }
+
+        return Task.FromResult<EditorLocation?>(null);
+    }
+
+    public Task<IReadOnlyList<EditorReference>> GetReferencesAsync(
+        string text,
+        int position,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        position = ClampPosition(text, position);
+        var token = GetXmlNameSpan(text, position);
+        if (token.Start == token.End)
+        {
+            return Task.FromResult<IReadOnlyList<EditorReference>>([]);
+        }
+
+        var key = TryReadResourceKeyAt(text, token.Start, token.End);
+        if (key is null)
+        {
+            return Task.FromResult<IReadOnlyList<EditorReference>>([]);
+        }
+
+        var references = new List<EditorReference>();
+        if (FindResourceDefinition(text, key) is { } definition)
+        {
+            references.Add(new EditorReference(definition, true));
+        }
+
+        foreach (Match match in ResourceReferenceRegex().Matches(text))
+        {
+            var value = match.Groups["key"].Value;
+            if (!string.Equals(value, key, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var start = match.Groups["key"].Index;
+            references.Add(new EditorReference(
+                CreateLocation(text, start, start + value.Length, filePath: null),
+                false));
+        }
+
+        return Task.FromResult<IReadOnlyList<EditorReference>>(references
+            .OrderBy(static reference => reference.Location.StartOffset)
+            .ToArray());
+    }
+
+    public Task<string?> FormatDocumentAsync(
+        string text,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        try
+        {
+            var formatted = XDocument.Parse(text, LoadOptions.PreserveWhitespace).ToString(SaveOptions.None);
+            return Task.FromResult<string?>(formatted);
+        }
+        catch
+        {
+            return Task.FromResult<string?>(null);
+        }
+    }
+
+    public Task<IReadOnlyList<EditorDocumentSymbol>> GetDocumentSymbolsAsync(
+        string text,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var symbols = ElementRegex()
+            .Matches(text)
+            .Where(static match => !match.Groups["closing"].Success)
+            .Select(match => CreateDocumentSymbol(text, match))
+            .Where(static symbol => symbol is not null)
+            .Cast<EditorDocumentSymbol>()
+            .ToArray();
+
+        return Task.FromResult<IReadOnlyList<EditorDocumentSymbol>>(symbols);
+    }
+
     public static void RegisterWorkspaceAssemblies(IEnumerable<Assembly> assemblies)
     {
         lock (s_catalogLock)
@@ -130,6 +337,185 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
                 s_catalog = null;
             }
         }
+    }
+
+    private static EditorDiagnostic CreateXmlExceptionDiagnostic(string text, XmlException exception)
+    {
+        var start = GetOffsetFromLineColumn(text, exception.LineNumber, exception.LinePosition);
+        var end = start < text.Length ? start + 1 : start;
+        return new EditorDiagnostic(
+            start,
+            end,
+            exception.Message,
+            EditorDiagnosticSeverity.Error,
+            "XML");
+    }
+
+    private static bool IsPropertyElement(string tagName)
+    {
+        return GetLocalName(tagName).Contains('.', StringComparison.Ordinal);
+    }
+
+    private static bool ShouldSkipAttributeDiagnostic(string attributeName)
+    {
+        return attributeName.StartsWith("xmlns", StringComparison.Ordinal) ||
+               attributeName.StartsWith("x:", StringComparison.Ordinal) ||
+               attributeName.StartsWith("xml:", StringComparison.Ordinal) ||
+               attributeName.StartsWith("d:", StringComparison.Ordinal) ||
+               attributeName.StartsWith("mc:", StringComparison.Ordinal);
+    }
+
+    private static string? TryReadResourceKeyAt(string text, int startOffset, int endOffset)
+    {
+        foreach (Match match in ResourceReferenceRegex().Matches(text))
+        {
+            var group = match.Groups["key"];
+            if (startOffset >= group.Index && endOffset <= group.Index + group.Length)
+            {
+                return group.Value;
+            }
+        }
+
+        foreach (Match match in ResourceDefinitionRegex().Matches(text))
+        {
+            var group = match.Groups["key"];
+            if (startOffset >= group.Index && endOffset <= group.Index + group.Length)
+            {
+                return group.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static EditorLocation? FindResourceDefinition(string text, string key)
+    {
+        foreach (Match match in ResourceDefinitionRegex().Matches(text))
+        {
+            var group = match.Groups["key"];
+            if (!string.Equals(group.Value, key, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return CreateLocation(text, group.Index, group.Index + group.Length, filePath: null);
+        }
+
+        return null;
+    }
+
+    private static EditorLocation CreateMetadataLocation(string previewText)
+    {
+        return new EditorLocation(
+            null,
+            0,
+            0,
+            1,
+            1,
+            previewText);
+    }
+
+    private static EditorLocation CreateLocation(string text, int start, int end, string? filePath)
+    {
+        start = Math.Clamp(start, 0, text.Length);
+        end = Math.Clamp(end, start, text.Length);
+        var (line, column) = GetLineColumn(text, start);
+        return new EditorLocation(
+            filePath,
+            start,
+            end,
+            line,
+            column,
+            GetLinePreview(text, start));
+    }
+
+    private static EditorDocumentSymbol? CreateDocumentSymbol(string text, Match match)
+    {
+        var name = match.Groups["name"].Value;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        var rest = match.Groups["rest"].Value;
+        var detail = string.Empty;
+        foreach (Match attribute in AttributeRegex().Matches(rest))
+        {
+            var attributeName = attribute.Groups["name"].Value;
+            if (attributeName is "Name" or "x:Name" or "x:Key")
+            {
+                detail = attribute.Groups["value"].Value;
+                break;
+            }
+        }
+
+        var start = match.Groups["name"].Index;
+        var end = start + name.Length;
+        return new EditorDocumentSymbol(
+            string.IsNullOrWhiteSpace(detail) ? name : $"{name} {detail}",
+            detail,
+            EditorCompletionKind.Type,
+            match.Index,
+            match.Index + match.Length,
+            start,
+            end,
+            []);
+    }
+
+    private static int GetOffsetFromLineColumn(string text, int lineNumber, int column)
+    {
+        if (lineNumber <= 1)
+        {
+            return Math.Clamp(Math.Max(0, column - 1), 0, text.Length);
+        }
+
+        var line = 1;
+        var offset = 0;
+        while (offset < text.Length && line < lineNumber)
+        {
+            if (text[offset] == '\n')
+            {
+                line++;
+            }
+
+            offset++;
+        }
+
+        return Math.Clamp(offset + Math.Max(0, column - 1), 0, text.Length);
+    }
+
+    private static (int Line, int Column) GetLineColumn(string text, int offset)
+    {
+        offset = Math.Clamp(offset, 0, text.Length);
+        var line = 1;
+        var column = 1;
+        for (var i = 0; i < offset; i++)
+        {
+            if (text[i] == '\n')
+            {
+                line++;
+                column = 1;
+            }
+            else
+            {
+                column++;
+            }
+        }
+
+        return (line, column);
+    }
+
+    private static string GetLinePreview(string text, int offset)
+    {
+        offset = Math.Clamp(offset, 0, text.Length);
+        var searchStart = offset - 1;
+        var lineStart = searchStart >= 0
+            ? text.LastIndexOf('\n', searchStart)
+            : -1;
+        lineStart = lineStart < 0 ? 0 : lineStart + 1;
+        var lineEnd = text.IndexOf('\n', offset);
+        lineEnd = lineEnd < 0 ? text.Length : lineEnd;
+        return text[lineStart..lineEnd].Trim();
     }
 
     private static XamlTypeCatalog GetCatalog()
@@ -705,6 +1091,15 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
 
     [GeneratedRegex("<(?<closing>/)?(?<name>[A-Za-z_][\\w:.-]*)(?<rest>[^<>]*?)(?<selfclosing>/)?>", RegexOptions.Compiled)]
     private static partial Regex ElementRegex();
+
+    [GeneratedRegex("(?<name>[A-Za-z_][\\w:.-]*)\\s*=\\s*(?:\"(?<value>[^\"]*)\"|'(?<value>[^']*)')", RegexOptions.Compiled)]
+    private static partial Regex AttributeRegex();
+
+    [GeneratedRegex("\\{(?:StaticResource|DynamicResource)(?:\\s+ResourceKey\\s*=)?\\s*(?<key>[^\\s,}]+)", RegexOptions.Compiled)]
+    private static partial Regex ResourceReferenceRegex();
+
+    [GeneratedRegex("(?<![A-Za-z0-9_.:-])(?:x:Key|Key)\\s*=\\s*(?:\"(?<key>[^\"]+)\"|'(?<key>[^']+)')", RegexOptions.Compiled)]
+    private static partial Regex ResourceDefinitionRegex();
 
     private sealed record XamlTypeCatalog(
         IReadOnlyList<XamlTypeInfo> Types,

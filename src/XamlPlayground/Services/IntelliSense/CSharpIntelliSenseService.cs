@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -9,11 +8,14 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using XamlPlayground.Workspace;
 
 namespace XamlPlayground.Services.IntelliSense;
 
 public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
 {
+    private const string DefaultFilePath = "SampleView.cs";
+
     private static readonly CSharpParseOptions s_parseOptions =
         CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
 
@@ -70,6 +72,15 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
         new("prop", "public string? Property { get; set; }", "Auto-property snippet", EditorCompletionKind.Snippet, 20, 15),
         new("override", "protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)\n{\n    base.OnAttachedToVisualTree(e);\n}", "Override OnAttachedToVisualTree", EditorCompletionKind.Snippet, 15, 86)
     ];
+
+    private readonly InMemoryProject? _project;
+    private readonly InMemoryProjectFile? _file;
+
+    public CSharpIntelliSenseService(InMemoryProject? project = null, InMemoryProjectFile? file = null)
+    {
+        _project = project;
+        _file = file;
+    }
 
     public async Task<EditorCompletionResult?> GetCompletionsAsync(
         string text,
@@ -160,21 +171,426 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
         return null;
     }
 
-    private static async Task<CSharpCompilationContext> CreateCompilationContextAsync(
+    public async Task<IReadOnlyList<EditorDiagnostic>> GetDiagnosticsAsync(
         string text,
         CancellationToken cancellationToken)
     {
+        var context = await CreateCompilationContextAsync(text, cancellationToken);
+        var diagnostics = context.Compilation
+            .GetDiagnostics(cancellationToken)
+            .Where(diagnostic => diagnostic.Location.SourceTree == context.CurrentTree)
+            .Select(diagnostic => CreateDiagnostic(text, diagnostic))
+            .Where(static diagnostic => diagnostic is not null)
+            .Cast<EditorDiagnostic>()
+            .ToArray();
+
+        return diagnostics;
+    }
+
+    public async Task<EditorLocation?> GetDefinitionAsync(
+        string text,
+        int position,
+        CancellationToken cancellationToken)
+    {
+        position = ClampPosition(text, position);
+        var context = await CreateCompilationContextAsync(text, cancellationToken);
+        var symbol = FindSymbolAtPosition(context, position, cancellationToken);
+        if (symbol is null)
+        {
+            return null;
+        }
+
+        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var node = await reference.GetSyntaxAsync(cancellationToken);
+            var span = GetDeclarationSelectionSpan(node);
+            var root = await reference.SyntaxTree.GetRootAsync(cancellationToken);
+            return CreateLocation(reference.SyntaxTree.FilePath, root, span);
+        }
+
+        return null;
+    }
+
+    public async Task<IReadOnlyList<EditorReference>> GetReferencesAsync(
+        string text,
+        int position,
+        CancellationToken cancellationToken)
+    {
+        position = ClampPosition(text, position);
+        var context = await CreateCompilationContextAsync(text, cancellationToken);
+        var symbol = FindSymbolAtPosition(context, position, cancellationToken);
+        if (symbol is null || string.IsNullOrWhiteSpace(symbol.Name))
+        {
+            return [];
+        }
+
+        var references = new List<EditorReference>();
+        foreach (var tree in context.Compilation.SyntaxTrees)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var root = await tree.GetRootAsync(cancellationToken);
+            var semanticModel = context.Compilation.GetSemanticModel(tree);
+            foreach (var token in root.DescendantTokens(descendIntoTrivia: false)
+                         .Where(token => string.Equals(token.ValueText, symbol.Name, StringComparison.Ordinal)))
+            {
+                var candidate = FindSymbol(semanticModel, token, cancellationToken);
+                if (candidate is null || !SymbolEqualityComparer.Default.Equals(candidate, symbol))
+                {
+                    continue;
+                }
+
+                var location = CreateLocation(tree.FilePath, root, token.Span);
+                references.Add(new EditorReference(location, IsDeclarationToken(token)));
+            }
+        }
+
+        return references
+            .OrderBy(reference => reference.Location.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(reference => reference.Location.StartOffset)
+            .ToArray();
+    }
+
+    public Task<string?> FormatDocumentAsync(
+        string text,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var sourceText = SourceText.From(text, Encoding.UTF8);
-        var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, s_parseOptions, "SampleView.cs", cancellationToken);
-        var references = await CompilerService.GetMetadataReferences();
+        var syntaxTree = CSharpSyntaxTree.ParseText(
+            sourceText,
+            _project?.CSharpParseOptions ?? s_parseOptions,
+            _file?.Path ?? DefaultFilePath,
+            cancellationToken);
+        var root = syntaxTree.GetRoot(cancellationToken);
+        var newLine = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var formatted = root.NormalizeWhitespace(indentation: "    ", eol: newLine, elasticTrivia: true).ToFullString();
+
+        return Task.FromResult<string?>(formatted);
+    }
+
+    public async Task<IReadOnlyList<EditorDocumentSymbol>> GetDocumentSymbolsAsync(
+        string text,
+        CancellationToken cancellationToken)
+    {
+        var context = await CreateCompilationContextAsync(text, cancellationToken);
+        return context.Root
+            .DescendantNodes()
+            .Select(node => CreateDocumentSymbol(node, cancellationToken))
+            .Where(static symbol => symbol is not null)
+            .Cast<EditorDocumentSymbol>()
+            .OrderBy(static symbol => symbol.StartOffset)
+            .ToArray();
+    }
+
+    private async Task<CSharpCompilationContext> CreateCompilationContextAsync(
+        string text,
+        CancellationToken cancellationToken)
+    {
+        var filePath = NormalizePath(_file?.Path) ?? DefaultFilePath;
+        var parseOptions = _project?.CSharpParseOptions ?? s_parseOptions;
+        var codeFiles = GetProjectCodeFiles(text, filePath);
+        var syntaxTrees = codeFiles
+            .Select(file => CSharpSyntaxTree.ParseText(
+                SourceText.From(file.Text, Encoding.UTF8),
+                parseOptions,
+                file.Path,
+                cancellationToken))
+            .ToArray();
+
+        var currentTree = syntaxTrees.FirstOrDefault(tree =>
+            string.Equals(NormalizePath(tree.FilePath), filePath, StringComparison.OrdinalIgnoreCase)) ??
+                          syntaxTrees.First();
+        var workspaceReferences = _project?.AssemblyReferences
+            .Where(reference =>
+                string.IsNullOrWhiteSpace(_project.AssemblyName) ||
+                !string.Equals(reference.Name, _project.AssemblyName, StringComparison.OrdinalIgnoreCase))
+            .ToArray() ?? [];
+        var baseReferences = workspaceReferences.Any(static reference => reference.IsReferenceAssembly)
+            ? Array.Empty<PortableExecutableReference>()
+            : await CompilerService.GetMetadataReferences();
+        var references = MergeReferences(baseReferences, workspaceReferences);
+        var compilationOptions = (_project?.CSharpCompilationOptions ?? s_compilationOptions)
+            .WithOutputKind(OutputKind.DynamicallyLinkedLibrary)
+            .WithOptimizationLevel(OptimizationLevel.Debug);
         var compilation = CSharpCompilation.Create(
-            "XamlPlayground.IntelliSense",
-            [syntaxTree],
+            string.IsNullOrWhiteSpace(_project?.AssemblyName) ? "XamlPlayground.IntelliSense" : _project.AssemblyName,
+            syntaxTrees,
             references,
-            s_compilationOptions);
-        var semanticModel = compilation.GetSemanticModel(syntaxTree, ignoreAccessibility: false);
-        var root = await syntaxTree.GetRootAsync(cancellationToken);
-        return new CSharpCompilationContext(compilation, semanticModel, root);
+            compilationOptions);
+        var semanticModel = compilation.GetSemanticModel(currentTree, ignoreAccessibility: false);
+        var root = await currentTree.GetRootAsync(cancellationToken);
+        return new CSharpCompilationContext(compilation, currentTree, semanticModel, root);
+    }
+
+    private IReadOnlyList<(string Path, string Text)> GetProjectCodeFiles(string currentText, string currentFilePath)
+    {
+        if (_project is null || _file?.IsCSharp != true)
+        {
+            return [(currentFilePath, currentText)];
+        }
+
+        var files = new List<(string Path, string Text)>();
+        var includedCurrentFile = false;
+        foreach (var file in _project.GetCSharpFiles())
+        {
+            var path = NormalizePath(file.Path) ?? file.Path;
+            var isCurrent = ReferenceEquals(file, _file) ||
+                            string.Equals(path, currentFilePath, StringComparison.OrdinalIgnoreCase);
+            files.Add((path, isCurrent ? currentText : file.Text));
+            includedCurrentFile |= isCurrent;
+        }
+
+        if (!includedCurrentFile)
+        {
+            files.Add((currentFilePath, currentText));
+        }
+
+        return files.Count == 0 ? [(currentFilePath, currentText)] : files;
+    }
+
+    private static IReadOnlyList<PortableExecutableReference> MergeReferences(
+        IReadOnlyList<PortableExecutableReference> baseReferences,
+        IReadOnlyList<WorkspaceAssemblyReference> workspaceReferences)
+    {
+        if (workspaceReferences.Count == 0)
+        {
+            return baseReferences;
+        }
+
+        var references = new List<PortableExecutableReference>();
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in workspaceReferences
+                     .Select(static (reference, index) => (Reference: reference, Index: index))
+                     .OrderByDescending(static item => item.Reference.IsReferenceAssembly)
+                     .ThenBy(static item => item.Index))
+        {
+            var workspaceReference = item.Reference;
+            var metadataReference = workspaceReference.CreateMetadataReference();
+            if (metadataReference is null)
+            {
+                continue;
+            }
+
+            var key = workspaceReference.Image is { Length: > 0 }
+                ? workspaceReference.Name
+                : GetReferenceKey(metadataReference) ?? workspaceReference.Name;
+            if (keys.Add(key))
+            {
+                references.Add(metadataReference);
+            }
+        }
+
+        foreach (var baseReference in baseReferences)
+        {
+            var key = GetReferenceKey(baseReference);
+            if (!string.IsNullOrWhiteSpace(key) && !keys.Add(key))
+            {
+                continue;
+            }
+
+            references.Add(baseReference);
+        }
+
+        return references;
+    }
+
+    private static string? GetReferenceKey(PortableExecutableReference reference)
+    {
+        var path = reference.FilePath ?? reference.Display;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var normalized = path.Replace('\\', '/');
+        var fileName = normalized[(normalized.LastIndexOf('/') + 1)..];
+        return fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            ? fileName[..^".dll".Length]
+            : fileName;
+    }
+
+    private static EditorDiagnostic? CreateDiagnostic(string text, Diagnostic diagnostic)
+    {
+        if (!diagnostic.Location.IsInSource)
+        {
+            return null;
+        }
+
+        var span = diagnostic.Location.SourceSpan;
+        var start = Math.Clamp(span.Start, 0, text.Length);
+        var end = Math.Clamp(span.End, start, text.Length);
+        if (start == end && start < text.Length)
+        {
+            end++;
+        }
+
+        return new EditorDiagnostic(
+            start,
+            end,
+            diagnostic.GetMessage(),
+            GetDiagnosticSeverity(diagnostic.Severity),
+            diagnostic.Id);
+    }
+
+    private static EditorDiagnosticSeverity GetDiagnosticSeverity(DiagnosticSeverity severity)
+    {
+        return severity switch
+        {
+            DiagnosticSeverity.Error => EditorDiagnosticSeverity.Error,
+            DiagnosticSeverity.Warning => EditorDiagnosticSeverity.Warning,
+            DiagnosticSeverity.Info => EditorDiagnosticSeverity.Information,
+            _ => EditorDiagnosticSeverity.Hint
+        };
+    }
+
+    private static ISymbol? FindSymbolAtPosition(
+        CSharpCompilationContext context,
+        int position,
+        CancellationToken cancellationToken)
+    {
+        var token = context.Root.FindToken(Math.Clamp(position, 0, Math.Max(0, context.Root.FullSpan.End - 1)));
+        return token.IsKind(SyntaxKind.None)
+            ? null
+            : FindSymbol(context.SemanticModel, token, cancellationToken);
+    }
+
+    private static EditorLocation CreateLocation(string? filePath, SyntaxNode root, TextSpan span)
+    {
+        var start = Math.Clamp(span.Start, 0, root.FullSpan.End);
+        var end = Math.Clamp(span.End, start, root.FullSpan.End);
+        var lineSpan = root.SyntaxTree.GetLineSpan(TextSpan.FromBounds(start, end));
+        var lineText = GetLinePreview(root, start);
+        return new EditorLocation(
+            NormalizePath(filePath),
+            start,
+            end,
+            lineSpan.StartLinePosition.Line + 1,
+            lineSpan.StartLinePosition.Character + 1,
+            lineText);
+    }
+
+    private static string GetLinePreview(SyntaxNode root, int offset)
+    {
+        var text = root.SyntaxTree.GetText();
+        var line = text.Lines.GetLineFromPosition(Math.Clamp(offset, 0, Math.Max(0, text.Length)));
+        return line.ToString().Trim();
+    }
+
+    private static TextSpan GetDeclarationSelectionSpan(SyntaxNode node)
+    {
+        return node switch
+        {
+            BaseTypeDeclarationSyntax declaration => declaration.Identifier.Span,
+            DelegateDeclarationSyntax declaration => declaration.Identifier.Span,
+            MethodDeclarationSyntax declaration => declaration.Identifier.Span,
+            ConstructorDeclarationSyntax declaration => declaration.Identifier.Span,
+            PropertyDeclarationSyntax declaration => declaration.Identifier.Span,
+            EventDeclarationSyntax declaration => declaration.Identifier.Span,
+            VariableDeclaratorSyntax declaration => declaration.Identifier.Span,
+            ParameterSyntax declaration => declaration.Identifier.Span,
+            _ => node.Span
+        };
+    }
+
+    private static bool IsDeclarationToken(SyntaxToken token)
+    {
+        return token.Parent switch
+        {
+            BaseTypeDeclarationSyntax declaration => declaration.Identifier == token,
+            DelegateDeclarationSyntax declaration => declaration.Identifier == token,
+            MethodDeclarationSyntax declaration => declaration.Identifier == token,
+            ConstructorDeclarationSyntax declaration => declaration.Identifier == token,
+            PropertyDeclarationSyntax declaration => declaration.Identifier == token,
+            EventDeclarationSyntax declaration => declaration.Identifier == token,
+            VariableDeclaratorSyntax declaration => declaration.Identifier == token,
+            ParameterSyntax declaration => declaration.Identifier == token,
+            _ => false
+        };
+    }
+
+    private static EditorDocumentSymbol? CreateDocumentSymbol(
+        SyntaxNode node,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return node switch
+        {
+            BaseTypeDeclarationSyntax declaration => new EditorDocumentSymbol(
+                declaration.Identifier.ValueText,
+                GetTypeDeclarationDetail(declaration),
+                EditorCompletionKind.Type,
+                declaration.SpanStart,
+                declaration.Span.End,
+                declaration.Identifier.SpanStart,
+                declaration.Identifier.Span.End,
+                []),
+            MethodDeclarationSyntax declaration => new EditorDocumentSymbol(
+                declaration.Identifier.ValueText,
+                declaration.ReturnType.ToString(),
+                EditorCompletionKind.Method,
+                declaration.SpanStart,
+                declaration.Span.End,
+                declaration.Identifier.SpanStart,
+                declaration.Identifier.Span.End,
+                []),
+            ConstructorDeclarationSyntax declaration => new EditorDocumentSymbol(
+                declaration.Identifier.ValueText,
+                "constructor",
+                EditorCompletionKind.Method,
+                declaration.SpanStart,
+                declaration.Span.End,
+                declaration.Identifier.SpanStart,
+                declaration.Identifier.Span.End,
+                []),
+            PropertyDeclarationSyntax declaration => new EditorDocumentSymbol(
+                declaration.Identifier.ValueText,
+                declaration.Type.ToString(),
+                EditorCompletionKind.Property,
+                declaration.SpanStart,
+                declaration.Span.End,
+                declaration.Identifier.SpanStart,
+                declaration.Identifier.Span.End,
+                []),
+            EventDeclarationSyntax declaration => new EditorDocumentSymbol(
+                declaration.Identifier.ValueText,
+                declaration.Type.ToString(),
+                EditorCompletionKind.Event,
+                declaration.SpanStart,
+                declaration.Span.End,
+                declaration.Identifier.SpanStart,
+                declaration.Identifier.Span.End,
+                []),
+            FieldDeclarationSyntax declaration when declaration.Declaration.Variables.Count == 1 => new EditorDocumentSymbol(
+                declaration.Declaration.Variables[0].Identifier.ValueText,
+                declaration.Declaration.Type.ToString(),
+                EditorCompletionKind.Field,
+                declaration.SpanStart,
+                declaration.Span.End,
+                declaration.Declaration.Variables[0].Identifier.SpanStart,
+                declaration.Declaration.Variables[0].Identifier.Span.End,
+                []),
+            _ => null
+        };
+    }
+
+    private static string GetTypeDeclarationDetail(BaseTypeDeclarationSyntax declaration)
+    {
+        return declaration switch
+        {
+            ClassDeclarationSyntax => "class",
+            StructDeclarationSyntax => "struct",
+            InterfaceDeclarationSyntax => "interface",
+            RecordDeclarationSyntax record => record.ClassOrStructKeyword.ValueText is { Length: > 0 } keyword
+                ? $"record {keyword}"
+                : "record",
+            EnumDeclarationSyntax => "enum",
+            _ => "type"
+        };
     }
 
     private static IReadOnlyList<EditorCompletionItem> GetMemberCompletions(
@@ -599,8 +1015,17 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
         return Math.Clamp(position, 0, text.Length);
     }
 
+    private static string? NormalizePath(string? path)
+    {
+        var normalized = path?.Replace('\\', '/').Trim();
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : normalized.Trim('/');
+    }
+
     private sealed record CSharpCompilationContext(
         Compilation Compilation,
+        SyntaxTree CurrentTree,
         SemanticModel SemanticModel,
         SyntaxNode Root);
 }
