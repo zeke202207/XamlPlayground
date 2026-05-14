@@ -89,6 +89,7 @@
           <SolidColorBrush x:Key="EditorMinimapTagBrush" Color="#800000" />
           <SolidColorBrush x:Key="EditorMinimapSliderBrush" Color="#00000024" />
           <SolidColorBrush x:Key="EditorMinimapSliderPointerOverBrush" Color="#0000003F" />
+          <SolidColorBrush x:Key="EditorMinimapSliderActiveBrush" Color="#00000066" />
           <SolidColorBrush x:Key="EditorMinimapSectionHeaderForegroundBrush" Color="#0F4FA8" />
           <SolidColorBrush x:Key="EditorMinimapSectionHeaderSeparatorBrush" Color="#0F4FA8" />
           <SolidColorBrush x:Key="ErrorPanelBackgroundBrush" Color="#FFF7F7" />
@@ -141,6 +142,7 @@
           <SolidColorBrush x:Key="EditorMinimapTagBrush" Color="#569CD6" />
           <SolidColorBrush x:Key="EditorMinimapSliderBrush" Color="#FFFFFF24" />
           <SolidColorBrush x:Key="EditorMinimapSliderPointerOverBrush" Color="#FFFFFF3F" />
+          <SolidColorBrush x:Key="EditorMinimapSliderActiveBrush" Color="#FFFFFF66" />
           <SolidColorBrush x:Key="EditorMinimapSectionHeaderForegroundBrush" Color="#DCDCAA" />
           <SolidColorBrush x:Key="EditorMinimapSectionHeaderSeparatorBrush" Color="#DCDCAA" />
           <SolidColorBrush x:Key="ErrorPanelBackgroundBrush" Color="#3A1F23" />
@@ -193,6 +195,7 @@
       <Setter Property="MinimapTagBrush" Value="{DynamicResource EditorMinimapTagBrush}" />
       <Setter Property="MinimapSliderBrush" Value="{DynamicResource EditorMinimapSliderBrush}" />
       <Setter Property="MinimapSliderPointerOverBrush" Value="{DynamicResource EditorMinimapSliderPointerOverBrush}" />
+      <Setter Property="MinimapSliderActiveBrush" Value="{DynamicResource EditorMinimapSliderActiveBrush}" />
       <Setter Property="MinimapSectionHeaderForeground" Value="{DynamicResource EditorMinimapSectionHeaderForegroundBrush}" />
       <Setter Property="MinimapSectionHeaderSeparatorBrush" Value="{DynamicResource EditorMinimapSectionHeaderSeparatorBrush}" />
     </Style>

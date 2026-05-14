@@ -91,6 +91,9 @@ public class TextEditorMinimap : Control
     public static readonly StyledProperty<IBrush?> SliderPointerOverBrushProperty =
         AvaloniaProperty.Register<TextEditorMinimap, IBrush?>(nameof(SliderPointerOverBrush));
 
+    public static readonly StyledProperty<IBrush?> SliderActiveBrushProperty =
+        AvaloniaProperty.Register<TextEditorMinimap, IBrush?>(nameof(SliderActiveBrush));
+
     public static readonly StyledProperty<IBrush?> SectionHeaderForegroundProperty =
         AvaloniaProperty.Register<TextEditorMinimap, IBrush?>(nameof(SectionHeaderForeground));
 
@@ -104,6 +107,7 @@ public class TextEditorMinimap : Control
     private static readonly SolidColorBrush s_defaultTagBrush = new(Color.FromRgb(128, 80, 160));
     private static readonly SolidColorBrush s_defaultSliderBrush = new(Color.FromArgb(70, 128, 128, 128));
     private static readonly SolidColorBrush s_defaultSliderPointerOverBrush = new(Color.FromArgb(120, 128, 128, 128));
+    private static readonly SolidColorBrush s_defaultSliderActiveBrush = new(Color.FromArgb(160, 128, 128, 128));
     private static readonly SolidColorBrush s_defaultSectionHeaderBrush = new(Color.FromRgb(16, 95, 191));
 
     private readonly DispatcherTimer _scrollRevealTimer;
@@ -144,6 +148,7 @@ public class TextEditorMinimap : Control
             TagBrushProperty,
             SliderBrushProperty,
             SliderPointerOverBrushProperty,
+            SliderActiveBrushProperty,
             SectionHeaderForegroundProperty,
             SectionHeaderSeparatorBrushProperty);
     }
@@ -288,6 +293,12 @@ public class TextEditorMinimap : Control
         set => SetValue(SliderPointerOverBrushProperty, value);
     }
 
+    public IBrush? SliderActiveBrush
+    {
+        get => GetValue(SliderActiveBrushProperty);
+        set => SetValue(SliderActiveBrushProperty, value);
+    }
+
     public IBrush? SectionHeaderForeground
     {
         get => GetValue(SectionHeaderForegroundProperty);
@@ -409,6 +420,33 @@ public class TextEditorMinimap : Control
             ScrollToPoint(e.GetPosition(this));
             e.Handled = true;
         }
+    }
+
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        base.OnPointerWheelChanged(e);
+
+        if (!MinimapEnabled || Editor?.TextArea.TextView is not { } textView)
+        {
+            return;
+        }
+
+        var scrollable = (IScrollable)textView;
+        var maxScroll = Math.Max(0, scrollable.Extent.Height - scrollable.Viewport.Height);
+        if (maxScroll <= 0)
+        {
+            return;
+        }
+
+        var lineScroll = Math.Max(1, textView.DefaultLineHeight) * 3;
+        var targetY = Math.Clamp(scrollable.Offset.Y - e.Delta.Y * lineScroll, 0, maxScroll);
+        if (!targetY.Equals(scrollable.Offset.Y))
+        {
+            scrollable.Offset = new Vector(scrollable.Offset.X, targetY);
+        }
+
+        e.Handled = true;
+        InvalidateVisual();
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -967,10 +1005,27 @@ public class TextEditorMinimap : Control
             return;
         }
 
-        var brush = (_isPointerOver || _isDragging ? SliderPointerOverBrush : SliderBrush) ??
-                    (_isPointerOver || _isDragging ? s_defaultSliderPointerOverBrush : s_defaultSliderBrush);
+        var brush = GetSliderBrush();
 
         context.FillRectangle(brush, new Rect(0, layout.SliderTop, Bounds.Width, layout.SliderHeight));
+    }
+
+    private IBrush GetSliderBrush()
+    {
+        if (_isDragging)
+        {
+            return SliderActiveBrush ??
+                   SliderPointerOverBrush ??
+                   s_defaultSliderActiveBrush;
+        }
+
+        if (_isPointerOver)
+        {
+            return SliderPointerOverBrush ??
+                   s_defaultSliderPointerOverBrush;
+        }
+
+        return SliderBrush ?? s_defaultSliderBrush;
     }
 
     private void DrawSectionHeader(DrawingContext context, SectionHeader header, double y, double width)

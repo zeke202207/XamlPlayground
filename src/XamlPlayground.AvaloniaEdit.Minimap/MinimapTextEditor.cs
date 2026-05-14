@@ -78,6 +78,9 @@ public class MinimapTextEditor : TextEditor
     public static readonly StyledProperty<IBrush?> MinimapSliderPointerOverBrushProperty =
         AvaloniaProperty.Register<MinimapTextEditor, IBrush?>(nameof(MinimapSliderPointerOverBrush));
 
+    public static readonly StyledProperty<IBrush?> MinimapSliderActiveBrushProperty =
+        AvaloniaProperty.Register<MinimapTextEditor, IBrush?>(nameof(MinimapSliderActiveBrush));
+
     public static readonly StyledProperty<IBrush?> MinimapSectionHeaderForegroundProperty =
         AvaloniaProperty.Register<MinimapTextEditor, IBrush?>(nameof(MinimapSectionHeaderForeground));
 
@@ -217,6 +220,12 @@ public class MinimapTextEditor : TextEditor
     {
         get => GetValue(MinimapSliderPointerOverBrushProperty);
         set => SetValue(MinimapSliderPointerOverBrushProperty, value);
+    }
+
+    public IBrush? MinimapSliderActiveBrush
+    {
+        get => GetValue(MinimapSliderActiveBrushProperty);
+        set => SetValue(MinimapSliderActiveBrushProperty, value);
     }
 
     public IBrush? MinimapSectionHeaderForeground

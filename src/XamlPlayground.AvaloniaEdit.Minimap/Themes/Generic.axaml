@@ -33,6 +33,7 @@
                                            TagBrush="{TemplateBinding MinimapTagBrush}"
                                            SliderBrush="{TemplateBinding MinimapSliderBrush}"
                                            SliderPointerOverBrush="{TemplateBinding MinimapSliderPointerOverBrush}"
+                                           SliderActiveBrush="{TemplateBinding MinimapSliderActiveBrush}"
                                            SectionHeaderForeground="{TemplateBinding MinimapSectionHeaderForeground}"
                                            SectionHeaderSeparatorBrush="{TemplateBinding MinimapSectionHeaderSeparatorBrush}" />
                 <ScrollViewer Focusable="False"
@@ -66,6 +67,7 @@
                                            TagBrush="{TemplateBinding MinimapTagBrush}"
                                            SliderBrush="{TemplateBinding MinimapSliderBrush}"
                                            SliderPointerOverBrush="{TemplateBinding MinimapSliderPointerOverBrush}"
+                                           SliderActiveBrush="{TemplateBinding MinimapSliderActiveBrush}"
                                            SectionHeaderForeground="{TemplateBinding MinimapSectionHeaderForeground}"
                                            SectionHeaderSeparatorBrush="{TemplateBinding MinimapSectionHeaderSeparatorBrush}" />
               </Grid>

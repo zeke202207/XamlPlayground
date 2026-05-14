@@ -25,6 +25,7 @@ public sealed class MinimapTextEditorTests
         Assert.Equal(@"\bMARK:\s*(?<separator>-?)\s*(?<label>.*)$", editor.MinimapMarkSectionHeaderRegex);
         Assert.Equal(9, editor.MinimapSectionHeaderFontSize);
         Assert.Equal(1, editor.MinimapSectionHeaderLetterSpacing);
+        Assert.Null(editor.MinimapSliderActiveBrush);
     }
 
     [Fact]
