@@ -772,16 +772,19 @@ public class TextEditorMinimap : Control
         var sliderRatio = GetSliderRatio(maxSliderTop, metrics);
         var sliderTop = Math.Clamp(metrics.ScrollTop * sliderRatio, 0, maxSliderTop);
         var maxLinesFitting = Math.Max(1, (int)Math.Floor(metrics.MinimapHeight / metrics.MinimapLineHeight));
+        var isSampling = maxLinesFitting < metrics.LineCount;
 
         return new MinimapLayout(
             metrics.MinimapLineHeight,
             1,
-            Math.Min(metrics.LineCount, maxLinesFitting),
+            isSampling ? metrics.LineCount : Math.Min(metrics.LineCount, maxLinesFitting),
             0,
             maxSliderTop > 0,
             sliderTop,
             sliderHeight,
-            sliderRatio);
+            sliderRatio,
+            isSampling,
+            isSampling ? maxLinesFitting : 0);
     }
 
     private MinimapLayout CreateProportionalLayout(MinimapMetrics metrics)
@@ -810,7 +813,9 @@ public class TextEditorMinimap : Control
                 maxSliderTop > 0,
                 sliderTop,
                 sliderHeight,
-                sliderRatio);
+                sliderRatio,
+                false,
+                0);
         }
 
         var consideringStartLineNumber = metrics.ViewportStartLineNumber > 1
@@ -835,7 +840,9 @@ public class TextEditorMinimap : Control
             true,
             sliderTopAligned,
             sliderHeight,
-            sliderRatio);
+            sliderRatio,
+            false,
+            0);
     }
 
     private static double GetSliderRatio(double maxSliderTop, MinimapMetrics metrics)
@@ -873,6 +880,12 @@ public class TextEditorMinimap : Control
     {
         var width = Math.Max(0, Bounds.Width - 3);
         var maxColumn = Math.Clamp(MaxColumn, 1, 10000);
+        if (layout.IsSampling)
+        {
+            DrawSampledDocument(context, document, layout, width, maxColumn);
+            return;
+        }
+
         var renderedLines = 0;
 
         for (var lineNumber = layout.StartLineNumber; lineNumber <= layout.EndLineNumber; lineNumber++)
@@ -909,6 +922,30 @@ public class TextEditorMinimap : Control
             if (renderedLines > 20000)
             {
                 break;
+            }
+        }
+    }
+
+    private void DrawSampledDocument(
+        DrawingContext context,
+        TextDocument document,
+        MinimapLayout layout,
+        double width,
+        int maxColumn)
+    {
+        var rows = Math.Min(layout.SampleRowCount, (int)Math.Ceiling(Bounds.Height / layout.LineHeight));
+        for (var row = 0; row < rows; row++)
+        {
+            var lineNumber = layout.GetLineNumberForSampleRow(row);
+            var y = row * layout.LineHeight;
+            var line = document.GetLineByNumber(lineNumber);
+            var text = document.GetText(line.Offset, Math.Min(line.Length, maxColumn));
+
+            DrawLineBlocks(context, text, y, width, layout.LineHeight);
+
+            if (TryGetSectionHeader(text, out var header))
+            {
+                DrawSectionHeader(context, header, y, width);
             }
         }
     }
@@ -1297,11 +1334,33 @@ public class TextEditorMinimap : Control
         bool SliderNeeded,
         double SliderTop,
         double SliderHeight,
-        double SliderRatio)
+        double SliderRatio,
+        bool IsSampling,
+        int SampleRowCount)
     {
         public double GetY(int lineNumber)
         {
+            if (IsSampling)
+            {
+                var rowCount = Math.Max(1, SampleRowCount);
+                var lineCount = Math.Max(1, EndLineNumber - StartLineNumber + 1);
+                return Math.Floor((lineNumber - StartLineNumber) * rowCount / (double)lineCount) * LineHeight;
+            }
+
             return (lineNumber - StartLineNumber + TopPaddingLineCount) * LineHeight;
+        }
+
+        public int GetLineNumberForSampleRow(int row)
+        {
+            var rowCount = Math.Max(1, SampleRowCount);
+            var lineCount = Math.Max(1, EndLineNumber - StartLineNumber + 1);
+            if (rowCount == 1 || lineCount == 1)
+            {
+                return StartLineNumber;
+            }
+
+            var lineOffset = (int)Math.Round(row * (lineCount - 1) / (double)(rowCount - 1));
+            return Math.Clamp(StartLineNumber + lineOffset, StartLineNumber, EndLineNumber);
         }
     }
 

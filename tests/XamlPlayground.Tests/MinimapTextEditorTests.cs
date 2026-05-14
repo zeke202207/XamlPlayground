@@ -1,3 +1,4 @@
+using System.Reflection;
 using Avalonia;
 using Avalonia.Media;
 using AvaloniaEdit.Document;
@@ -74,5 +75,47 @@ public sealed class MinimapTextEditorTests
 
         var brush = Assert.IsAssignableFrom<ISolidColorBrush>(minimap.Background);
         Assert.Equal(Colors.Transparent, brush.Color);
+    }
+
+    [Fact]
+    public void TextEditorMinimap_FillSamplingLayoutCoversFullDocument()
+    {
+        var minimap = new TextEditorMinimap();
+        var metricsType = typeof(TextEditorMinimap).GetNestedType("MinimapMetrics", BindingFlags.NonPublic);
+        var layoutMethod = typeof(TextEditorMinimap).GetMethod("CreateContainedLayout", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(metricsType);
+        Assert.NotNull(layoutMethod);
+
+        var metrics = Activator.CreateInstance(
+            metricsType,
+            1000,
+            20d,
+            1d,
+            100d,
+            200d,
+            20000d,
+            0d,
+            1,
+            10,
+            0d,
+            0d,
+            true);
+
+        Assert.NotNull(metrics);
+
+        var layout = layoutMethod.Invoke(minimap, [metrics]);
+        Assert.NotNull(layout);
+
+        var layoutType = layout.GetType();
+        Assert.Equal(true, layoutType.GetProperty("IsSampling")?.GetValue(layout));
+        Assert.Equal(1, layoutType.GetProperty("StartLineNumber")?.GetValue(layout));
+        Assert.Equal(1000, layoutType.GetProperty("EndLineNumber")?.GetValue(layout));
+        Assert.Equal(100, layoutType.GetProperty("SampleRowCount")?.GetValue(layout));
+
+        var getLineNumberForSampleRow = layoutType.GetMethod("GetLineNumberForSampleRow");
+        Assert.NotNull(getLineNumberForSampleRow);
+        Assert.Equal(1, getLineNumberForSampleRow.Invoke(layout, [0]));
+        Assert.Equal(1000, getLineNumberForSampleRow.Invoke(layout, [99]));
     }
 }
