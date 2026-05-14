@@ -78,6 +78,33 @@ public sealed class MinimapTextEditorTests
     }
 
     [Fact]
+    public void TextEditorMinimap_MouseOverSliderOnlyShowsForMinimapPointerOrDrag()
+    {
+        var minimap = new TextEditorMinimap();
+        var shouldDrawSlider = typeof(TextEditorMinimap).GetMethod("ShouldDrawSlider", BindingFlags.Instance | BindingFlags.NonPublic);
+        var pointerOverField = typeof(TextEditorMinimap).GetField("_isPointerOver", BindingFlags.Instance | BindingFlags.NonPublic);
+        var draggingField = typeof(TextEditorMinimap).GetField("_isDragging", BindingFlags.Instance | BindingFlags.NonPublic);
+        var scrollRevealedField = typeof(TextEditorMinimap).GetField("_isScrollRevealed", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(shouldDrawSlider);
+        Assert.NotNull(pointerOverField);
+        Assert.NotNull(draggingField);
+        Assert.NotNull(scrollRevealedField);
+
+        Assert.Equal(false, shouldDrawSlider.Invoke(minimap, []));
+
+        scrollRevealedField.SetValue(minimap, true);
+        Assert.Equal(false, shouldDrawSlider.Invoke(minimap, []));
+
+        pointerOverField.SetValue(minimap, true);
+        Assert.Equal(true, shouldDrawSlider.Invoke(minimap, []));
+
+        pointerOverField.SetValue(minimap, false);
+        draggingField.SetValue(minimap, true);
+        Assert.Equal(true, shouldDrawSlider.Invoke(minimap, []));
+    }
+
+    [Fact]
     public void TextEditorMinimap_FillSamplingLayoutCoversFullDocument()
     {
         var minimap = new TextEditorMinimap();

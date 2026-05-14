@@ -116,7 +116,6 @@ public class TextEditorMinimap : Control
     private TextEditor? _subscribedEditor;
     private TextDocument? _document;
     private bool _isPointerOver;
-    private bool _isEditorPointerOver;
     private bool _isDragging;
     private bool _isScrollRevealed;
 
@@ -477,15 +476,12 @@ public class TextEditorMinimap : Control
             _subscribedEditor.DocumentChanged -= EditorOnDocumentChanged;
             _subscribedEditor.TextChanged -= EditorOnTextChanged;
             _subscribedEditor.PropertyChanged -= EditorOnPropertyChanged;
-            _subscribedEditor.PointerEntered -= EditorOnPointerEntered;
-            _subscribedEditor.PointerExited -= EditorOnPointerExited;
             _subscribedEditor.TextArea.TextView.ScrollOffsetChanged -= EditorOnScrollOffsetChanged;
             _subscribedEditor.TextArea.TextView.VisualLinesChanged -= EditorOnVisualLinesChanged;
             _subscribedEditor.TextArea.Caret.PositionChanged -= EditorOnCaretPositionChanged;
         }
 
         _subscribedEditor = editor;
-        _isEditorPointerOver = false;
         SubscribeToDocument(null);
 
         if (_subscribedEditor is not null)
@@ -493,8 +489,6 @@ public class TextEditorMinimap : Control
             _subscribedEditor.DocumentChanged += EditorOnDocumentChanged;
             _subscribedEditor.TextChanged += EditorOnTextChanged;
             _subscribedEditor.PropertyChanged += EditorOnPropertyChanged;
-            _subscribedEditor.PointerEntered += EditorOnPointerEntered;
-            _subscribedEditor.PointerExited += EditorOnPointerExited;
             _subscribedEditor.TextArea.TextView.ScrollOffsetChanged += EditorOnScrollOffsetChanged;
             _subscribedEditor.TextArea.TextView.VisualLinesChanged += EditorOnVisualLinesChanged;
             _subscribedEditor.TextArea.Caret.PositionChanged += EditorOnCaretPositionChanged;
@@ -502,18 +496,6 @@ public class TextEditorMinimap : Control
         }
 
         InvalidateMeasure();
-        InvalidateVisual();
-    }
-
-    private void EditorOnPointerEntered(object? sender, PointerEventArgs e)
-    {
-        _isEditorPointerOver = true;
-        InvalidateVisual();
-    }
-
-    private void EditorOnPointerExited(object? sender, PointerEventArgs e)
-    {
-        _isEditorPointerOver = false;
         InvalidateVisual();
     }
 
@@ -618,9 +600,7 @@ public class TextEditorMinimap : Control
     {
         return ShowSlider == TextMinimapSliderVisibility.Always ||
                _isPointerOver ||
-               _isEditorPointerOver ||
-               _isDragging ||
-               _isScrollRevealed;
+               _isDragging;
     }
 
     private double GetPreferredWidth(Size availableSize)
@@ -1073,7 +1053,7 @@ public class TextEditorMinimap : Control
                    s_defaultSliderActiveBrush;
         }
 
-        if (_isPointerOver || _isEditorPointerOver || _isScrollRevealed)
+        if (_isPointerOver)
         {
             return SliderPointerOverBrush ??
                    s_defaultSliderPointerOverBrush;
