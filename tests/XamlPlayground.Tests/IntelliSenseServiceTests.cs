@@ -140,7 +140,7 @@ public sealed class IntelliSenseServiceTests
         var formatted = await service.FormatDocumentAsync(code, CancellationToken.None);
 
         Assert.NotNull(formatted);
-        Assert.Contains(Environment.NewLine, formatted, StringComparison.Ordinal);
+        Assert.Contains("\n", formatted, StringComparison.Ordinal);
         Assert.Contains("return 42;", formatted, StringComparison.Ordinal);
     }
 
