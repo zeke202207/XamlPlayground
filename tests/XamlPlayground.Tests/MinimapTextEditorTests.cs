@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Media;
 using AvaloniaEdit.Document;
 using XamlPlayground.Behaviors;
 using XamlPlayground.Editor.Minimap;
@@ -64,5 +65,14 @@ public sealed class MinimapTextEditorTests
 
         minimap.Measure(new Size(2000, 400));
         Assert.Equal(120, minimap.DesiredSize.Width);
+    }
+
+    [Fact]
+    public void TextEditorMinimap_DefaultsToTransparentInputSurface()
+    {
+        var minimap = new TextEditorMinimap();
+
+        var brush = Assert.IsAssignableFrom<ISolidColorBrush>(minimap.Background);
+        Assert.Equal(Colors.Transparent, brush.Color);
     }
 }

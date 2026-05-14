@@ -22,7 +22,7 @@ public class TextEditorMinimap : Control
     private const double MinimapWidthPadding = 2;
 
     public static readonly StyledProperty<IBrush?> BackgroundProperty =
-        AvaloniaProperty.Register<TextEditorMinimap, IBrush?>(nameof(Background));
+        AvaloniaProperty.Register<TextEditorMinimap, IBrush?>(nameof(Background), Brushes.Transparent);
 
     public static readonly StyledProperty<TextEditor?> EditorProperty =
         AvaloniaProperty.Register<TextEditorMinimap, TextEditor?>(nameof(Editor));
@@ -116,6 +116,7 @@ public class TextEditorMinimap : Control
     private TextEditor? _subscribedEditor;
     private TextDocument? _document;
     private bool _isPointerOver;
+    private bool _isEditorPointerOver;
     private bool _isDragging;
     private bool _isScrollRevealed;
 
@@ -476,12 +477,15 @@ public class TextEditorMinimap : Control
             _subscribedEditor.DocumentChanged -= EditorOnDocumentChanged;
             _subscribedEditor.TextChanged -= EditorOnTextChanged;
             _subscribedEditor.PropertyChanged -= EditorOnPropertyChanged;
+            _subscribedEditor.PointerEntered -= EditorOnPointerEntered;
+            _subscribedEditor.PointerExited -= EditorOnPointerExited;
             _subscribedEditor.TextArea.TextView.ScrollOffsetChanged -= EditorOnScrollOffsetChanged;
             _subscribedEditor.TextArea.TextView.VisualLinesChanged -= EditorOnVisualLinesChanged;
             _subscribedEditor.TextArea.Caret.PositionChanged -= EditorOnCaretPositionChanged;
         }
 
         _subscribedEditor = editor;
+        _isEditorPointerOver = false;
         SubscribeToDocument(null);
 
         if (_subscribedEditor is not null)
@@ -489,6 +493,8 @@ public class TextEditorMinimap : Control
             _subscribedEditor.DocumentChanged += EditorOnDocumentChanged;
             _subscribedEditor.TextChanged += EditorOnTextChanged;
             _subscribedEditor.PropertyChanged += EditorOnPropertyChanged;
+            _subscribedEditor.PointerEntered += EditorOnPointerEntered;
+            _subscribedEditor.PointerExited += EditorOnPointerExited;
             _subscribedEditor.TextArea.TextView.ScrollOffsetChanged += EditorOnScrollOffsetChanged;
             _subscribedEditor.TextArea.TextView.VisualLinesChanged += EditorOnVisualLinesChanged;
             _subscribedEditor.TextArea.Caret.PositionChanged += EditorOnCaretPositionChanged;
@@ -496,6 +502,18 @@ public class TextEditorMinimap : Control
         }
 
         InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    private void EditorOnPointerEntered(object? sender, PointerEventArgs e)
+    {
+        _isEditorPointerOver = true;
+        InvalidateVisual();
+    }
+
+    private void EditorOnPointerExited(object? sender, PointerEventArgs e)
+    {
+        _isEditorPointerOver = false;
         InvalidateVisual();
     }
 
@@ -573,11 +591,6 @@ public class TextEditorMinimap : Control
 
     private void RevealForScroll()
     {
-        if (AutoHide != TextMinimapAutoHide.Scroll)
-        {
-            return;
-        }
-
         _isScrollRevealed = true;
         _scrollRevealTimer.Stop();
         _scrollRevealTimer.Start();
@@ -603,7 +616,11 @@ public class TextEditorMinimap : Control
 
     private bool ShouldDrawSlider()
     {
-        return ShowSlider == TextMinimapSliderVisibility.Always || _isPointerOver || _isDragging;
+        return ShowSlider == TextMinimapSliderVisibility.Always ||
+               _isPointerOver ||
+               _isEditorPointerOver ||
+               _isDragging ||
+               _isScrollRevealed;
     }
 
     private double GetPreferredWidth(Size availableSize)
@@ -1019,7 +1036,7 @@ public class TextEditorMinimap : Control
                    s_defaultSliderActiveBrush;
         }
 
-        if (_isPointerOver)
+        if (_isPointerOver || _isEditorPointerOver || _isScrollRevealed)
         {
             return SliderPointerOverBrush ??
                    s_defaultSliderPointerOverBrush;
