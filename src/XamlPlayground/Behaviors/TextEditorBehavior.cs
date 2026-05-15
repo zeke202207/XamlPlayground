@@ -1,7 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
-using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -17,12 +17,15 @@ using AvaloniaEdit.Document;
 using AvaloniaEdit.Editing;
 using AvaloniaEdit.Folding;
 using AvaloniaEdit.Highlighting;
+using AvaloniaEdit.Rendering;
 using TextMateSharp.Grammars;
 using XamlPlayground;
 using XamlPlayground.Editor.Minimap;
 using XamlPlayground.Services.Editing;
 using XamlPlayground.Services.Editing.InlineFeatures;
 using XamlPlayground.Services.IntelliSense;
+using XamlPlayground.ViewModels;
+using XamlPlayground.Workspace;
 
 namespace XamlPlayground.Behaviors;
 
@@ -31,7 +34,17 @@ public class TextEditorBehavior : Behavior<TextEditor>
     public static readonly StyledProperty<string?> ExtensionProperty = 
         AvaloniaProperty.Register<TextEditorBehavior, string?>(nameof(Extension));
 
+    public static readonly StyledProperty<InMemoryProject?> ProjectProperty =
+        AvaloniaProperty.Register<TextEditorBehavior, InMemoryProject?>(nameof(Project));
+
+    public static readonly StyledProperty<InMemoryProjectFile?> FileProperty =
+        AvaloniaProperty.Register<TextEditorBehavior, InMemoryProjectFile?>(nameof(File));
+
+    public static readonly StyledProperty<MainViewModel?> ShellProperty =
+        AvaloniaProperty.Register<TextEditorBehavior, MainViewModel?>(nameof(Shell));
+
     private static readonly TimeSpan FoldingUpdateDelay = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan DiagnosticsUpdateDelay = TimeSpan.FromMilliseconds(250);
 
     private TextEditor? _textEditor;
     private FoldingManager? _foldingManager;
@@ -41,6 +54,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private IEditorIntelliSenseService? _intelliSenseService;
     private CompletionWindow? _completionWindow;
     private OverloadInsightWindow? _insightWindow;
+    private EditorDiagnosticRenderer? _diagnosticRenderer;
     private AvaloniaEdit.TextMate.TextMate.Installation? _textMateInstallation;
     private RegistryOptions? _textMateRegistryOptions;
     private TextDocument? _subscribedDocument;
@@ -50,12 +64,32 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private bool _isApplyingXamlEdit;
     private int _completionRequestVersion;
     private int _quickInfoRequestVersion;
+    private int _diagnosticsRequestVersion;
     private int _foldingRefreshVersion;
+    private DispatcherTimer? _diagnosticsTimer;
 
     public string? Extension
     {
         get => GetValue(ExtensionProperty);
         set => SetValue(ExtensionProperty, value);
+    }
+
+    public InMemoryProject? Project
+    {
+        get => GetValue(ProjectProperty);
+        set => SetValue(ProjectProperty, value);
+    }
+
+    public InMemoryProjectFile? File
+    {
+        get => GetValue(FileProperty);
+        set => SetValue(FileProperty, value);
+    }
+
+    public MainViewModel? Shell
+    {
+        get => GetValue(ShellProperty);
+        set => SetValue(ShellProperty, value);
     }
 
     public static void PrepareForDocumentReplacement(TextEditor textEditor)
@@ -92,6 +126,10 @@ public class TextEditorBehavior : Behavior<TextEditor>
         InstallFoldingManager();
         _foldingTimer = new DispatcherTimer { Interval = FoldingUpdateDelay };
         _foldingTimer.Tick += FoldingTimerOnTick;
+        _diagnosticsTimer = new DispatcherTimer { Interval = DiagnosticsUpdateDelay };
+        _diagnosticsTimer.Tick += DiagnosticsTimerOnTick;
+        _diagnosticRenderer = new EditorDiagnosticRenderer();
+        _textEditor.TextArea.TextView.BackgroundRenderers.Add(_diagnosticRenderer);
 
         ApplyExtensionMode();
         ApplyEditorTheme();
@@ -119,7 +157,19 @@ public class TextEditorBehavior : Behavior<TextEditor>
             foldingTimer.Tick -= FoldingTimerOnTick;
         }
 
+        if (_diagnosticsTimer is { } diagnosticsTimer)
+        {
+            diagnosticsTimer.Stop();
+            diagnosticsTimer.Tick -= DiagnosticsTimerOnTick;
+        }
+
+        if (_diagnosticRenderer is not null && _textEditor is not null)
+        {
+            _textEditor.TextArea.TextView.BackgroundRenderers.Remove(_diagnosticRenderer);
+        }
+
         _foldingRefreshVersion++;
+        _diagnosticsRequestVersion++;
         UninstallFoldingManager();
         SubscribeToDocument(null);
         CloseCompletionWindow();
@@ -133,8 +183,10 @@ public class TextEditorBehavior : Behavior<TextEditor>
         _xmlFoldingStrategy = null;
         _csharpFoldingStrategy = null;
         _intelliSenseService = null;
+        _diagnosticRenderer = null;
         _subscribedDocument = null;
         _contextMenuOffset = null;
+        _diagnosticsTimer = null;
         _textEditor = null;
 
         base.OnDetaching();
@@ -144,7 +196,10 @@ public class TextEditorBehavior : Behavior<TextEditor>
     {
         base.OnPropertyChanged(change);
 
-        if (change.Property == ExtensionProperty && _textEditor is not null)
+        if ((change.Property == ExtensionProperty ||
+             change.Property == ProjectProperty ||
+             change.Property == FileProperty) &&
+            _textEditor is not null)
         {
             ApplyExtensionMode();
         }
@@ -323,6 +378,13 @@ public class TextEditorBehavior : Behavior<TextEditor>
         var documentLine = textEditor.Document.GetLineByNumber(line);
         var column = Math.Clamp(position.Value.Column, 1, documentLine.Length + 1);
         var offset = textEditor.Document.GetOffset(line, column);
+        if (_diagnosticRenderer?.GetDiagnosticAt(offset) is { } diagnostic)
+        {
+            ToolTip.SetTip(_textEditor, FormatDiagnostic(diagnostic));
+            ToolTip.SetIsOpen(_textEditor, true);
+            return;
+        }
+
         var requestVersion = ++_quickInfoRequestVersion;
 
         try
@@ -431,16 +493,16 @@ public class TextEditorBehavior : Behavior<TextEditor>
         AddMenuItem("Copy", async () => await CopySelectionAsync(), hasSelection);
         AddMenuItem("Paste", async () => await PasteAsync(), isEditable);
         AddSeparator();
-        AddMenuItem("Peek Definition", () => TryPeekDefinition(offset), canResolveResource);
-        AddMenuItem("Go to Definition", () => TryGoToDefinition(offset), canResolveResource);
-        AddMenuItem("Peek References", () => TryPeekReferences(offset), canResolveResource);
+        AddMenuItem("Peek Definition", async () => await TryPeekDefinitionAsync(offset), canResolveResource || canUseIntelliSense);
+        AddMenuItem("Go to Definition", async () => await TryGoToDefinitionAsync(offset), canResolveResource || canUseIntelliSense);
+        AddMenuItem("Peek References", async () => await TryPeekReferencesAsync(offset), canResolveResource || canUseIntelliSense);
         AddMenuItem("Close Peek", CloseInlinePeek, _textEditor is MinimapTextEditor { InlineViewZones.Count: > 0 });
         AddSeparator();
         AddMenuItem("Show Suggestions", async () => await ShowCompletionAsync(explicitInvocation: true, triggerCharacter: null), canUseIntelliSense);
         AddMenuItem("Parameter Hints", async () => await ShowSignatureHelpAsync(), canUseIntelliSense);
         AddMenuItem("Quick Info", async () => await ShowQuickInfoAtOffsetAsync(offset), canUseIntelliSense);
         AddSeparator();
-        AddMenuItem("Format Document", FormatDocument, isEditable && IsXmlExtension(Extension));
+        AddMenuItem("Format Document", FormatDocument, isEditable && canUseIntelliSense);
         AddMenuItem("Toggle Line Comment", ToggleLineComment, isEditable && (IsXmlExtension(Extension) || IsCSharpExtension(Extension)));
         AddMenuItem("Indent Selection", () => IndentSelection(outdent: false), isEditable);
         AddMenuItem("Outdent Selection", () => IndentSelection(outdent: true), isEditable);
@@ -587,28 +649,193 @@ public class TextEditorBehavior : Behavior<TextEditor>
         }
     }
 
-    private void TryPeekDefinition(int offset)
+    private async System.Threading.Tasks.Task TryPeekDefinitionAsync(int offset)
     {
-        if (_textEditor is MinimapTextEditor minimapTextEditor)
+        if (_textEditor is MinimapTextEditor minimapTextEditor &&
+            PlaygroundEditorContextActions.TryShowResourceDefinitionPeek(minimapTextEditor, offset))
         {
-            PlaygroundEditorContextActions.TryShowResourceDefinitionPeek(minimapTextEditor, offset);
+            return;
+        }
+
+        await ShowLanguageDefinitionAsync(offset, navigate: false);
+    }
+
+    private async System.Threading.Tasks.Task TryGoToDefinitionAsync(int offset)
+    {
+        if (_textEditor is MinimapTextEditor minimapTextEditor &&
+            PlaygroundEditorContextActions.TryGoToResourceDefinition(minimapTextEditor, offset))
+        {
+            return;
+        }
+
+        await ShowLanguageDefinitionAsync(offset, navigate: true);
+    }
+
+    private async System.Threading.Tasks.Task TryPeekReferencesAsync(int offset)
+    {
+        if (_textEditor is MinimapTextEditor minimapTextEditor &&
+            PlaygroundEditorContextActions.TryShowResourceReferencesPeek(minimapTextEditor, offset))
+        {
+            return;
+        }
+
+        await ShowLanguageReferencesAsync(offset);
+    }
+
+    private async System.Threading.Tasks.Task ShowLanguageDefinitionAsync(int offset, bool navigate)
+    {
+        if (_textEditor?.Document is null || _intelliSenseService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var definition = await _intelliSenseService.GetDefinitionAsync(
+                _textEditor.Document.Text,
+                Math.Clamp(offset, 0, _textEditor.Document.TextLength),
+                default);
+            if (definition is null)
+            {
+                return;
+            }
+
+            if (navigate && TryNavigateToLocation(definition))
+            {
+                return;
+            }
+
+            ShowLanguagePeek(
+                offset,
+                "Definition",
+                FormatLocation(definition),
+                string.IsNullOrWhiteSpace(definition.PreviewText) ? FormatLocation(definition) : definition.PreviewText,
+                IsCSharpExtension(Extension) ? "csharp" : "xaml",
+                180);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
         }
     }
 
-    private void TryGoToDefinition(int offset)
+    private async System.Threading.Tasks.Task ShowLanguageReferencesAsync(int offset)
     {
-        if (_textEditor is MinimapTextEditor minimapTextEditor)
+        if (_textEditor?.Document is null || _intelliSenseService is null)
         {
-            PlaygroundEditorContextActions.TryGoToResourceDefinition(minimapTextEditor, offset);
+            return;
+        }
+
+        try
+        {
+            var references = await _intelliSenseService.GetReferencesAsync(
+                _textEditor.Document.Text,
+                Math.Clamp(offset, 0, _textEditor.Document.TextLength),
+                default);
+            if (references.Count == 0)
+            {
+                return;
+            }
+
+            var lines = references
+                .Take(12)
+                .Select(reference => $"{(reference.IsDefinition ? "def" : "ref")} {FormatLocation(reference.Location)}");
+            var suffix = references.Count > 12 ? $"{Environment.NewLine}+ {references.Count - 12} more" : string.Empty;
+            ShowLanguagePeek(
+                offset,
+                "References",
+                $"{references.Count} reference(s)",
+                string.Join(Environment.NewLine, lines) + suffix,
+                "text",
+                220);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
         }
     }
 
-    private void TryPeekReferences(int offset)
+    private bool TryNavigateToLocation(EditorLocation location)
     {
+        if (location.EndOffset <= location.StartOffset)
+        {
+            return false;
+        }
+
+        if (!IsCurrentDocumentLocation(location))
+        {
+            return TryOpenWorkspaceLocation(location);
+        }
+
+        if (_textEditor?.Document is not { } document)
+        {
+            return false;
+        }
+
+        var start = Math.Clamp(location.StartOffset, 0, document.TextLength);
+        var length = Math.Clamp(location.EndOffset - location.StartOffset, 0, document.TextLength - start);
+        _textEditor.Select(start, length);
+        _textEditor.CaretOffset = start;
+        _textEditor.TextArea.Caret.BringCaretToView();
+        return true;
+    }
+
+    private bool IsCurrentDocumentLocation(EditorLocation location)
+    {
+        if (string.IsNullOrWhiteSpace(location.FilePath) ||
+            File is null)
+        {
+            return true;
+        }
+
+        return string.Equals(NormalizePath(location.FilePath), NormalizePath(File.Path), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TryOpenWorkspaceLocation(EditorLocation location)
+    {
+        if (Shell is not { } shell ||
+            string.IsNullOrWhiteSpace(location.FilePath) ||
+            FindWorkspaceFile(location.FilePath) is not { CanEdit: true } file)
+        {
+            return false;
+        }
+
+        shell.OpenWorkspaceFileLocation(file, location.StartOffset, location.EndOffset - location.StartOffset);
+        return true;
+    }
+
+    private InMemoryProjectFile? FindWorkspaceFile(string path)
+    {
+        return Project?.FindFile(path) ??
+               Shell?.ActiveProject?.FindFile(path) ??
+               Shell?.Solution?.Projects
+                   .Select(project => project.FindFile(path))
+                   .FirstOrDefault(static file => file is not null);
+    }
+
+    private void ShowLanguagePeek(
+        int offset,
+        string title,
+        string subtitle,
+        string text,
+        string language,
+        double height)
+    {
+        if (_textEditor?.Document is null || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
         if (_textEditor is MinimapTextEditor minimapTextEditor)
         {
-            PlaygroundEditorContextActions.TryShowResourceReferencesPeek(minimapTextEditor, offset);
+            var line = minimapTextEditor.Document.GetLineByOffset(
+                Math.Clamp(offset, 0, minimapTextEditor.Document.TextLength));
+            minimapTextEditor.ShowInlinePeek(line.LineNumber, title, subtitle, text, language, height);
+            return;
         }
+
+        ToolTip.SetTip(_textEditor, $"{subtitle}{Environment.NewLine}{text}");
+        ToolTip.SetIsOpen(_textEditor, true);
     }
 
     private void CloseInlinePeek()
@@ -619,18 +846,23 @@ public class TextEditorBehavior : Behavior<TextEditor>
         }
     }
 
-    private void FormatDocument()
+    private async void FormatDocument()
     {
         if (_textEditor?.Document is not { } document ||
             _textEditor.IsReadOnly ||
-            !IsXmlExtension(Extension))
+            _intelliSenseService is null)
         {
             return;
         }
 
         try
         {
-            var formatted = XDocument.Parse(document.Text, LoadOptions.PreserveWhitespace).ToString(SaveOptions.None);
+            var formatted = await _intelliSenseService.FormatDocumentAsync(document.Text, default);
+            if (formatted is null)
+            {
+                return;
+            }
+
             document.Replace(0, document.TextLength, formatted);
             _textEditor.CaretOffset = Math.Clamp(_textEditor.CaretOffset, 0, document.TextLength);
         }
@@ -833,15 +1065,20 @@ public class TextEditorBehavior : Behavior<TextEditor>
     {
         ClearFoldings();
         ScheduleFoldingUpdate();
+        ScheduleDiagnosticsUpdate();
     }
 
     private void TextEditorOnDocumentChanged(object? sender, DocumentChangedEventArgs e)
     {
         _foldingTimer?.Stop();
+        _diagnosticsTimer?.Stop();
         _foldingRefreshVersion++;
+        _diagnosticsRequestVersion++;
         UninstallFoldingManager();
+        ClearDiagnostics();
         SubscribeToDocument(e.NewDocument);
         QueueFoldingRefresh();
+        ScheduleDiagnosticsUpdate();
     }
 
     private void PrepareForDocumentReplacementCore(TextEditor textEditor)
@@ -852,8 +1089,11 @@ public class TextEditorBehavior : Behavior<TextEditor>
         }
 
         _foldingTimer?.Stop();
+        _diagnosticsTimer?.Stop();
         _foldingRefreshVersion++;
+        _diagnosticsRequestVersion++;
         UninstallFoldingManager();
+        ClearDiagnostics();
         SubscribeToDocument(null);
     }
 
@@ -891,6 +1131,64 @@ public class TextEditorBehavior : Behavior<TextEditor>
     {
         _foldingTimer?.Stop();
         UpdateFoldings();
+    }
+
+    private async void DiagnosticsTimerOnTick(object? sender, EventArgs e)
+    {
+        _diagnosticsTimer?.Stop();
+        await UpdateDiagnosticsAsync();
+    }
+
+    private void ScheduleDiagnosticsUpdate()
+    {
+        if (_textEditor?.Document is null || _intelliSenseService is null)
+        {
+            ClearDiagnostics();
+            return;
+        }
+
+        if (_diagnosticsTimer is null)
+        {
+            _ = UpdateDiagnosticsAsync();
+            return;
+        }
+
+        _diagnosticsTimer.Stop();
+        _diagnosticsTimer.Start();
+    }
+
+    private async System.Threading.Tasks.Task UpdateDiagnosticsAsync()
+    {
+        if (_textEditor?.Document is null || _intelliSenseService is null)
+        {
+            ClearDiagnostics();
+            return;
+        }
+
+        var requestVersion = ++_diagnosticsRequestVersion;
+        var text = _textEditor.Document.Text;
+        try
+        {
+            var diagnostics = await _intelliSenseService.GetDiagnosticsAsync(text, default);
+            if (requestVersion != _diagnosticsRequestVersion || _textEditor is null)
+            {
+                return;
+            }
+
+            _diagnosticRenderer?.SetDiagnostics(diagnostics);
+            _textEditor.TextArea.TextView.InvalidateLayer(EditorDiagnosticRenderer.RenderLayer);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(exception);
+            ClearDiagnostics();
+        }
+    }
+
+    private void ClearDiagnostics()
+    {
+        _diagnosticRenderer?.SetDiagnostics([]);
+        _textEditor?.TextArea.TextView.InvalidateLayer(EditorDiagnosticRenderer.RenderLayer);
     }
 
     private void SubscribeToDocument(TextDocument? document)
@@ -986,7 +1284,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
         {
             _csharpFoldingStrategy ??= new CSharpFoldingStrategy();
             _xmlFoldingStrategy = null;
-            _intelliSenseService = new CSharpIntelliSenseService();
+            _intelliSenseService = new CSharpIntelliSenseService(Project, File);
         }
         else
         {
@@ -995,6 +1293,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
             _intelliSenseService = null;
         }
 
+        ClearDiagnostics();
         CloseCompletionWindow();
         CloseInsightWindow();
         CloseQuickInfo();
@@ -1006,6 +1305,8 @@ public class TextEditorBehavior : Behavior<TextEditor>
         {
             QueueFoldingRefresh();
         }
+
+        ScheduleDiagnosticsUpdate();
     }
 
     private void ApplySyntaxHighlighting()
@@ -1411,6 +1712,111 @@ public class TextEditorBehavior : Behavior<TextEditor>
     private static bool IsCSharpExtension(string? extension)
     {
         return string.Equals(extension, ".cs", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FormatDiagnostic(EditorDiagnostic diagnostic)
+    {
+        var code = string.IsNullOrWhiteSpace(diagnostic.Code) ? string.Empty : $"{diagnostic.Code}: ";
+        return $"{diagnostic.Severity}: {code}{diagnostic.Message}";
+    }
+
+    private static string FormatLocation(EditorLocation location)
+    {
+        var path = string.IsNullOrWhiteSpace(location.FilePath) ? "current document" : location.FilePath;
+        var preview = string.IsNullOrWhiteSpace(location.PreviewText)
+            ? string.Empty
+            : $"{Environment.NewLine}{location.PreviewText}";
+        return $"{path}:{location.Line}:{location.Column}{preview}";
+    }
+
+    private static string? NormalizePath(string? path)
+    {
+        var normalized = path?.Replace('\\', '/').Trim();
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : normalized.Trim('/');
+    }
+
+    private sealed class EditorDiagnosticRenderer : IBackgroundRenderer
+    {
+        public const KnownLayer RenderLayer = KnownLayer.Text;
+
+        private IReadOnlyList<EditorDiagnostic> _diagnostics = [];
+
+        public KnownLayer Layer => RenderLayer;
+
+        public void SetDiagnostics(IReadOnlyList<EditorDiagnostic> diagnostics)
+        {
+            _diagnostics = diagnostics;
+        }
+
+        public EditorDiagnostic? GetDiagnosticAt(int offset)
+        {
+            return _diagnostics
+                .Where(diagnostic => diagnostic.StartOffset <= offset && offset < diagnostic.EndOffset)
+                .OrderByDescending(static diagnostic => diagnostic.Severity)
+                .ThenBy(static diagnostic => diagnostic.EndOffset - diagnostic.StartOffset)
+                .FirstOrDefault();
+        }
+
+        public void Draw(TextView textView, DrawingContext drawingContext)
+        {
+            if (_diagnostics.Count == 0 || textView.Document is null)
+            {
+                return;
+            }
+
+            textView.EnsureVisualLines();
+            foreach (var diagnostic in _diagnostics)
+            {
+                var start = Math.Clamp(diagnostic.StartOffset, 0, textView.Document.TextLength);
+                var end = Math.Clamp(diagnostic.EndOffset, start, textView.Document.TextLength);
+                if (start == end)
+                {
+                    end = Math.Min(textView.Document.TextLength, start + 1);
+                }
+
+                if (start == end)
+                {
+                    continue;
+                }
+
+                var segment = new TextSegment { StartOffset = start, EndOffset = end };
+                var brush = GetDiagnosticBrush(diagnostic.Severity);
+                var pen = new Pen(brush, 1);
+                foreach (var rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, segment))
+                {
+                    DrawSquiggle(drawingContext, pen, rect);
+                }
+            }
+        }
+
+        private static IBrush GetDiagnosticBrush(EditorDiagnosticSeverity severity)
+        {
+            return severity switch
+            {
+                EditorDiagnosticSeverity.Error => Brushes.IndianRed,
+                EditorDiagnosticSeverity.Warning => Brushes.Goldenrod,
+                EditorDiagnosticSeverity.Information => Brushes.DeepSkyBlue,
+                _ => Brushes.Gray
+            };
+        }
+
+        private static void DrawSquiggle(DrawingContext drawingContext, Pen pen, Rect rect)
+        {
+            const double waveWidth = 4;
+            const double waveHeight = 2;
+            var y = Math.Max(rect.Top, rect.Bottom - waveHeight - 1);
+            var x = rect.Left;
+            while (x < rect.Right)
+            {
+                var mid = Math.Min(x + waveWidth / 2, rect.Right);
+                var end = Math.Min(x + waveWidth, rect.Right);
+                drawingContext.DrawLine(pen, new Point(x, y + waveHeight), new Point(mid, y));
+                drawingContext.DrawLine(pen, new Point(mid, y), new Point(end, y + waveHeight));
+                x += waveWidth;
+            }
+        }
     }
 
     private sealed class EditorCompletionData : ICompletionData

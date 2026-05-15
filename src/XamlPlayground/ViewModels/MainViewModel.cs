@@ -82,6 +82,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private InMemoryProjectFile? _activeWorkspaceFile;
     [ObservableProperty] private InMemoryProjectFile? _activeXamlFile;
     [ObservableProperty] private InMemoryProjectFile? _activeCodeFile;
+    [ObservableProperty] private string? _workspaceEditorNavigationFilePath;
+    [ObservableProperty] private int _workspaceEditorNavigationStart;
+    [ObservableProperty] private int _workspaceEditorNavigationLength;
+    [ObservableProperty] private int _workspaceEditorNavigationVersion;
     [ObservableProperty] private string _workspaceStatus = "No solution loaded.";
     [ObservableProperty] private bool _isWorkspaceLoading;
     [ObservableProperty] private string _currentDockPerspectiveId = PlaygroundDockFactory.DefaultPerspectiveId;
@@ -1397,7 +1401,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         OpenWorkspaceFile(file);
     }
 
-    private void OpenWorkspaceFile(InMemoryProjectFile file)
+    internal void OpenWorkspaceFile(InMemoryProjectFile file)
     {
         if (!file.CanEdit)
         {
@@ -1410,6 +1414,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             factory.OpenDocument(file);
         }
+    }
+
+    internal void OpenWorkspaceFileLocation(InMemoryProjectFile file, int startOffset, int length)
+    {
+        OpenWorkspaceFile(file);
+        WorkspaceEditorNavigationFilePath = file.Path;
+        WorkspaceEditorNavigationStart = Math.Max(0, startOffset);
+        WorkspaceEditorNavigationLength = Math.Max(0, length);
+        WorkspaceEditorNavigationVersion++;
     }
 
     internal void ActivateWorkspaceFileFromDocument(InMemoryProjectFile file)

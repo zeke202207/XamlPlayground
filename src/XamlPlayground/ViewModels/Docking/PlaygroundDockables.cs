@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Linq;
 using Avalonia.Diagnostics;
 using Dock.Model.Controls;
 using Dock.Model.Core;
@@ -25,6 +26,11 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
 
     public InMemoryProjectFile File { get; }
 
+    public InMemoryProject? Project =>
+        Shell.Solution?.Projects.FirstOrDefault(project =>
+            project.Files.Any(projectFile => ReferenceEquals(projectFile, File))) ??
+        Shell.ActiveProject;
+
     public string Extension => File.Extension;
 
     public string? VisualEditorSourceSelectionFilePath => Shell.VisualEditorSourceSelectionFilePath;
@@ -34,6 +40,14 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
     public int VisualEditorSourceSelectionLength => Shell.VisualEditorSourceSelectionLength;
 
     public int VisualEditorSourceSelectionVersion => Shell.VisualEditorSourceSelectionVersion;
+
+    public string? WorkspaceEditorNavigationFilePath => Shell.WorkspaceEditorNavigationFilePath;
+
+    public int WorkspaceEditorNavigationStart => Shell.WorkspaceEditorNavigationStart;
+
+    public int WorkspaceEditorNavigationLength => Shell.WorkspaceEditorNavigationLength;
+
+    public int WorkspaceEditorNavigationVersion => Shell.WorkspaceEditorNavigationVersion;
 
     public void Dispose()
     {
@@ -64,6 +78,22 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
                 break;
             case nameof(MainViewModel.VisualEditorSourceSelectionVersion):
                 OnPropertyChanged(nameof(VisualEditorSourceSelectionVersion));
+                break;
+            case nameof(MainViewModel.WorkspaceEditorNavigationFilePath):
+                OnPropertyChanged(nameof(WorkspaceEditorNavigationFilePath));
+                break;
+            case nameof(MainViewModel.WorkspaceEditorNavigationStart):
+                OnPropertyChanged(nameof(WorkspaceEditorNavigationStart));
+                break;
+            case nameof(MainViewModel.WorkspaceEditorNavigationLength):
+                OnPropertyChanged(nameof(WorkspaceEditorNavigationLength));
+                break;
+            case nameof(MainViewModel.WorkspaceEditorNavigationVersion):
+                OnPropertyChanged(nameof(WorkspaceEditorNavigationVersion));
+                break;
+            case nameof(MainViewModel.Solution):
+            case nameof(MainViewModel.ActiveProject):
+                OnPropertyChanged(nameof(Project));
                 break;
         }
     }
