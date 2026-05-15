@@ -1617,6 +1617,72 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsMapAgainstPreviewSourceAfterLineShift()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                               <Button Content="First" />
+                                               <Button Content="Second" />
+                                             </StackPanel>
+                                             """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+            var root = Assert.IsAssignableFrom<StackPanel>(
+                RuntimeXamlPreviewLoader.LoadControl(
+                    viewModel.ActiveXamlFile.Text,
+                    null,
+                    null,
+                    viewModel.ActiveXamlFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
+            var buttons = root.Children.OfType<Button>().ToArray();
+            Assert.Equal(2, buttons.Length);
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+            var handler = viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!;
+
+            handler.OnPropertyEdited(new DevToolsPropertyEdit(
+                root,
+                root,
+                "Margin",
+                "Margin",
+                typeof(Thickness),
+                typeof(Layoutable),
+                default(Thickness),
+                new Thickness(4),
+                "0",
+                "4",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Margin=\"4,4,4,4\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+
+            handler.OnPropertyEdited(new DevToolsPropertyEdit(
+                buttons[1],
+                buttons[1],
+                "Content",
+                "Content",
+                typeof(object),
+                typeof(ContentControl),
+                "Second",
+                "Updated Second",
+                "Second",
+                "Updated Second",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("<Button Content=\"First\" />", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.Contains("<Button Content=\"Updated Second\" />", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("<Button Content=\"Updated First\" />", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void MainViewModel_ToolboxCommandInsertsIntoSelectedEmptyDecoratorContainer()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -4659,10 +4725,16 @@ public sealed class VisualEditingTests
         fileField.SetValue(viewModel, xamlFile);
 
         var textField = typeof(MainViewModel).GetField(
-            "_diagnosticsPreviewXamlText",
+            "_diagnosticsPreviewSourceXamlText",
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(textField);
         textField.SetValue(viewModel, xamlFile.Text);
+
+        var acceptedTextField = typeof(MainViewModel).GetField(
+            "_diagnosticsAcceptedXamlText",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(acceptedTextField);
+        acceptedTextField.SetValue(viewModel, xamlFile.Text);
     }
 
     private static IEnumerable<VisualEditorNodeViewModel> FlattenVisualEditorNodes(VisualEditorNodeViewModel node)
