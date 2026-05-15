@@ -46,6 +46,7 @@ public partial class MainViewModel
     private bool _isSynchronizingVisualEditorSelection;
     private bool _suppressVisualEditorSourceSelectionUpdate;
     private bool _isApplyingVisualEditorMutation;
+    private bool _isApplyingDiagnosticsPropertyMutation;
     private bool _isSynchronizingVisualEditorPropertySelection;
     private bool _isApplyingVisualEditorPropertyGridValue;
     private XamlElementSelector? _visualEditorCurrentContainerSelector;
@@ -2963,7 +2964,16 @@ public partial class MainViewModel
             element.Selector,
             mutationPropertyName,
             value);
-        ApplyVisualEditorMutation(result);
+
+        try
+        {
+            _isApplyingDiagnosticsPropertyMutation = true;
+            ApplyVisualEditorMutation(result);
+        }
+        finally
+        {
+            _isApplyingDiagnosticsPropertyMutation = false;
+        }
 
         if (result.Success)
         {
@@ -5896,6 +5906,12 @@ public partial class MainViewModel
 
         element = selected;
         return true;
+    }
+
+    private bool ShouldSuppressPreviewReloadForDiagnosticsMutation(InMemoryProjectFile file)
+    {
+        return _isApplyingDiagnosticsPropertyMutation &&
+               ReferenceEquals(file, ActiveXamlFile);
     }
 
     private void ApplyVisualEditorMutation(XamlMutationResult result)

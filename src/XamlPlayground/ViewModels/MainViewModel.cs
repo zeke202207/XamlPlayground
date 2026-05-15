@@ -1481,6 +1481,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             RefreshVisualEditingModel(updateSourceSelection: false);
         }
 
+        // Diagnostics edits already changed the live control; avoid reloading the preview and DevTools host.
+        if (ReferenceEquals(file, ActiveXamlFile) &&
+            ShouldSuppressPreviewReloadForDiagnosticsMutation(file))
+        {
+            return;
+        }
+
         if (!EnableAutoRun)
         {
             return;
@@ -1510,6 +1517,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void RunActiveDocument()
     {
+        if (ActiveXamlFile is { } activeXamlFile &&
+            ShouldSuppressPreviewReloadForDiagnosticsMutation(activeXamlFile))
+        {
+            return;
+        }
+
         _timer?.Dispose();
         _timer = DispatcherTimer.RunOnce(() => _ = RunInternal(), AutoRunDelay);
     }

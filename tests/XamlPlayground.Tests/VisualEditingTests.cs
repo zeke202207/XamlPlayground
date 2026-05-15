@@ -1416,6 +1416,63 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsDoNotSchedulePreviewReload()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            using var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <Button x:Name="Action" Content="Run" />
+                                             </StackPanel>
+                                             """;
+            var root = Assert.IsAssignableFrom<StackPanel>(
+                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+            var button = Assert.IsType<Button>(root.Children.Single());
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+            var handler = viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!;
+            var timerField = typeof(MainViewModel).GetField(
+                "_timer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(timerField);
+            Assert.Null(timerField.GetValue(viewModel));
+            Dispatcher.UIThread.RunJobs();
+            Assert.Null(timerField.GetValue(viewModel));
+
+            viewModel.EnableAutoRun = true;
+            Assert.Null(timerField.GetValue(viewModel));
+            handler.OnPropertyEdited(new DevToolsPropertyEdit(
+                button,
+                button,
+                "Content",
+                "Content",
+                typeof(object),
+                typeof(ContentControl),
+                "Run",
+                "Apply",
+                "Run",
+                "Apply",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Content=\"Apply\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.Null(timerField.GetValue(viewModel));
+
+            viewModel.ActiveXamlFile.Text += Environment.NewLine;
+
+            Assert.NotNull(timerField.GetValue(viewModel));
+            viewModel.EnableAutoRun = false;
+        });
+    }
+
+    [Fact]
     public void MainViewModel_DiagnosticsPropertyEditsPreserveNumericPrecision()
     {
         TestApplication.EnsureAvaloniaInitialized();
