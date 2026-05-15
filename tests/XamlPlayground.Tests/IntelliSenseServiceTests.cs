@@ -234,6 +234,26 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task XamlCompletion_IgnoresCommentedElementsForClosingTags()
+    {
+        _ = typeof(Button);
+        var service = new XamlIntelliSenseService();
+        const string xaml = """
+            <UserControl xmlns="https://github.com/avaloniaui">
+              <!-- <StackPanel> -->
+              </
+            </UserControl>
+            """;
+
+        var position = xaml.IndexOf("</", StringComparison.Ordinal) + 2;
+        var result = await service.GetCompletionsAsync(xaml, position, explicitInvocation: true, null, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Contains(result.Items, item => item.Text == nameof(UserControl));
+        Assert.DoesNotContain(result.Items, item => item.Text == nameof(StackPanel));
+    }
+
+    [Fact]
     public async Task XamlQuickInfo_ReturnsMemberTypeHint()
     {
         _ = typeof(Button);

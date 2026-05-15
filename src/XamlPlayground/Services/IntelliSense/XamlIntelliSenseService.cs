@@ -1044,8 +1044,14 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
     {
         position = ClampPosition(text, position);
         var stack = new List<string>();
+        var commentRanges = GetXmlCommentRanges(text);
         foreach (Match match in ElementRegex().Matches(text[..position]))
         {
+            if (IsOffsetInRanges(match.Index, commentRanges))
+            {
+                continue;
+            }
+
             var full = match.Value;
             if (full.StartsWith("<!--", StringComparison.Ordinal) ||
                 full.StartsWith("<!", StringComparison.Ordinal) ||
