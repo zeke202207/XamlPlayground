@@ -41,6 +41,14 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
 
     public int VisualEditorSourceSelectionVersion => Shell.VisualEditorSourceSelectionVersion;
 
+    public string? WorkspaceEditorNavigationFilePath => Shell.WorkspaceEditorNavigationFilePath;
+
+    public int WorkspaceEditorNavigationStart => Shell.WorkspaceEditorNavigationStart;
+
+    public int WorkspaceEditorNavigationLength => Shell.WorkspaceEditorNavigationLength;
+
+    public int WorkspaceEditorNavigationVersion => Shell.WorkspaceEditorNavigationVersion;
+
     public void Dispose()
     {
         File.PropertyChanged -= FileOnPropertyChanged;
@@ -70,6 +78,18 @@ public sealed class WorkspaceFileDocumentDockViewModel : Document
                 break;
             case nameof(MainViewModel.VisualEditorSourceSelectionVersion):
                 OnPropertyChanged(nameof(VisualEditorSourceSelectionVersion));
+                break;
+            case nameof(MainViewModel.WorkspaceEditorNavigationFilePath):
+                OnPropertyChanged(nameof(WorkspaceEditorNavigationFilePath));
+                break;
+            case nameof(MainViewModel.WorkspaceEditorNavigationStart):
+                OnPropertyChanged(nameof(WorkspaceEditorNavigationStart));
+                break;
+            case nameof(MainViewModel.WorkspaceEditorNavigationLength):
+                OnPropertyChanged(nameof(WorkspaceEditorNavigationLength));
+                break;
+            case nameof(MainViewModel.WorkspaceEditorNavigationVersion):
+                OnPropertyChanged(nameof(WorkspaceEditorNavigationVersion));
                 break;
             case nameof(MainViewModel.Solution):
             case nameof(MainViewModel.ActiveProject):

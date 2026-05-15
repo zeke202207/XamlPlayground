@@ -145,6 +145,10 @@ public sealed class TextEditorDocumentTests
         Assert.True(result);
         Assert.Same(definitionFile, viewModel.ActiveWorkspaceFile);
         Assert.Same(definitionFile, viewModel.ActiveCodeFile);
+        Assert.Equal(definitionFile.Path, viewModel.WorkspaceEditorNavigationFilePath);
+        Assert.Equal(start, viewModel.WorkspaceEditorNavigationStart);
+        Assert.Equal("Customer".Length, viewModel.WorkspaceEditorNavigationLength);
+        Assert.Equal(1, viewModel.WorkspaceEditorNavigationVersion);
     }
 
     [Fact]

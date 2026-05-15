@@ -1250,6 +1250,7 @@ public partial class MainViewModel
 
     private void SetVisualEditorSourceSelection(XamlElementSnapshot element)
     {
+        WorkspaceEditorNavigationFilePath = null;
         VisualEditorSourceSelectionFilePath = ActiveXamlFile?.Path;
         VisualEditorSourceSelectionStart = element.Start;
         VisualEditorSourceSelectionLength = Math.Max(0, element.Length);
@@ -1258,6 +1259,7 @@ public partial class MainViewModel
 
     private void ClearVisualEditorSourceSelection()
     {
+        WorkspaceEditorNavigationFilePath = null;
         VisualEditorSourceSelectionFilePath = null;
         VisualEditorSourceSelectionStart = 0;
         VisualEditorSourceSelectionLength = 0;

@@ -800,7 +800,7 @@ public class TextEditorBehavior : Behavior<TextEditor>
             return false;
         }
 
-        shell.OpenWorkspaceFile(file);
+        shell.OpenWorkspaceFileLocation(file, location.StartOffset, location.EndOffset - location.StartOffset);
         return true;
     }
 
