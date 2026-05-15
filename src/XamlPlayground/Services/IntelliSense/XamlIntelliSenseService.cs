@@ -299,8 +299,14 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
             references.Add(new EditorReference(definition, true));
         }
 
+        var commentRanges = GetXmlCommentRanges(text);
         foreach (Match match in ResourceReferenceRegex().Matches(text))
         {
+            if (IsOffsetInRanges(match.Groups["key"].Index, commentRanges))
+            {
+                continue;
+            }
+
             var value = match.Groups["key"].Value;
             if (!string.Equals(value, key, StringComparison.Ordinal))
             {
@@ -402,9 +408,15 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
 
     private static string? TryReadResourceKeyAt(string text, int startOffset, int endOffset)
     {
+        var commentRanges = GetXmlCommentRanges(text);
         foreach (Match match in ResourceReferenceRegex().Matches(text))
         {
             var group = match.Groups["key"];
+            if (IsOffsetInRanges(group.Index, commentRanges))
+            {
+                continue;
+            }
+
             if (startOffset >= group.Index && endOffset <= group.Index + group.Length)
             {
                 return group.Value;
@@ -414,6 +426,11 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         foreach (Match match in ResourceDefinitionRegex().Matches(text))
         {
             var group = match.Groups["key"];
+            if (IsOffsetInRanges(group.Index, commentRanges))
+            {
+                continue;
+            }
+
             if (startOffset >= group.Index && endOffset <= group.Index + group.Length)
             {
                 return group.Value;
@@ -425,9 +442,15 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
 
     private static EditorLocation? FindResourceDefinition(string text, string key)
     {
+        var commentRanges = GetXmlCommentRanges(text);
         foreach (Match match in ResourceDefinitionRegex().Matches(text))
         {
             var group = match.Groups["key"];
+            if (IsOffsetInRanges(group.Index, commentRanges))
+            {
+                continue;
+            }
+
             if (!string.Equals(group.Value, key, StringComparison.Ordinal))
             {
                 continue;

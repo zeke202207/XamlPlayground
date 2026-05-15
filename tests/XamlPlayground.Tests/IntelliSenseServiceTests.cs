@@ -345,6 +345,32 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task XamlReferences_IgnoreCommentedResourceDefinitions()
+    {
+        var service = new XamlIntelliSenseService();
+        const string xaml = """
+            <UserControl xmlns="https://github.com/avaloniaui">
+              <UserControl.Resources>
+                <!-- <SolidColorBrush x:Key="AccentBrush" Color="Blue" /> -->
+                <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+              </UserControl.Resources>
+              <Border Background="{StaticResource AccentBrush}" />
+            </UserControl>
+            """;
+
+        var referencePosition = xaml.LastIndexOf("AccentBrush", StringComparison.Ordinal) + 2;
+        var definition = await service.GetDefinitionAsync(xaml, referencePosition, CancellationToken.None);
+        var references = await service.GetReferencesAsync(xaml, referencePosition, CancellationToken.None);
+        var commentedKeyPosition = xaml.IndexOf("x:Key=\"AccentBrush\"", StringComparison.Ordinal) + "x:Key=\"".Length + 2;
+        var commentedKeyReferences = await service.GetReferencesAsync(xaml, commentedKeyPosition, CancellationToken.None);
+
+        Assert.NotNull(definition);
+        Assert.Equal(xaml.LastIndexOf("x:Key=\"AccentBrush\"", StringComparison.Ordinal) + "x:Key=\"".Length, definition.StartOffset);
+        Assert.Contains(references, reference => reference.IsDefinition && reference.Location.StartOffset == definition.StartOffset);
+        Assert.Empty(commentedKeyReferences);
+    }
+
+    [Fact]
     public async Task XamlReferences_IgnoresPlainAttributeValues()
     {
         var service = new XamlIntelliSenseService();
