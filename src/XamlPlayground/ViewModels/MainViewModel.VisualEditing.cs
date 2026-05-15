@@ -2954,19 +2954,20 @@ public partial class MainViewModel
             return;
         }
 
+        var mutationPropertyName = ResolveMutationPropertyName(element, edit.XamlPropertyName);
         _visualEditorSelectedSelector = element.Selector;
-        VisualEditorPropertyName = edit.XamlPropertyName;
+        VisualEditorPropertyName = mutationPropertyName;
         VisualEditorPropertyValue = value;
         var result = _visualMutationEngine.SetProperty(
             xamlFile.Text,
             element.Selector,
-            edit.XamlPropertyName,
+            mutationPropertyName,
             value);
         ApplyVisualEditorMutation(result);
 
         if (result.Success)
         {
-            VisualEditorStatus = $"Updated {edit.XamlPropertyName} from diagnostics.";
+            VisualEditorStatus = $"Updated {mutationPropertyName} from diagnostics.";
         }
     }
 

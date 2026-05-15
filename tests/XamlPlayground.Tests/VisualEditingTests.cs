@@ -1455,6 +1455,47 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_DiagnosticsNameEditUpdatesExistingXName()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <StackPanel xmlns="https://github.com/avaloniaui"
+                                                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                         x:Name="Root">
+                                               <Button x:Name="Action" Content="Run" />
+                                             </StackPanel>
+                                             """;
+            var root = Assert.IsAssignableFrom<StackPanel>(
+                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+            var button = Assert.IsType<Button>(root.Children.Single());
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+            var handler = viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!;
+
+            handler.OnPropertyEdited(new DevToolsPropertyEdit(
+                button,
+                button,
+                "Name",
+                "Name",
+                typeof(string),
+                typeof(Control),
+                "Action",
+                "PrimaryAction",
+                "Action",
+                "PrimaryAction",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("x:Name=\"PrimaryAction\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("x:Name=\"Action\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(" Name=\"PrimaryAction\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void MainViewModel_ToolboxCommandInsertsIntoSelectedEmptyDecoratorContainer()
     {
         TestApplication.EnsureAvaloniaInitialized();
