@@ -44,13 +44,16 @@ public sealed class VisualEditorSelectionService
         return SetCurrent(new VisualEditorSelection(document, element, null, diagnostics));
     }
 
-    public VisualEditorSelection SelectVisual(string xaml, VisualTreeNodeSnapshot visualNode)
+    public VisualEditorSelection SelectVisual(
+        string xaml,
+        VisualTreeNodeSnapshot visualNode,
+        bool allowTypeFallback = true)
     {
         ArgumentNullException.ThrowIfNull(xaml);
         ArgumentNullException.ThrowIfNull(visualNode);
 
         var document = _mutationEngine.Analyze(xaml);
-        var element = _visualTreeMapper.FindXamlElement(visualNode, document);
+        var element = _visualTreeMapper.FindXamlElement(visualNode, document, allowTypeFallback);
         var diagnostics = element is null
             ? new[] { "The selected visual could not be mapped to a XAML source element." }
             : Array.Empty<string>();

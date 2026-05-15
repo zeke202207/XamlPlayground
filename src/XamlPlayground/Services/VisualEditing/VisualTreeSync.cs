@@ -67,7 +67,8 @@ public sealed class XamlVisualTreeMapper
 {
     public XamlElementSnapshot? FindXamlElement(
         VisualTreeNodeSnapshot visualNode,
-        XamlDocumentSnapshot xamlSnapshot)
+        XamlDocumentSnapshot xamlSnapshot,
+        bool allowTypeFallback = true)
     {
         ArgumentNullException.ThrowIfNull(visualNode);
         ArgumentNullException.ThrowIfNull(xamlSnapshot);
@@ -85,6 +86,11 @@ public sealed class XamlVisualTreeMapper
             {
                 return byName;
             }
+        }
+
+        if (!allowTypeFallback)
+        {
+            return null;
         }
 
         var typeMatches = xamlSnapshot.Elements

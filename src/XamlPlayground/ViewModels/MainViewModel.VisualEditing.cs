@@ -2959,7 +2959,8 @@ public partial class MainViewModel
                 previewXaml,
                 out _,
                 out var element,
-                out var diagnostics))
+                out var diagnostics,
+                allowTypeFallback: false))
         {
             VisualEditorStatus = string.Join(Environment.NewLine, diagnostics);
             return;
@@ -5983,13 +5984,17 @@ public partial class MainViewModel
         string xaml,
         [NotNullWhen(true)] out XamlDocumentSnapshot? document,
         [NotNullWhen(true)] out XamlElementSnapshot? element,
-        out IReadOnlyList<string> diagnostics)
+        out IReadOnlyList<string> diagnostics,
+        bool allowTypeFallback = true)
     {
         ArgumentNullException.ThrowIfNull(control);
         ArgumentNullException.ThrowIfNull(xaml);
 
         var visualNode = _visualTreeSnapshotService.Snapshot(control);
-        var selection = _visualSelectionService.SelectVisual(xaml, visualNode);
+        var selection = _visualSelectionService.SelectVisual(
+            xaml,
+            visualNode,
+            allowTypeFallback);
         document = selection.Document;
         element = selection.XamlElement;
         diagnostics = selection.Diagnostics;

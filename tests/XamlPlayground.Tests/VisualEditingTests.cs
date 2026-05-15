@@ -1683,6 +1683,55 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsIgnoreGeneratedPreviewWrapper()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <Border xmlns="https://github.com/avaloniaui"
+                                                     Background="Red" />
+                                             """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+            var root = Assert.IsAssignableFrom<Border>(
+                RuntimeXamlPreviewLoader.LoadControl(
+                    viewModel.ActiveXamlFile.Text,
+                    null,
+                    null,
+                    viewModel.ActiveXamlFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
+            var generatedScope = new Border
+            {
+                Name = "GeneratedSampleScope",
+                Child = root
+            };
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+
+            viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!.OnPropertyEdited(new DevToolsPropertyEdit(
+                generatedScope,
+                generatedScope,
+                "Background",
+                "Background",
+                typeof(object),
+                typeof(Border),
+                "Red",
+                "Blue",
+                "Red",
+                "Blue",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Background=\"Red\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Background=\"Blue\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.Contains("could not be mapped", viewModel.VisualEditorStatus, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void MainViewModel_ToolboxCommandInsertsIntoSelectedEmptyDecoratorContainer()
     {
         TestApplication.EnsureAvaloniaInitialized();
