@@ -234,7 +234,7 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
             var root = await tree.GetRootAsync(cancellationToken);
             var semanticModel = context.Compilation.GetSemanticModel(tree);
             foreach (var token in root.DescendantTokens(descendIntoTrivia: false)
-                         .Where(token => string.Equals(token.ValueText, symbol.Name, StringComparison.Ordinal)))
+                         .Where(token => IsReferenceTokenCandidate(token, symbol)))
             {
                 var candidate = FindSymbol(semanticModel, token, cancellationToken);
                 if (candidate is null || !SymbolEqualityComparer.Default.Equals(candidate, symbol))
@@ -512,6 +512,22 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
         };
     }
 
+    private static bool IsReferenceTokenCandidate(SyntaxToken token, ISymbol symbol)
+    {
+        if (symbol is IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.StaticConstructor } constructor)
+        {
+            if (string.Equals(token.ValueText, constructor.ContainingType.Name, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return constructor.MethodKind == MethodKind.Constructor &&
+                   (token.IsKind(SyntaxKind.ThisKeyword) || token.IsKind(SyntaxKind.BaseKeyword));
+        }
+
+        return string.Equals(token.ValueText, symbol.Name, StringComparison.Ordinal);
+    }
+
     private static EditorDocumentSymbol? CreateDocumentSymbol(
         SyntaxNode node,
         CancellationToken cancellationToken)
@@ -758,6 +774,11 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
         SyntaxToken token,
         CancellationToken cancellationToken)
     {
+        if (TryFindConstructorReferenceSymbol(semanticModel, token, cancellationToken) is { } constructor)
+        {
+            return constructor;
+        }
+
         foreach (var node in token.Parent?.AncestorsAndSelf() ?? [])
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -769,6 +790,7 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
                 InterfaceDeclarationSyntax interfaceDeclaration => semanticModel.GetDeclaredSymbol(interfaceDeclaration, cancellationToken),
                 EnumDeclarationSyntax enumDeclaration => semanticModel.GetDeclaredSymbol(enumDeclaration, cancellationToken),
                 MethodDeclarationSyntax methodDeclaration => semanticModel.GetDeclaredSymbol(methodDeclaration, cancellationToken),
+                ConstructorDeclarationSyntax constructorDeclaration => semanticModel.GetDeclaredSymbol(constructorDeclaration, cancellationToken),
                 PropertyDeclarationSyntax propertyDeclaration => semanticModel.GetDeclaredSymbol(propertyDeclaration, cancellationToken),
                 EventDeclarationSyntax eventDeclaration => semanticModel.GetDeclaredSymbol(eventDeclaration, cancellationToken),
                 FieldDeclarationSyntax fieldDeclaration => fieldDeclaration.Declaration.Variables.Count == 1
@@ -797,6 +819,37 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
         }
 
         return null;
+    }
+
+    private static IMethodSymbol? TryFindConstructorReferenceSymbol(
+        SemanticModel semanticModel,
+        SyntaxToken token,
+        CancellationToken cancellationToken)
+    {
+        if (token.Parent is ConstructorInitializerSyntax initializer &&
+            initializer.ThisOrBaseKeyword == token)
+        {
+            return GetMethodSymbol(semanticModel.GetSymbolInfo(initializer, cancellationToken));
+        }
+
+        var objectCreation = token.Parent?
+            .AncestorsAndSelf()
+            .OfType<ObjectCreationExpressionSyntax>()
+            .FirstOrDefault(node => node.Type.Span.Contains(token.SpanStart));
+
+        return objectCreation is null
+            ? null
+            : GetMethodSymbol(semanticModel.GetSymbolInfo(objectCreation, cancellationToken));
+    }
+
+    private static IMethodSymbol? GetMethodSymbol(SymbolInfo symbolInfo)
+    {
+        if (symbolInfo.Symbol is IMethodSymbol method)
+        {
+            return method;
+        }
+
+        return symbolInfo.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
     }
 
     private static InvocationExpressionSyntax? FindInvocation(SyntaxNode root, int position)

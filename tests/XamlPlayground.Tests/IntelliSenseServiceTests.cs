@@ -142,6 +142,39 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task CSharpReferences_ReturnConstructorLocations()
+    {
+        var service = new CSharpIntelliSenseService();
+        const string code = """
+            public class Customer
+            {
+                public Customer()
+                {
+                }
+            }
+
+            public class Consumer
+            {
+                public Customer Create()
+                {
+                    return new Customer();
+                }
+            }
+            """;
+
+        var declarationStart = code.IndexOf("Customer()", StringComparison.Ordinal);
+        var creationStart = code.LastIndexOf("Customer()", StringComparison.Ordinal);
+        var references = await service.GetReferencesAsync(code, declarationStart + 2, CancellationToken.None);
+
+        Assert.Contains(references, reference =>
+            reference.IsDefinition &&
+            reference.Location.StartOffset == declarationStart);
+        Assert.Contains(references, reference =>
+            !reference.IsDefinition &&
+            reference.Location.StartOffset == creationStart);
+    }
+
+    [Fact]
     public async Task CSharpDefinition_UsesWorkspaceFiles()
     {
         var project = new InMemoryProject("Demo", "Demo", "blank");
