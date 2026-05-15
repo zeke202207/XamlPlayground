@@ -25,6 +25,7 @@ using XamlPlayground.ViewModels.Docking;
 using XamlPlayground.ViewModels.VisualEditing;
 using XamlPlayground.Views;
 using XamlPlayground.Views.Docking;
+using XamlPlayground.Workspace;
 
 namespace XamlPlayground.Tests;
 
@@ -1385,6 +1386,7 @@ public sealed class VisualEditingTests
             var root = Assert.IsAssignableFrom<StackPanel>(
                 AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
             var button = Assert.IsType<Button>(root.Children.Single());
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
             Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
             Assert.True(viewModel.DiagnosticsDevToolsOptions.ShowEventsTab);
             var handler = viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!;
@@ -1436,6 +1438,7 @@ public sealed class VisualEditingTests
             var root = Assert.IsAssignableFrom<StackPanel>(
                 AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
             var button = Assert.IsType<Button>(root.Children.Single());
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
             Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
             var handler = viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!;
             var timerField = typeof(MainViewModel).GetField(
@@ -1490,6 +1493,7 @@ public sealed class VisualEditingTests
             var root = Assert.IsAssignableFrom<StackPanel>(
                 AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
             var button = Assert.IsType<Button>(root.Children.Single());
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
             Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
             var handler = viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!;
 
@@ -1529,6 +1533,7 @@ public sealed class VisualEditingTests
             var root = Assert.IsAssignableFrom<StackPanel>(
                 AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
             var button = Assert.IsType<Button>(root.Children.Single());
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
             Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
             var handler = viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!;
 
@@ -1549,6 +1554,65 @@ public sealed class VisualEditingTests
             Assert.Contains("x:Name=\"PrimaryAction\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
             Assert.DoesNotContain("x:Name=\"Action\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
             Assert.DoesNotContain(" Name=\"PrimaryAction\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsIgnoreStalePreviewRoot()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            using var viewModel = new MainViewModel(null)
+            {
+                EnableAutoRun = false
+            };
+            var previewFile = viewModel.ActiveXamlFile!;
+            previewFile.Text = """
+                               <StackPanel xmlns="https://github.com/avaloniaui"
+                                           xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                           x:Name="Root">
+                                 <Button x:Name="Action" Content="Run" />
+                               </StackPanel>
+                               """;
+            var root = Assert.IsAssignableFrom<StackPanel>(
+                AvaloniaRuntimeXamlLoader.Load(previewFile.Text));
+            var button = Assert.IsType<Button>(root.Children.Single());
+            SetDiagnosticsPreviewXamlFile(viewModel, previewFile);
+
+            var activeFile = new InMemoryProjectFile(
+                "Other.axaml",
+                """
+                <StackPanel xmlns="https://github.com/avaloniaui"
+                            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                            x:Name="Root">
+                  <Button x:Name="Action" Content="Other" />
+                </StackPanel>
+                """,
+                ProjectFileKind.Xaml);
+            viewModel.ActiveXamlFile = activeFile;
+            viewModel.ActiveWorkspaceFile = activeFile;
+
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+            viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!.OnPropertyEdited(new DevToolsPropertyEdit(
+                button,
+                button,
+                "Content",
+                "Content",
+                typeof(object),
+                typeof(ContentControl),
+                "Run",
+                "Apply",
+                "Run",
+                "Apply",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Content=\"Other\"", activeFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Content=\"Apply\"", activeFile.Text, StringComparison.Ordinal);
+            Assert.Contains("Content=\"Run\"", previewFile.Text, StringComparison.Ordinal);
+            Assert.Contains("Diagnostics preview is stale", viewModel.VisualEditorStatus, StringComparison.Ordinal);
         });
     }
 
@@ -4584,6 +4648,21 @@ public sealed class VisualEditingTests
             .GetProperty("Path")
             ?.GetValue(binding)
             ?.ToString();
+    }
+
+    private static void SetDiagnosticsPreviewXamlFile(MainViewModel viewModel, InMemoryProjectFile xamlFile)
+    {
+        var fileField = typeof(MainViewModel).GetField(
+            "_diagnosticsPreviewXamlFile",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(fileField);
+        fileField.SetValue(viewModel, xamlFile);
+
+        var textField = typeof(MainViewModel).GetField(
+            "_diagnosticsPreviewXamlText",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(textField);
+        textField.SetValue(viewModel, xamlFile.Text);
     }
 
     private static IEnumerable<VisualEditorNodeViewModel> FlattenVisualEditorNodes(VisualEditorNodeViewModel node)

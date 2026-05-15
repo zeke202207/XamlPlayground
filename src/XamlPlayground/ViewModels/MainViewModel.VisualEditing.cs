@@ -47,6 +47,8 @@ public partial class MainViewModel
     private bool _suppressVisualEditorSourceSelectionUpdate;
     private bool _isApplyingVisualEditorMutation;
     private bool _isApplyingDiagnosticsPropertyMutation;
+    private InMemoryProjectFile? _diagnosticsPreviewXamlFile;
+    private string? _diagnosticsPreviewXamlText;
     private bool _isSynchronizingVisualEditorPropertySelection;
     private bool _isApplyingVisualEditorPropertyGridValue;
     private XamlElementSelector? _visualEditorCurrentContainerSelector;
@@ -2938,11 +2940,15 @@ public partial class MainViewModel
     private void ApplyDiagnosticsPropertyEdit(DevToolsPropertyEdit edit)
     {
         if (_isApplyingVisualEditorMutation ||
-            ActiveXamlFile is not { } xamlFile ||
             edit.Target is not Control control ||
             !ReferenceEquals(edit.Target, edit.InspectedObject) ||
             string.IsNullOrWhiteSpace(edit.XamlPropertyName) ||
             !TryFormatDiagnosticsPropertyValue(edit, out var value))
+        {
+            return;
+        }
+
+        if (!TryGetDiagnosticsPreviewXamlFileForEdit(out var xamlFile))
         {
             return;
         }
@@ -2979,6 +2985,7 @@ public partial class MainViewModel
 
         if (result.Success)
         {
+            SetDiagnosticsPreviewXamlFile(xamlFile);
             VisualEditorStatus = $"Updated {mutationPropertyName} from diagnostics.";
         }
     }
@@ -5914,6 +5921,41 @@ public partial class MainViewModel
     {
         return _isApplyingDiagnosticsPropertyMutation &&
                ReferenceEquals(file, ActiveXamlFile);
+    }
+
+    private void SetDiagnosticsPreviewXamlFile(InMemoryProjectFile xamlFile)
+    {
+        ArgumentNullException.ThrowIfNull(xamlFile);
+
+        _diagnosticsPreviewXamlFile = xamlFile;
+        _diagnosticsPreviewXamlText = xamlFile.Text;
+    }
+
+    private void ClearDiagnosticsPreviewXamlFile()
+    {
+        _diagnosticsPreviewXamlFile = null;
+        _diagnosticsPreviewXamlText = null;
+    }
+
+    private bool TryGetDiagnosticsPreviewXamlFileForEdit([NotNullWhen(true)] out InMemoryProjectFile? xamlFile)
+    {
+        xamlFile = null;
+
+        if (ActiveXamlFile is not { } activeXamlFile)
+        {
+            VisualEditorStatus = "No XAML document selected.";
+            return false;
+        }
+
+        if (!ReferenceEquals(_diagnosticsPreviewXamlFile, activeXamlFile) ||
+            !string.Equals(_diagnosticsPreviewXamlText, activeXamlFile.Text, StringComparison.Ordinal))
+        {
+            VisualEditorStatus = "Diagnostics preview is stale. Run the active XAML document before editing diagnostics properties.";
+            return false;
+        }
+
+        xamlFile = activeXamlFile;
+        return true;
     }
 
     private void ApplyVisualEditorMutation(XamlMutationResult result)

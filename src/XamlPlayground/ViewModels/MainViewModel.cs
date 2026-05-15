@@ -590,6 +590,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         UnloadPreviousInProcessPreview();
         Control = null;
         DiagnosticsRoot = null;
+        ClearDiagnosticsPreviewXamlFile();
         EnsureSolutionDocumentsOnCurrentThread(solution);
         Solution = solution;
         ActiveProject = SelectInitialProject(solution);
@@ -754,6 +755,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             CurrentSample = null;
             Control = null;
             DiagnosticsRoot = null;
+            ClearDiagnosticsPreviewXamlFile();
             LastErrorMessage = null;
             LoadSolution(solution);
             WorkspaceStatus = $"Imported solution {solution.Name}.";
@@ -872,6 +874,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             CurrentSample = null;
             Control = null;
             DiagnosticsRoot = null;
+            ClearDiagnosticsPreviewXamlFile();
             LoadSolution(solution);
             WorkspaceStatus = $"Loaded workspace {solution.Name}: {solution.Projects.Count} project(s).";
 
@@ -1313,6 +1316,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             Control = null;
             DiagnosticsRoot = null;
+            ClearDiagnosticsPreviewXamlFile();
             LastErrorMessage = null;
             _openXamlFile = null;
             _openCodeFile = null;
@@ -1477,6 +1481,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             Control = null;
             DiagnosticsRoot = null;
+            ClearDiagnosticsPreviewXamlFile();
             LastErrorMessage = null;
             RunActiveDocument();
         }
@@ -1654,6 +1659,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         WorkspacePreviewAssemblyScope? previewAssemblyScope = null;
         var xamlFile = ActiveXamlFile;
         var project = ActiveProject;
+        ClearDiagnosticsPreviewXamlFile();
 
         try
         {
@@ -1836,7 +1842,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         documentAssemblyName);
                 if (control is { })
                 {
-                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
+                    ShowControl(xamlFile, control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
                     previewAssemblyScope = null;
                 }
             }
@@ -1860,7 +1866,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         documentAssemblyName);
                 if (control is { })
                 {
-                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
+                    ShowControl(xamlFile, control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
                     previewAssemblyScope = null;
                 }
             }
@@ -1957,6 +1963,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         Control = null;
         DiagnosticsRoot = null;
+        ClearDiagnosticsPreviewXamlFile();
         IsRemotePreviewActive = true;
         LastErrorMessage = "Using isolated workspace preview host.";
         _previous = null;
@@ -2750,6 +2757,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     private void ShowControl(
+        InMemoryProjectFile xamlFile,
         Control control,
         string? diagnosticsMessage,
         WorkspacePreviewAssemblyScope? assemblyScope = null)
@@ -2764,6 +2772,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         StopRemotePreview();
         Control = scope;
         DiagnosticsRoot = scope;
+        SetDiagnosticsPreviewXamlFile(xamlFile);
         LastErrorMessage = diagnosticsMessage;
         _previous = assemblyScope;
         previousScope?.Unload();
