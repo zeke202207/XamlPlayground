@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Diagnostics;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -92,6 +93,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private readonly IDockThemeManager _dockThemeManager;
     private readonly InMemorySolutionFactory _solutionFactory;
     private readonly WorkspaceRemotePreviewService _remotePreviewService = new();
+    private IDevToolsPropertyEditHandler _diagnosticsPropertyEditHandler = null!;
     private bool _update;
     private bool _rerunRequested;
     private bool _openingSample;
@@ -102,6 +104,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private IDisposable? _solutionExplorerSearchThrottle;
     private int _solutionExplorerSearchRevision;
     private IDisposable? _timer;
+
+    public DevToolsOptions DiagnosticsDevToolsOptions { get; private set; } = null!;
 
     public MainViewModel(string? initialGist)
     {
@@ -586,6 +590,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         UnloadPreviousInProcessPreview();
         Control = null;
         DiagnosticsRoot = null;
+        ClearDiagnosticsPreviewXamlFile();
         EnsureSolutionDocumentsOnCurrentThread(solution);
         Solution = solution;
         ActiveProject = SelectInitialProject(solution);
@@ -750,6 +755,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             CurrentSample = null;
             Control = null;
             DiagnosticsRoot = null;
+            ClearDiagnosticsPreviewXamlFile();
             LastErrorMessage = null;
             LoadSolution(solution);
             WorkspaceStatus = $"Imported solution {solution.Name}.";
@@ -868,6 +874,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             CurrentSample = null;
             Control = null;
             DiagnosticsRoot = null;
+            ClearDiagnosticsPreviewXamlFile();
             LoadSolution(solution);
             WorkspaceStatus = $"Loaded workspace {solution.Name}: {solution.Projects.Count} project(s).";
 
@@ -1309,6 +1316,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             Control = null;
             DiagnosticsRoot = null;
+            ClearDiagnosticsPreviewXamlFile();
             LastErrorMessage = null;
             _openXamlFile = null;
             _openCodeFile = null;
@@ -1473,6 +1481,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             Control = null;
             DiagnosticsRoot = null;
+            ClearDiagnosticsPreviewXamlFile();
             LastErrorMessage = null;
             RunActiveDocument();
         }
@@ -1590,6 +1599,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             RefreshVisualEditingModel(updateSourceSelection: false);
         }
 
+        // Diagnostics edits already changed the live control; avoid reloading the preview and DevTools host.
+        if (ReferenceEquals(file, ActiveXamlFile) &&
+            ShouldSuppressPreviewReloadForDiagnosticsMutation(file))
+        {
+            return;
+        }
+
         if (!EnableAutoRun)
         {
             return;
@@ -1619,6 +1635,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void RunActiveDocument()
     {
+        if (ActiveXamlFile is { } activeXamlFile &&
+            ShouldSuppressPreviewReloadForDiagnosticsMutation(activeXamlFile))
+        {
+            return;
+        }
+
         _timer?.Dispose();
         _timer = DispatcherTimer.RunOnce(() => _ = RunInternal(), AutoRunDelay);
     }
@@ -1637,6 +1659,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         WorkspacePreviewAssemblyScope? previewAssemblyScope = null;
         var xamlFile = ActiveXamlFile;
         var project = ActiveProject;
+        ClearDiagnosticsPreviewXamlFile();
 
         try
         {
@@ -1819,7 +1842,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         documentAssemblyName);
                 if (control is { })
                 {
-                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
+                    ShowControl(
+                        xamlFile,
+                        control,
+                        xamlText,
+                        CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)),
+                        previewAssemblyScope);
                     previewAssemblyScope = null;
                 }
             }
@@ -1843,7 +1871,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         documentAssemblyName);
                 if (control is { })
                 {
-                    ShowControl(control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
+                    ShowControl(
+                        xamlFile,
+                        control,
+                        xamlText,
+                        CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)),
+                        previewAssemblyScope);
                     previewAssemblyScope = null;
                 }
             }
@@ -1940,6 +1973,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         Control = null;
         DiagnosticsRoot = null;
+        ClearDiagnosticsPreviewXamlFile();
         IsRemotePreviewActive = true;
         LastErrorMessage = "Using isolated workspace preview host.";
         _previous = null;
@@ -2733,7 +2767,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     private void ShowControl(
+        InMemoryProjectFile xamlFile,
         Control control,
+        string previewSourceXaml,
         string? diagnosticsMessage,
         WorkspacePreviewAssemblyScope? assemblyScope = null)
     {
@@ -2747,6 +2783,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         StopRemotePreview();
         Control = scope;
         DiagnosticsRoot = scope;
+        SetDiagnosticsPreviewXamlFile(xamlFile, previewSourceXaml, xamlFile.Kind != ProjectFileKind.Resource);
         LastErrorMessage = diagnosticsMessage;
         _previous = assemblyScope;
         previousScope?.Unload();

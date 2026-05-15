@@ -448,7 +448,7 @@ public sealed class DiagnosticTreeDockViewModel : Tool, IDisposable
         Session = new DevToolsSession
         {
             Root = shell.DiagnosticsRoot,
-            Options = CreateOptions()
+            Options = shell.DiagnosticsDevToolsOptions
         };
 
         var factory = new DiagnosticSegmentsDockFactory(this);
@@ -475,18 +475,6 @@ public sealed class DiagnosticTreeDockViewModel : Tool, IDisposable
     {
         Shell.PropertyChanged -= OnShellPropertyChanged;
         Session.Dispose();
-    }
-
-    private static DevToolsOptions CreateOptions()
-    {
-        return new DevToolsOptions
-        {
-            ShowMenu = false,
-            ShowResourcesTab = false,
-            ShowAssetsTab = false,
-            ShowEventsTab = false,
-            ScopeEventsToRoot = true
-        };
     }
 
     private void OnShellPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -542,6 +530,8 @@ public sealed class DiagnosticToolDockViewModel : Tool
     public MainViewModel Shell { get; }
 
     public DevToolsViewKind ViewKind { get; }
+
+    public DevToolsOptions Options => Shell.DiagnosticsDevToolsOptions;
 }
 
 public sealed class ErrorsDockViewModel : Tool, IDisposable

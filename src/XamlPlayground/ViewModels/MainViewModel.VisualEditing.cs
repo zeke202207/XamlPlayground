@@ -14,6 +14,8 @@ using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.DataGridHierarchical;
+using Avalonia.Diagnostics;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -44,6 +46,11 @@ public partial class MainViewModel
     private bool _isSynchronizingVisualEditorSelection;
     private bool _suppressVisualEditorSourceSelectionUpdate;
     private bool _isApplyingVisualEditorMutation;
+    private bool _isApplyingDiagnosticsPropertyMutation;
+    private InMemoryProjectFile? _diagnosticsPreviewXamlFile;
+    private string? _diagnosticsPreviewSourceXamlText;
+    private string? _diagnosticsAcceptedXamlText;
+    private bool _diagnosticsPreviewUsesGeneratedSource;
     private bool _isSynchronizingVisualEditorPropertySelection;
     private bool _isApplyingVisualEditorPropertyGridValue;
     private XamlElementSelector? _visualEditorCurrentContainerSelector;
@@ -338,6 +345,8 @@ public partial class MainViewModel
         _controlThemeCatalog = new FluentControlThemeCatalog();
         _visualTreeSnapshotService = new AvaloniaVisualTreeSnapshotService();
         _visualSelectionService = new VisualEditorSelectionService(_visualMutationEngine, new XamlVisualTreeMapper());
+        _diagnosticsPropertyEditHandler = new DiagnosticsPropertyEditHandler(this);
+        DiagnosticsDevToolsOptions = CreateDiagnosticsDevToolsOptions(_diagnosticsPropertyEditHandler);
 
         RefreshVisualEditorCommand = new RelayCommand(() => RefreshVisualEditingModel());
         ApplyVisualEditorPropertyCommand = new RelayCommand(ApplyVisualEditorProperty);
@@ -1703,12 +1712,12 @@ public partial class MainViewModel
             return false;
         }
 
-        var visualNode = _visualTreeSnapshotService.Snapshot(control);
-        var selection = _visualSelectionService.SelectVisual(xamlFile.Text, visualNode);
-        document = selection.Document;
-        element = selection.XamlElement;
-        diagnostics = selection.Diagnostics;
-        return selection.HasSelection && selection.XamlElement is not null;
+        return TryResolveVisualEditorPreviewControl(
+            control,
+            xamlFile.Text,
+            out document,
+            out element,
+            out diagnostics);
     }
 
     public bool SelectVisualEditorPreviewElement(
@@ -2918,7 +2927,166 @@ public partial class MainViewModel
         return value.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
+    private static DevToolsOptions CreateDiagnosticsDevToolsOptions(IDevToolsPropertyEditHandler propertyEditHandler)
+    {
+        return new DevToolsOptions
+        {
+            ShowMenu = false,
+            ShowResourcesTab = false,
+            ShowAssetsTab = false,
+            ScopeEventsToRoot = true,
+            PropertyEditHandler = propertyEditHandler
+        };
+    }
+
+    private void ApplyDiagnosticsPropertyEdit(DevToolsPropertyEdit edit)
+    {
+        if (_isApplyingVisualEditorMutation ||
+            edit.Target is not Control control ||
+            !ReferenceEquals(edit.Target, edit.InspectedObject) ||
+            string.IsNullOrWhiteSpace(edit.XamlPropertyName) ||
+            !TryFormatDiagnosticsPropertyValue(edit, out var value))
+        {
+            return;
+        }
+
+        if (!TryGetDiagnosticsPreviewXamlFileForEdit(out var xamlFile, out var previewXaml))
+        {
+            return;
+        }
+
+        if (!TryResolveDiagnosticsPreviewControl(
+                control,
+                xamlFile,
+                previewXaml,
+                out _,
+                out var element,
+                out var diagnostics))
+        {
+            VisualEditorStatus = string.Join(Environment.NewLine, diagnostics);
+            return;
+        }
+
+        var mutationSelector = XamlElementSelector.ByPath(element.Path.ToArray());
+        var mutationPropertyName = ResolveMutationPropertyName(element, edit.XamlPropertyName);
+        _visualEditorSelectedSelector = mutationSelector;
+        VisualEditorPropertyName = mutationPropertyName;
+        VisualEditorPropertyValue = value;
+        var result = _visualMutationEngine.SetProperty(
+            xamlFile.Text,
+            mutationSelector,
+            mutationPropertyName,
+            value);
+
+        try
+        {
+            _isApplyingDiagnosticsPropertyMutation = true;
+            ApplyVisualEditorMutation(result);
+        }
+        finally
+        {
+            _isApplyingDiagnosticsPropertyMutation = false;
+        }
+
+        if (result.Success)
+        {
+            SetDiagnosticsAcceptedXamlText(xamlFile);
+            VisualEditorStatus = $"Updated {mutationPropertyName} from diagnostics.";
+        }
+    }
+
+    private static bool TryFormatDiagnosticsPropertyValue(DevToolsPropertyEdit edit, out string value)
+    {
+        value = string.Empty;
+
+        switch (edit.NewValue)
+        {
+            case null:
+                return false;
+            case string text:
+                value = text;
+                return true;
+            case bool flag:
+                value = flag ? "True" : "False";
+                return true;
+            case double number when double.IsNaN(number) || double.IsInfinity(number):
+                return false;
+            case double number:
+                value = FormatDiagnosticsDouble(number);
+                return true;
+            case float number when float.IsNaN(number) || float.IsInfinity(number):
+                return false;
+            case float number:
+                value = number.ToString("R", CultureInfo.InvariantCulture);
+                return true;
+            case decimal number:
+                value = number.ToString(CultureInfo.InvariantCulture);
+                return true;
+            case int or long or short or byte or uint or ulong or ushort or sbyte:
+                value = ((IFormattable)edit.NewValue).ToString(null, CultureInfo.InvariantCulture);
+                return true;
+            case Enum enumValue:
+                value = enumValue.ToString();
+                return true;
+            case Color color:
+                value = color.ToString();
+                return true;
+            case ISolidColorBrush solidColorBrush:
+                value = solidColorBrush.Color.ToString();
+                return true;
+            case Thickness thickness:
+                value = string.Join(
+                    ",",
+                    FormatDiagnosticsDouble(thickness.Left),
+                    FormatDiagnosticsDouble(thickness.Top),
+                    FormatDiagnosticsDouble(thickness.Right),
+                    FormatDiagnosticsDouble(thickness.Bottom));
+                return true;
+            case CornerRadius cornerRadius:
+                value = string.Join(
+                    ",",
+                    FormatDiagnosticsDouble(cornerRadius.TopLeft),
+                    FormatDiagnosticsDouble(cornerRadius.TopRight),
+                    FormatDiagnosticsDouble(cornerRadius.BottomRight),
+                    FormatDiagnosticsDouble(cornerRadius.BottomLeft));
+                return true;
+        }
+
+        if (edit.NewValueText is not { } valueText)
+        {
+            return false;
+        }
+
+        if (valueText.Length == 0 && edit.PropertyType != typeof(string))
+        {
+            return false;
+        }
+
+        value = valueText;
+        return true;
+    }
+
+    private static string FormatDiagnosticsDouble(double value)
+    {
+        return value.ToString("R", CultureInfo.InvariantCulture);
+    }
+
     private readonly record struct DesignerThickness(double Left, double Top, double Right, double Bottom);
+
+    private sealed class DiagnosticsPropertyEditHandler : IDevToolsPropertyEditHandler
+    {
+        private readonly MainViewModel _owner;
+
+        public DiagnosticsPropertyEditHandler(MainViewModel owner)
+        {
+            _owner = owner;
+        }
+
+        public void OnPropertyEdited(DevToolsPropertyEdit edit)
+        {
+            _owner.ApplyDiagnosticsPropertyEdit(edit);
+        }
+    }
 
     private sealed record ThemeEditScope(
         InMemoryProjectFile OwnerFile,
@@ -5754,6 +5922,165 @@ public partial class MainViewModel
         return true;
     }
 
+    private bool ShouldSuppressPreviewReloadForDiagnosticsMutation(InMemoryProjectFile file)
+    {
+        return _isApplyingDiagnosticsPropertyMutation &&
+               ReferenceEquals(file, ActiveXamlFile);
+    }
+
+    private void SetDiagnosticsPreviewXamlFile(
+        InMemoryProjectFile xamlFile,
+        string previewSourceXaml,
+        bool supportsSourceMutations = true)
+    {
+        ArgumentNullException.ThrowIfNull(xamlFile);
+        ArgumentNullException.ThrowIfNull(previewSourceXaml);
+
+        _diagnosticsPreviewXamlFile = xamlFile;
+        _diagnosticsPreviewSourceXamlText = supportsSourceMutations ? previewSourceXaml : null;
+        _diagnosticsAcceptedXamlText = supportsSourceMutations ? previewSourceXaml : null;
+        _diagnosticsPreviewUsesGeneratedSource = !supportsSourceMutations;
+    }
+
+    private void SetDiagnosticsAcceptedXamlText(InMemoryProjectFile xamlFile)
+    {
+        ArgumentNullException.ThrowIfNull(xamlFile);
+
+        if (ReferenceEquals(_diagnosticsPreviewXamlFile, xamlFile))
+        {
+            _diagnosticsAcceptedXamlText = xamlFile.Text;
+        }
+    }
+
+    private void ClearDiagnosticsPreviewXamlFile()
+    {
+        _diagnosticsPreviewXamlFile = null;
+        _diagnosticsPreviewSourceXamlText = null;
+        _diagnosticsAcceptedXamlText = null;
+        _diagnosticsPreviewUsesGeneratedSource = false;
+    }
+
+    private bool TryGetDiagnosticsPreviewXamlFileForEdit(
+        [NotNullWhen(true)] out InMemoryProjectFile? xamlFile,
+        [NotNullWhen(true)] out string? previewXaml)
+    {
+        xamlFile = null;
+        previewXaml = null;
+
+        if (ActiveXamlFile is not { } activeXamlFile)
+        {
+            VisualEditorStatus = "No XAML document selected.";
+            return false;
+        }
+
+        if (_diagnosticsPreviewUsesGeneratedSource)
+        {
+            VisualEditorStatus = "Diagnostics property edits are not available for generated resource previews.";
+            return false;
+        }
+
+        if (!ReferenceEquals(_diagnosticsPreviewXamlFile, activeXamlFile) ||
+            _diagnosticsPreviewSourceXamlText is null ||
+            !string.Equals(_diagnosticsAcceptedXamlText, activeXamlFile.Text, StringComparison.Ordinal))
+        {
+            VisualEditorStatus = "Diagnostics preview is stale. Run the active XAML document before editing diagnostics properties.";
+            return false;
+        }
+
+        xamlFile = activeXamlFile;
+        previewXaml = _diagnosticsPreviewSourceXamlText;
+        return true;
+    }
+
+    private bool TryResolveVisualEditorPreviewControl(
+        Control control,
+        string xaml,
+        [NotNullWhen(true)] out XamlDocumentSnapshot? document,
+        [NotNullWhen(true)] out XamlElementSnapshot? element,
+        out IReadOnlyList<string> diagnostics,
+        bool allowTypeFallback = true)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        ArgumentNullException.ThrowIfNull(xaml);
+
+        var visualNode = _visualTreeSnapshotService.Snapshot(control);
+        var selection = _visualSelectionService.SelectVisual(
+            xaml,
+            visualNode,
+            allowTypeFallback);
+        document = selection.Document;
+        element = selection.XamlElement;
+        diagnostics = selection.Diagnostics;
+        return selection.HasSelection && selection.XamlElement is not null;
+    }
+
+    private bool TryResolveDiagnosticsPreviewControl(
+        Control control,
+        InMemoryProjectFile xamlFile,
+        string xaml,
+        [NotNullWhen(true)] out XamlDocumentSnapshot? document,
+        [NotNullWhen(true)] out XamlElementSnapshot? element,
+        out IReadOnlyList<string> diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        ArgumentNullException.ThrowIfNull(xamlFile);
+        ArgumentNullException.ThrowIfNull(xaml);
+
+        document = null;
+        element = null;
+
+        var visualNode = _visualTreeSnapshotService.Snapshot(control);
+        var sourcePath = NormalizeXamlSourcePath(visualNode.SourceUri);
+        if (sourcePath is null)
+        {
+            diagnostics = new[]
+            {
+                "The selected visual does not have XAML source information and cannot be edited from diagnostics."
+            };
+            return false;
+        }
+
+        var activePath = NormalizeXamlSourcePath(xamlFile.Path);
+        if (!string.Equals(sourcePath, activePath, StringComparison.OrdinalIgnoreCase))
+        {
+            diagnostics = new[]
+            {
+                $"The selected visual belongs to '{sourcePath}', not the active XAML document '{activePath}'."
+            };
+            return false;
+        }
+
+        var selection = _visualSelectionService.SelectVisual(
+            xaml,
+            visualNode,
+            allowTypeFallback: false);
+        document = selection.Document;
+        element = selection.XamlElement;
+        diagnostics = selection.Diagnostics;
+        return selection.HasSelection && selection.XamlElement is not null;
+    }
+
+    private static string? NormalizeXamlSourcePath(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return null;
+        }
+
+        var path = source.Trim();
+        if (Uri.TryCreate(path, UriKind.Absolute, out var uri))
+        {
+            path = uri.IsFile
+                ? uri.LocalPath
+                : uri.AbsolutePath;
+        }
+
+        path = Uri.UnescapeDataString(path)
+            .Replace('\\', '/')
+            .Trim('/');
+        return string.IsNullOrWhiteSpace(path) ? null : path;
+    }
+
     private void ApplyVisualEditorMutation(XamlMutationResult result)
     {
         if (ActiveXamlFile is null)
@@ -5772,7 +6099,7 @@ public partial class MainViewModel
         try
         {
             _isApplyingVisualEditorMutation = true;
-            ActiveXamlFile.Text = result.Text;
+            ActiveXamlFile.ApplyTextEdit(result.Text);
             _visualEditorDocument = result.Snapshot;
             _visualEditorSelectedSelector = selectedSelector;
             RefreshVisualEditingModel();

@@ -97,6 +97,27 @@ public sealed class TextEditorDocumentTests
     }
 
     [Fact]
+    public void InMemoryProjectFile_ApplyTextEdit_CreatesUndoRedoUnit()
+    {
+        var file = new InMemoryProjectFile(
+            "Main.axaml",
+            "<Button Content=\"Before\" />",
+            ProjectFileKind.Xaml);
+
+        file.ApplyTextEdit("<Button Content=\"After\" />");
+
+        Assert.Equal("<Button Content=\"After\" />", file.Text);
+        Assert.True(file.Document.UndoStack.CanUndo);
+
+        file.Document.UndoStack.Undo();
+        Assert.Equal("<Button Content=\"Before\" />", file.Text);
+        Assert.True(file.Document.UndoStack.CanRedo);
+
+        file.Document.UndoStack.Redo();
+        Assert.Equal("<Button Content=\"After\" />", file.Text);
+    }
+
+    [Fact]
     public void TextEditorBehavior_GoToDefinitionOpensCrossFileWorkspaceDocument()
     {
         TestApplication.EnsureAvaloniaInitialized();
