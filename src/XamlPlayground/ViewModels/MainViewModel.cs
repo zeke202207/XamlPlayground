@@ -28,6 +28,7 @@ using Dock.Avalonia.Themes;
 using Dock.Avalonia.Themes.Fluent;
 using Dock.Model.Controls;
 using Dock.Model.Core;
+using Dock.Model.Core.Events;
 using Microsoft.CodeAnalysis;
 using RemotePixelFormat = Avalonia.Remote.Protocol.Viewport.PixelFormat;
 using Avalonia.Remote.Protocol.Viewport;
@@ -83,6 +84,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private InMemoryProjectFile? _activeCodeFile;
     [ObservableProperty] private string _workspaceStatus = "No solution loaded.";
     [ObservableProperty] private bool _isWorkspaceLoading;
+    [ObservableProperty] private string _currentDockPerspectiveId = PlaygroundDockFactory.DefaultPerspectiveId;
     private readonly IDockThemeManager _dockThemeManager;
     private readonly InMemorySolutionFactory _solutionFactory;
     private readonly WorkspaceRemotePreviewService _remotePreviewService = new();
@@ -130,6 +132,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         RunCommand = new RelayCommand(RunActiveDocument);
         ToggleThemeCommand = new RelayCommand(ToggleTheme);
         GistCommand = new AsyncRelayCommand<string?>(Gist);
+        ToggleDockToolCommand = new RelayCommand<string?>(ToggleDockTool);
+        ApplyDockPerspectiveCommand = new RelayCommand<string?>(ApplyDockPerspective);
+        RestoreDockToolsCommand = new RelayCommand(RestoreDockTools);
+        DockToolMenuItems = new ObservableCollection<DockToolMenuItemViewModel>(
+            PlaygroundDockFactory.ToolDescriptors.Select(descriptor => new DockToolMenuItemViewModel(descriptor, ToggleDockToolCommand)));
+        DockPerspectiveMenuItems = new ObservableCollection<DockPerspectiveMenuItemViewModel>(
+            PlaygroundDockFactory.PerspectiveDescriptors.Select(descriptor => new DockPerspectiveMenuItemViewModel(descriptor, ApplyDockPerspectiveCommand)));
         InitializeVisualEditing();
         InitializeDockLayout();
 
@@ -153,6 +162,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         _timer?.Dispose();
         _solutionExplorerSearchThrottle?.Dispose();
+        if (DockFactory is PlaygroundDockFactory factory)
+        {
+            factory.DockableHidden -= DockFactoryOnDockableHidden;
+            factory.DockableRestored -= DockFactoryOnDockableRestored;
+        }
+
         _remotePreviewService.Dispose();
         UnloadPreviousInProcessPreview();
     }
@@ -211,6 +226,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public ICommand OpenCodeFileCommand { get; }
 
     public ICommand SaveCodeFileCommand { get; }
+
+    public ICommand ToggleDockToolCommand { get; }
+
+    public ICommand ApplyDockPerspectiveCommand { get; }
+
+    public ICommand RestoreDockToolsCommand { get; }
+
+    public ObservableCollection<DockToolMenuItemViewModel> DockToolMenuItems { get; }
+
+    public ObservableCollection<DockPerspectiveMenuItemViewModel> DockPerspectiveMenuItems { get; }
 
     public bool IsLightTheme => !IsDarkTheme;
 
@@ -471,9 +496,84 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         var factory = new PlaygroundDockFactory(this);
         var layout = factory.CreateLayout();
         factory.InitLayout(layout);
+        factory.DockableHidden += DockFactoryOnDockableHidden;
+        factory.DockableRestored += DockFactoryOnDockableRestored;
 
         DockFactory = factory;
         DockLayout = layout;
+        CurrentDockPerspectiveId = factory.CurrentPerspectiveId;
+        UpdateDockMenuState();
+    }
+
+    private void ToggleDockTool(string? id)
+    {
+        if (DockFactory is not PlaygroundDockFactory factory ||
+            !factory.ToggleTool(id))
+        {
+            return;
+        }
+
+        UpdateDockToolMenuState(factory);
+    }
+
+    private void ApplyDockPerspective(string? id)
+    {
+        if (DockFactory is not PlaygroundDockFactory factory)
+        {
+            return;
+        }
+
+        DockLayout = factory.CreatePerspectiveLayout(id);
+        CurrentDockPerspectiveId = factory.CurrentPerspectiveId;
+        UpdateDockMenuState();
+    }
+
+    private void RestoreDockTools()
+    {
+        if (DockFactory is not PlaygroundDockFactory factory ||
+            !factory.RestoreAllTools())
+        {
+            return;
+        }
+
+        UpdateDockToolMenuState(factory);
+    }
+
+    private void DockFactoryOnDockableHidden(object? sender, DockableHiddenEventArgs e)
+    {
+        if (sender is PlaygroundDockFactory factory)
+        {
+            UpdateDockToolMenuState(factory);
+        }
+    }
+
+    private void DockFactoryOnDockableRestored(object? sender, DockableRestoredEventArgs e)
+    {
+        if (sender is PlaygroundDockFactory factory)
+        {
+            UpdateDockToolMenuState(factory);
+        }
+    }
+
+    private void UpdateDockMenuState()
+    {
+        if (DockFactory is PlaygroundDockFactory factory)
+        {
+            UpdateDockToolMenuState(factory);
+        }
+
+        foreach (var item in DockPerspectiveMenuItems)
+        {
+            item.IsCurrent = item.Id.Equals(CurrentDockPerspectiveId, StringComparison.Ordinal);
+        }
+    }
+
+    private void UpdateDockToolMenuState(PlaygroundDockFactory factory)
+    {
+        foreach (var item in DockToolMenuItems)
+        {
+            item.IsVisible = factory.IsToolVisible(item.Id);
+        }
     }
 
     private void LoadSolution(InMemorySolution solution)

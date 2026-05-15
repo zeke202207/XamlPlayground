@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:XamlPlayground.ViewModels"
+             xmlns:dockVm="clr-namespace:XamlPlayground.ViewModels.Docking"
              mc:Ignorable="d" d:DesignWidth="915" d:DesignHeight="500"
              x:Class="XamlPlayground.Views.HeaderView"
              Background="{DynamicResource AppHeaderBackgroundBrush}"
@@ -100,6 +101,35 @@
             <Separator />
             <MenuItem Header="Open Code..." Command="{Binding OpenCodeFileCommand}" />
             <MenuItem Header="Save Code As..." Command="{Binding SaveCodeFileCommand}" />
+          </MenuItem>
+
+          <MenuItem Header="View" Classes="main">
+            <MenuItem Header="Perspectives"
+                      ItemsSource="{Binding DockPerspectiveMenuItems}">
+              <MenuItem.Styles>
+                <Style Selector="MenuItem > MenuItem"
+                       x:DataType="dockVm:DockPerspectiveMenuItemViewModel">
+                  <Setter Property="Header" Value="{Binding Header}" />
+                  <Setter Property="Command" Value="{Binding Command}" />
+                  <Setter Property="CommandParameter" Value="{Binding Id}" />
+                </Style>
+              </MenuItem.Styles>
+            </MenuItem>
+            <Separator />
+            <MenuItem Header="Tool Windows"
+                      ItemsSource="{Binding DockToolMenuItems}">
+              <MenuItem.Styles>
+                <Style Selector="MenuItem > MenuItem"
+                       x:DataType="dockVm:DockToolMenuItemViewModel">
+                  <Setter Property="Header" Value="{Binding Header}" />
+                  <Setter Property="Command" Value="{Binding Command}" />
+                  <Setter Property="CommandParameter" Value="{Binding Id}" />
+                </Style>
+              </MenuItem.Styles>
+            </MenuItem>
+            <Separator />
+            <MenuItem Header="Restore All Tools"
+                      Command="{Binding RestoreDockToolsCommand}" />
           </MenuItem>
 
           <MenuItem Header="Run" 
