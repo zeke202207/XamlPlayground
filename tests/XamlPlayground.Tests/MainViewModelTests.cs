@@ -3052,6 +3052,89 @@ public sealed class MainViewModelTests
         Assert.Same(diagnosticTools[1], contextLocator["DiagnosticsResources"]());
         Assert.Same(diagnosticTools[2], contextLocator["DiagnosticsAssets"]());
         Assert.Same(errors, contextLocator["Errors"]());
+        Assert.True(factory.HideToolsOnClose);
+        Assert.All(PlaygroundDockFactory.ToolDescriptors, descriptor => Assert.True(factory.IsToolVisible(descriptor.Id)));
+        Assert.All(viewModel.DockToolMenuItems, item => Assert.True(item.IsVisible));
+    }
+
+    [Fact]
+    public void DockToolMenu_HidesAndRestoresCachedTool()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var factory = Assert.IsType<PlaygroundDockFactory>(viewModel.DockFactory);
+        var root = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        var preview = Assert.Single(Enumerate(root).OfType<PreviewDockViewModel>());
+        var previewMenuItem = Assert.Single(viewModel.DockToolMenuItems, item => item.Id == "Preview");
+
+        Assert.True(previewMenuItem.IsVisible);
+        Assert.Contains("Shown", previewMenuItem.Header, StringComparison.Ordinal);
+
+        viewModel.ToggleDockToolCommand.Execute("Preview");
+
+        Assert.False(factory.IsToolVisible("Preview"));
+        Assert.False(previewMenuItem.IsVisible);
+        Assert.DoesNotContain(Enumerate(root), dockable => ReferenceEquals(dockable, preview));
+        Assert.Contains(preview, root.HiddenDockables!);
+        Assert.Contains("Hidden", previewMenuItem.Header, StringComparison.Ordinal);
+
+        viewModel.ToggleDockToolCommand.Execute("Preview");
+
+        Assert.True(factory.IsToolVisible("Preview"));
+        Assert.True(previewMenuItem.IsVisible);
+        Assert.Same(preview, Assert.Single(Enumerate(root).OfType<PreviewDockViewModel>()));
+    }
+
+    [Fact]
+    public void DockPerspective_ReusesCachedToolsAcrossLayouts()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var factory = Assert.IsType<PlaygroundDockFactory>(viewModel.DockFactory);
+        var originalRoot = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        var preview = Assert.Single(Enumerate(originalRoot).OfType<PreviewDockViewModel>());
+        var controlThemes = Assert.Single(Enumerate(originalRoot).OfType<ControlThemesDockViewModel>());
+
+        viewModel.ApplyDockPerspectiveCommand.Execute("Diagnostics");
+
+        var diagnosticsRoot = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        Assert.NotSame(originalRoot, diagnosticsRoot);
+        Assert.Equal("Diagnostics", factory.CurrentPerspectiveId);
+        Assert.Equal("Diagnostics", viewModel.CurrentDockPerspectiveId);
+        Assert.True(factory.IsToolVisible("DiagnosticsEvents"));
+        Assert.False(factory.IsToolVisible("ControlThemes"));
+        Assert.Contains(diagnosticsRoot.HiddenDockables!, dockable => dockable.Id == "ControlThemes");
+        Assert.Same(preview, Assert.Single(Enumerate(diagnosticsRoot).OfType<PreviewDockViewModel>()));
+
+        viewModel.ToggleDockToolCommand.Execute("ControlThemes");
+
+        Assert.True(factory.IsToolVisible("ControlThemes"));
+        Assert.DoesNotContain(diagnosticsRoot.HiddenDockables!, dockable => dockable.Id == "ControlThemes");
+        Assert.Same(controlThemes, Assert.Single(Enumerate(diagnosticsRoot).OfType<ControlThemesDockViewModel>()));
+
+        var diagnosticsMenuItem = Assert.Single(viewModel.DockPerspectiveMenuItems, item => item.Id == "Diagnostics");
+        Assert.True(diagnosticsMenuItem.IsCurrent);
+        Assert.Contains("Current", diagnosticsMenuItem.Header, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DockRestoreAllTools_ShowsToolsHiddenByPerspective()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var factory = Assert.IsType<PlaygroundDockFactory>(viewModel.DockFactory);
+
+        viewModel.ApplyDockPerspectiveCommand.Execute("Preview");
+
+        Assert.Contains(viewModel.DockToolMenuItems, item => !item.IsVisible);
+
+        viewModel.RestoreDockToolsCommand.Execute(null);
+
+        Assert.All(PlaygroundDockFactory.ToolDescriptors, descriptor => Assert.True(factory.IsToolVisible(descriptor.Id), descriptor.Id));
+        Assert.All(viewModel.DockToolMenuItems, item => Assert.True(item.IsVisible, item.Id));
     }
 
     [Fact]

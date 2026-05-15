@@ -27,7 +27,10 @@
                              WordWrap="False"
                              MinimapLanguage="{Binding Extension}">
     <i:Interaction.Behaviors>
-      <behaviors:TextEditorBehavior Extension="{Binding Extension}" />
+      <behaviors:TextEditorBehavior Extension="{Binding Extension}"
+                                    Project="{Binding Project}"
+                                    File="{Binding File}"
+                                    Shell="{Binding Shell}" />
     </i:Interaction.Behaviors>
   </minimap:MinimapTextEditor>
 </UserControl>

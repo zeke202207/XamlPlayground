@@ -54,7 +54,11 @@ public partial class WorkspaceFileEditorDockView : UserControl
         if (e.PropertyName is nameof(WorkspaceFileDocumentDockViewModel.VisualEditorSourceSelectionFilePath) or
             nameof(WorkspaceFileDocumentDockViewModel.VisualEditorSourceSelectionStart) or
             nameof(WorkspaceFileDocumentDockViewModel.VisualEditorSourceSelectionLength) or
-            nameof(WorkspaceFileDocumentDockViewModel.VisualEditorSourceSelectionVersion))
+            nameof(WorkspaceFileDocumentDockViewModel.VisualEditorSourceSelectionVersion) or
+            nameof(WorkspaceFileDocumentDockViewModel.WorkspaceEditorNavigationFilePath) or
+            nameof(WorkspaceFileDocumentDockViewModel.WorkspaceEditorNavigationStart) or
+            nameof(WorkspaceFileDocumentDockViewModel.WorkspaceEditorNavigationLength) or
+            nameof(WorkspaceFileDocumentDockViewModel.WorkspaceEditorNavigationVersion))
         {
             ApplyVisualEditorSourceSelection();
         }
@@ -71,12 +75,32 @@ public partial class WorkspaceFileEditorDockView : UserControl
         try
         {
             _applyingVisualEditorSourceSelection = true;
-            TextEditorSourceSelection.SetIsEnabled(Editor, _dockable.File.IsXaml);
-            TextEditorSourceSelection.SetSourcePath(Editor, _dockable.VisualEditorSourceSelectionFilePath);
+            var navigationMatchesFile = string.Equals(
+                _dockable.WorkspaceEditorNavigationFilePath,
+                _dockable.File.Path,
+                StringComparison.OrdinalIgnoreCase);
+            TextEditorSourceSelection.SetIsEnabled(Editor, navigationMatchesFile || _dockable.File.IsXaml);
+            TextEditorSourceSelection.SetSourcePath(
+                Editor,
+                navigationMatchesFile
+                    ? _dockable.WorkspaceEditorNavigationFilePath
+                    : _dockable.VisualEditorSourceSelectionFilePath);
             TextEditorSourceSelection.SetTargetPath(Editor, _dockable.File.Path);
-            TextEditorSourceSelection.SetSourceStart(Editor, _dockable.VisualEditorSourceSelectionStart);
-            TextEditorSourceSelection.SetSourceLength(Editor, _dockable.VisualEditorSourceSelectionLength);
-            TextEditorSourceSelection.SetSourceVersion(Editor, _dockable.VisualEditorSourceSelectionVersion);
+            TextEditorSourceSelection.SetSourceStart(
+                Editor,
+                navigationMatchesFile
+                    ? _dockable.WorkspaceEditorNavigationStart
+                    : _dockable.VisualEditorSourceSelectionStart);
+            TextEditorSourceSelection.SetSourceLength(
+                Editor,
+                navigationMatchesFile
+                    ? _dockable.WorkspaceEditorNavigationLength
+                    : _dockable.VisualEditorSourceSelectionLength);
+            TextEditorSourceSelection.SetSourceVersion(
+                Editor,
+                navigationMatchesFile
+                    ? _dockable.WorkspaceEditorNavigationVersion
+                    : _dockable.VisualEditorSourceSelectionVersion);
         }
         finally
         {

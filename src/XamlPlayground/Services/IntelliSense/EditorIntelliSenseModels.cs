@@ -41,6 +41,43 @@ public sealed record EditorSignatureHelp(
     int SelectedIndex,
     int SelectedParameterIndex);
 
+public enum EditorDiagnosticSeverity
+{
+    Hint,
+    Information,
+    Warning,
+    Error
+}
+
+public sealed record EditorDiagnostic(
+    int StartOffset,
+    int EndOffset,
+    string Message,
+    EditorDiagnosticSeverity Severity,
+    string? Code = null);
+
+public sealed record EditorLocation(
+    string? FilePath,
+    int StartOffset,
+    int EndOffset,
+    int Line,
+    int Column,
+    string PreviewText);
+
+public sealed record EditorReference(
+    EditorLocation Location,
+    bool IsDefinition);
+
+public sealed record EditorDocumentSymbol(
+    string Name,
+    string Detail,
+    EditorCompletionKind Kind,
+    int StartOffset,
+    int EndOffset,
+    int SelectionStartOffset,
+    int SelectionEndOffset,
+    IReadOnlyList<EditorDocumentSymbol> Children);
+
 public interface IEditorIntelliSenseService
 {
     Task<EditorCompletionResult?> GetCompletionsAsync(
@@ -58,5 +95,27 @@ public interface IEditorIntelliSenseService
     Task<EditorSignatureHelp?> GetSignatureHelpAsync(
         string text,
         int position,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<EditorDiagnostic>> GetDiagnosticsAsync(
+        string text,
+        CancellationToken cancellationToken);
+
+    Task<EditorLocation?> GetDefinitionAsync(
+        string text,
+        int position,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<EditorReference>> GetReferencesAsync(
+        string text,
+        int position,
+        CancellationToken cancellationToken);
+
+    Task<string?> FormatDocumentAsync(
+        string text,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<EditorDocumentSymbol>> GetDocumentSymbolsAsync(
+        string text,
         CancellationToken cancellationToken);
 }

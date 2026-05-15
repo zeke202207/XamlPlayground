@@ -7,6 +7,8 @@ using Avalonia.Xaml.Interactivity;
 using AvaloniaEdit;
 using AvaloniaEdit.Document;
 using XamlPlayground.Behaviors;
+using XamlPlayground.Services.IntelliSense;
+using XamlPlayground.ViewModels;
 using XamlPlayground.Workspace;
 
 namespace XamlPlayground.Tests;
@@ -116,6 +118,61 @@ public sealed class TextEditorDocumentTests
     }
 
     [Fact]
+    public void TextEditorBehavior_GoToDefinitionOpensCrossFileWorkspaceDocument()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var solution = new InMemorySolution("Workspace");
+        var project = new InMemoryProject("Demo", "Demo", "msbuild");
+        const string definitionText = "namespace Demo; public sealed class Customer { }";
+        var definitionFile = project.AddFile(new InMemoryProjectFile(
+            "Models/Customer.cs",
+            definitionText,
+            ProjectFileKind.CSharp));
+        var currentFile = project.AddFile(new InMemoryProjectFile(
+            "Views/MainViewModel.cs",
+            "namespace Demo; public sealed class MainViewModel { Customer? Current; }",
+            ProjectFileKind.CSharp));
+        solution.Projects.Add(project);
+        var viewModel = new MainViewModel(null);
+        LoadSolution(viewModel, solution);
+        var editor = new TextEditor
+        {
+            Document = new TextDocument(currentFile.Text)
+        };
+        var behavior = new TextEditorBehavior
+        {
+            Extension = ".cs",
+            Project = project,
+            File = currentFile,
+            Shell = viewModel
+        };
+        Interaction.GetBehaviors(editor).Add(behavior);
+        var start = definitionText.IndexOf("Customer", StringComparison.Ordinal);
+        var location = new EditorLocation(
+            definitionFile.Path,
+            start,
+            start + "Customer".Length,
+            1,
+            start + 1,
+            definitionText);
+
+        var method = typeof(TextEditorBehavior).GetMethod(
+            "TryNavigateToLocation",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var result = Assert.IsType<bool>(method.Invoke(behavior, [location]));
+
+        Assert.True(result);
+        Assert.Same(definitionFile, viewModel.ActiveWorkspaceFile);
+        Assert.Same(definitionFile, viewModel.ActiveCodeFile);
+        Assert.Equal(definitionFile.Path, viewModel.WorkspaceEditorNavigationFilePath);
+        Assert.Equal(start, viewModel.WorkspaceEditorNavigationStart);
+        Assert.Equal("Customer".Length, viewModel.WorkspaceEditorNavigationLength);
+        Assert.Equal(1, viewModel.WorkspaceEditorNavigationVersion);
+    }
+
+    [Fact]
     public void AttachedDocument_SwapsFoldedEditorDocumentWithoutStaleFoldingGenerator()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -179,5 +236,14 @@ public sealed class TextEditorDocumentTests
         window.UpdateLayout();
         Dispatcher.UIThread.RunJobs(DispatcherPriority.Loaded);
         Dispatcher.UIThread.RunJobs();
+    }
+
+    private static void LoadSolution(MainViewModel viewModel, InMemorySolution solution)
+    {
+        var method = typeof(MainViewModel).GetMethod(
+            "LoadSolution",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        method.Invoke(viewModel, [solution]);
     }
 }
