@@ -24,6 +24,7 @@ using XamlPlayground.Editor.Minimap;
 using XamlPlayground.Services.Editing;
 using XamlPlayground.Services.Editing.InlineFeatures;
 using XamlPlayground.Services.IntelliSense;
+using XamlPlayground.ViewModels;
 using XamlPlayground.Workspace;
 
 namespace XamlPlayground.Behaviors;
@@ -38,6 +39,9 @@ public class TextEditorBehavior : Behavior<TextEditor>
 
     public static readonly StyledProperty<InMemoryProjectFile?> FileProperty =
         AvaloniaProperty.Register<TextEditorBehavior, InMemoryProjectFile?>(nameof(File));
+
+    public static readonly StyledProperty<MainViewModel?> ShellProperty =
+        AvaloniaProperty.Register<TextEditorBehavior, MainViewModel?>(nameof(Shell));
 
     private static readonly TimeSpan FoldingUpdateDelay = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan DiagnosticsUpdateDelay = TimeSpan.FromMilliseconds(250);
@@ -80,6 +84,12 @@ public class TextEditorBehavior : Behavior<TextEditor>
     {
         get => GetValue(FileProperty);
         set => SetValue(FileProperty, value);
+    }
+
+    public MainViewModel? Shell
+    {
+        get => GetValue(ShellProperty);
+        set => SetValue(ShellProperty, value);
     }
 
     public static void PrepareForDocumentReplacement(TextEditor textEditor)
@@ -747,13 +757,17 @@ public class TextEditorBehavior : Behavior<TextEditor>
 
     private bool TryNavigateToLocation(EditorLocation location)
     {
-        if (_textEditor?.Document is not { } document ||
-            location.EndOffset <= location.StartOffset)
+        if (location.EndOffset <= location.StartOffset)
         {
             return false;
         }
 
         if (!IsCurrentDocumentLocation(location))
+        {
+            return TryOpenWorkspaceLocation(location);
+        }
+
+        if (_textEditor?.Document is not { } document)
         {
             return false;
         }
@@ -775,6 +789,28 @@ public class TextEditorBehavior : Behavior<TextEditor>
         }
 
         return string.Equals(NormalizePath(location.FilePath), NormalizePath(File.Path), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TryOpenWorkspaceLocation(EditorLocation location)
+    {
+        if (Shell is not { } shell ||
+            string.IsNullOrWhiteSpace(location.FilePath) ||
+            FindWorkspaceFile(location.FilePath) is not { CanEdit: true } file)
+        {
+            return false;
+        }
+
+        shell.OpenWorkspaceFile(file);
+        return true;
+    }
+
+    private InMemoryProjectFile? FindWorkspaceFile(string path)
+    {
+        return Project?.FindFile(path) ??
+               Shell?.ActiveProject?.FindFile(path) ??
+               Shell?.Solution?.Projects
+                   .Select(project => project.FindFile(path))
+                   .FirstOrDefault(static file => file is not null);
     }
 
     private void ShowLanguagePeek(

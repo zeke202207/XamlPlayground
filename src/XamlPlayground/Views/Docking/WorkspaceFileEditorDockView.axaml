@@ -29,7 +29,8 @@
     <i:Interaction.Behaviors>
       <behaviors:TextEditorBehavior Extension="{Binding Extension}"
                                     Project="{Binding Project}"
-                                    File="{Binding File}" />
+                                    File="{Binding File}"
+                                    Shell="{Binding Shell}" />
     </i:Interaction.Behaviors>
   </minimap:MinimapTextEditor>
 </UserControl>

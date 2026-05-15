@@ -1297,7 +1297,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         OpenWorkspaceFile(file);
     }
 
-    private void OpenWorkspaceFile(InMemoryProjectFile file)
+    internal void OpenWorkspaceFile(InMemoryProjectFile file)
     {
         if (!file.CanEdit)
         {
