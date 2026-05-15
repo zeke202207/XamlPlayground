@@ -1852,6 +1852,59 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsIgnoreGeneratedResourcePreview()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            var resourceFile = new InMemoryProjectFile(
+                "Themes/Theme.axaml",
+                """
+                <ResourceDictionary xmlns="https://github.com/avaloniaui"
+                                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                  <Design.PreviewWith>
+                    <Button Content="Preview" />
+                  </Design.PreviewWith>
+                </ResourceDictionary>
+                """,
+                ProjectFileKind.Resource);
+            viewModel.ActiveXamlFile = resourceFile;
+            viewModel.ActiveWorkspaceFile = resourceFile;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+            var preview = Assert.IsType<UserControl>(
+                RuntimeXamlPreviewLoader.LoadResourceDictionaryPreview(
+                    resourceFile.Text,
+                    null,
+                    resourceFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
+            var button = Assert.IsType<Button>(preview.Content);
+            SetGeneratedDiagnosticsPreviewXamlFile(viewModel, resourceFile);
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+
+            viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!.OnPropertyEdited(new DevToolsPropertyEdit(
+                button,
+                button,
+                "Content",
+                "Content",
+                typeof(object),
+                typeof(ContentControl),
+                "Preview",
+                "Mutated",
+                "Preview",
+                "Mutated",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Content=\"Preview\"", resourceFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Content=\"Mutated\"", resourceFile.Text, StringComparison.Ordinal);
+            Assert.Contains("not available for generated resource previews", viewModel.VisualEditorStatus, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void MainViewModel_ToolboxCommandInsertsIntoSelectedEmptyDecoratorContainer()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -4904,6 +4957,39 @@ public sealed class VisualEditingTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(acceptedTextField);
         acceptedTextField.SetValue(viewModel, xamlFile.Text);
+
+        var generatedSourceField = typeof(MainViewModel).GetField(
+            "_diagnosticsPreviewUsesGeneratedSource",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(generatedSourceField);
+        generatedSourceField.SetValue(viewModel, false);
+    }
+
+    private static void SetGeneratedDiagnosticsPreviewXamlFile(MainViewModel viewModel, InMemoryProjectFile xamlFile)
+    {
+        var fileField = typeof(MainViewModel).GetField(
+            "_diagnosticsPreviewXamlFile",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(fileField);
+        fileField.SetValue(viewModel, xamlFile);
+
+        var textField = typeof(MainViewModel).GetField(
+            "_diagnosticsPreviewSourceXamlText",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(textField);
+        textField.SetValue(viewModel, null);
+
+        var acceptedTextField = typeof(MainViewModel).GetField(
+            "_diagnosticsAcceptedXamlText",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(acceptedTextField);
+        acceptedTextField.SetValue(viewModel, null);
+
+        var generatedSourceField = typeof(MainViewModel).GetField(
+            "_diagnosticsPreviewUsesGeneratedSource",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(generatedSourceField);
+        generatedSourceField.SetValue(viewModel, true);
     }
 
     private static IEnumerable<VisualEditorNodeViewModel> FlattenVisualEditorNodes(VisualEditorNodeViewModel node)

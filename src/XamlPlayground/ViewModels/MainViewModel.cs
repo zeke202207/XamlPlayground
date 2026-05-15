@@ -2772,7 +2772,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         StopRemotePreview();
         Control = scope;
         DiagnosticsRoot = scope;
-        SetDiagnosticsPreviewXamlFile(xamlFile);
+        SetDiagnosticsPreviewXamlFile(xamlFile, xamlFile.Kind != ProjectFileKind.Resource);
         LastErrorMessage = diagnosticsMessage;
         _previous = assemblyScope;
         previousScope?.Unload();

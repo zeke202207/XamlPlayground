@@ -50,6 +50,7 @@ public partial class MainViewModel
     private InMemoryProjectFile? _diagnosticsPreviewXamlFile;
     private string? _diagnosticsPreviewSourceXamlText;
     private string? _diagnosticsAcceptedXamlText;
+    private bool _diagnosticsPreviewUsesGeneratedSource;
     private bool _isSynchronizingVisualEditorPropertySelection;
     private bool _isApplyingVisualEditorPropertyGridValue;
     private XamlElementSelector? _visualEditorCurrentContainerSelector;
@@ -5927,13 +5928,16 @@ public partial class MainViewModel
                ReferenceEquals(file, ActiveXamlFile);
     }
 
-    private void SetDiagnosticsPreviewXamlFile(InMemoryProjectFile xamlFile)
+    private void SetDiagnosticsPreviewXamlFile(
+        InMemoryProjectFile xamlFile,
+        bool supportsSourceMutations = true)
     {
         ArgumentNullException.ThrowIfNull(xamlFile);
 
         _diagnosticsPreviewXamlFile = xamlFile;
-        _diagnosticsPreviewSourceXamlText = xamlFile.Text;
-        _diagnosticsAcceptedXamlText = xamlFile.Text;
+        _diagnosticsPreviewSourceXamlText = supportsSourceMutations ? xamlFile.Text : null;
+        _diagnosticsAcceptedXamlText = supportsSourceMutations ? xamlFile.Text : null;
+        _diagnosticsPreviewUsesGeneratedSource = !supportsSourceMutations;
     }
 
     private void SetDiagnosticsAcceptedXamlText(InMemoryProjectFile xamlFile)
@@ -5951,6 +5955,7 @@ public partial class MainViewModel
         _diagnosticsPreviewXamlFile = null;
         _diagnosticsPreviewSourceXamlText = null;
         _diagnosticsAcceptedXamlText = null;
+        _diagnosticsPreviewUsesGeneratedSource = false;
     }
 
     private bool TryGetDiagnosticsPreviewXamlFileForEdit(
@@ -5963,6 +5968,12 @@ public partial class MainViewModel
         if (ActiveXamlFile is not { } activeXamlFile)
         {
             VisualEditorStatus = "No XAML document selected.";
+            return false;
+        }
+
+        if (_diagnosticsPreviewUsesGeneratedSource)
+        {
+            VisualEditorStatus = "Diagnostics property edits are not available for generated resource previews.";
             return false;
         }
 
