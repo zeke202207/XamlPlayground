@@ -2954,13 +2954,13 @@ public partial class MainViewModel
             return;
         }
 
-        if (!TryResolveVisualEditorPreviewControl(
+        if (!TryResolveDiagnosticsPreviewControl(
                 control,
+                xamlFile,
                 previewXaml,
                 out _,
                 out var element,
-                out var diagnostics,
-                allowTypeFallback: false))
+                out var diagnostics))
         {
             VisualEditorStatus = string.Join(Environment.NewLine, diagnostics);
             return;
@@ -5999,6 +5999,78 @@ public partial class MainViewModel
         element = selection.XamlElement;
         diagnostics = selection.Diagnostics;
         return selection.HasSelection && selection.XamlElement is not null;
+    }
+
+    private bool TryResolveDiagnosticsPreviewControl(
+        Control control,
+        InMemoryProjectFile xamlFile,
+        string xaml,
+        [NotNullWhen(true)] out XamlDocumentSnapshot? document,
+        [NotNullWhen(true)] out XamlElementSnapshot? element,
+        out IReadOnlyList<string> diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        ArgumentNullException.ThrowIfNull(xamlFile);
+        ArgumentNullException.ThrowIfNull(xaml);
+
+        document = null;
+        element = null;
+
+        var visualNode = _visualTreeSnapshotService.Snapshot(control);
+        if (!VisualNodeSourceMatchesXamlFile(visualNode, xamlFile.Path, out var sourcePath))
+        {
+            diagnostics = new[]
+            {
+                $"The selected visual belongs to '{sourcePath}', not the active XAML document '{NormalizeXamlSourcePath(xamlFile.Path)}'."
+            };
+            return false;
+        }
+
+        var selection = _visualSelectionService.SelectVisual(
+            xaml,
+            visualNode,
+            allowTypeFallback: false);
+        document = selection.Document;
+        element = selection.XamlElement;
+        diagnostics = selection.Diagnostics;
+        return selection.HasSelection && selection.XamlElement is not null;
+    }
+
+    private static bool VisualNodeSourceMatchesXamlFile(
+        VisualTreeNodeSnapshot visualNode,
+        string xamlFilePath,
+        [NotNullWhen(false)] out string? sourcePath)
+    {
+        sourcePath = NormalizeXamlSourcePath(visualNode.SourceUri);
+        if (sourcePath is null)
+        {
+            return true;
+        }
+
+        var activePath = NormalizeXamlSourcePath(xamlFilePath);
+        return activePath is not null &&
+               string.Equals(sourcePath, activePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeXamlSourcePath(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return null;
+        }
+
+        var path = source.Trim();
+        if (Uri.TryCreate(path, UriKind.Absolute, out var uri))
+        {
+            path = uri.IsFile
+                ? uri.LocalPath
+                : uri.AbsolutePath;
+        }
+
+        path = Uri.UnescapeDataString(path)
+            .Replace('\\', '/')
+            .Trim('/');
+        return string.IsNullOrWhiteSpace(path) ? null : path;
     }
 
     private void ApplyVisualEditorMutation(XamlMutationResult result)

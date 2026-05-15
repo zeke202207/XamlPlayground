@@ -1732,6 +1732,49 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsIgnoreNonActiveSourceUri()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text =
+                "<Button xmlns=\"https://github.com/avaloniaui\" Content=\"Active\" />";
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+            var resourceButton = Assert.IsAssignableFrom<Button>(
+                RuntimeXamlPreviewLoader.LoadControl(
+                    "<Button xmlns=\"https://github.com/avaloniaui\" Content=\"Resource\" />",
+                    null,
+                    null,
+                    "Resources/Template.axaml",
+                    diagnostics));
+            Assert.Empty(diagnostics);
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+
+            viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!.OnPropertyEdited(new DevToolsPropertyEdit(
+                resourceButton,
+                resourceButton,
+                "Content",
+                "Content",
+                typeof(object),
+                typeof(ContentControl),
+                "Resource",
+                "Mutated",
+                "Resource",
+                "Mutated",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Content=\"Active\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Content=\"Mutated\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.Contains("resources/Template.axaml", viewModel.VisualEditorStatus, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("not the active XAML document", viewModel.VisualEditorStatus, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void MainViewModel_ToolboxCommandInsertsIntoSelectedEmptyDecoratorContainer()
     {
         TestApplication.EnsureAvaloniaInitialized();
