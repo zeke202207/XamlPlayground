@@ -1383,8 +1383,15 @@ public sealed class VisualEditingTests
                                                <Button x:Name="Action" Content="Run" />
                                              </StackPanel>
                                              """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
             var root = Assert.IsAssignableFrom<StackPanel>(
-                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+                RuntimeXamlPreviewLoader.LoadControl(
+                    viewModel.ActiveXamlFile.Text,
+                    null,
+                    null,
+                    viewModel.ActiveXamlFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
             var button = Assert.IsType<Button>(root.Children.Single());
             SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
             Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
@@ -1435,8 +1442,15 @@ public sealed class VisualEditingTests
                                                <Button x:Name="Action" Content="Run" />
                                              </StackPanel>
                                              """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
             var root = Assert.IsAssignableFrom<StackPanel>(
-                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+                RuntimeXamlPreviewLoader.LoadControl(
+                    viewModel.ActiveXamlFile.Text,
+                    null,
+                    null,
+                    viewModel.ActiveXamlFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
             var button = Assert.IsType<Button>(root.Children.Single());
             SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
             Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
@@ -1490,8 +1504,15 @@ public sealed class VisualEditingTests
                                                <Button x:Name="Action" Width="24" />
                                              </StackPanel>
                                              """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
             var root = Assert.IsAssignableFrom<StackPanel>(
-                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+                RuntimeXamlPreviewLoader.LoadControl(
+                    viewModel.ActiveXamlFile.Text,
+                    null,
+                    null,
+                    viewModel.ActiveXamlFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
             var button = Assert.IsType<Button>(root.Children.Single());
             SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
             Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
@@ -1530,8 +1551,15 @@ public sealed class VisualEditingTests
                                                <Button x:Name="Action" Content="Run" />
                                              </StackPanel>
                                              """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
             var root = Assert.IsAssignableFrom<StackPanel>(
-                AvaloniaRuntimeXamlLoader.Load(viewModel.ActiveXamlFile.Text));
+                RuntimeXamlPreviewLoader.LoadControl(
+                    viewModel.ActiveXamlFile.Text,
+                    null,
+                    null,
+                    viewModel.ActiveXamlFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
             var button = Assert.IsType<Button>(root.Children.Single());
             SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
             Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
@@ -1576,8 +1604,15 @@ public sealed class VisualEditingTests
                                  <Button x:Name="Action" Content="Run" />
                                </StackPanel>
                                """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
             var root = Assert.IsAssignableFrom<StackPanel>(
-                AvaloniaRuntimeXamlLoader.Load(previewFile.Text));
+                RuntimeXamlPreviewLoader.LoadControl(
+                    previewFile.Text,
+                    null,
+                    null,
+                    previewFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
             var button = Assert.IsType<Button>(root.Children.Single());
             SetDiagnosticsPreviewXamlFile(viewModel, previewFile);
 
@@ -1727,7 +1762,49 @@ public sealed class VisualEditingTests
 
             Assert.Contains("Background=\"Red\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
             Assert.DoesNotContain("Background=\"Blue\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
-            Assert.Contains("could not be mapped", viewModel.VisualEditorStatus, StringComparison.Ordinal);
+            Assert.Contains("does not have XAML source information", viewModel.VisualEditorStatus, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsIgnoreSourceLessNameCollision()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <Border xmlns="https://github.com/avaloniaui"
+                                                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                     x:Name="GeneratedSampleScope"
+                                                     Background="Red" />
+                                             """;
+            var generatedRuntimeControl = new Border
+            {
+                Name = "GeneratedSampleScope",
+                Background = Brushes.Red
+            };
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+
+            viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!.OnPropertyEdited(new DevToolsPropertyEdit(
+                generatedRuntimeControl,
+                generatedRuntimeControl,
+                "Background",
+                "Background",
+                typeof(object),
+                typeof(Border),
+                Brushes.Red,
+                Brushes.Blue,
+                "Red",
+                "Blue",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Background=\"Red\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Background=\"Blue\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.Contains("does not have XAML source information", viewModel.VisualEditorStatus, StringComparison.Ordinal);
         });
     }
 

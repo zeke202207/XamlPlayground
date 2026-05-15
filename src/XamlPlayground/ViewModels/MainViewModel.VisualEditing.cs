@@ -6017,11 +6017,22 @@ public partial class MainViewModel
         element = null;
 
         var visualNode = _visualTreeSnapshotService.Snapshot(control);
-        if (!VisualNodeSourceMatchesXamlFile(visualNode, xamlFile.Path, out var sourcePath))
+        var sourcePath = NormalizeXamlSourcePath(visualNode.SourceUri);
+        if (sourcePath is null)
         {
             diagnostics = new[]
             {
-                $"The selected visual belongs to '{sourcePath}', not the active XAML document '{NormalizeXamlSourcePath(xamlFile.Path)}'."
+                "The selected visual does not have XAML source information and cannot be edited from diagnostics."
+            };
+            return false;
+        }
+
+        var activePath = NormalizeXamlSourcePath(xamlFile.Path);
+        if (!string.Equals(sourcePath, activePath, StringComparison.OrdinalIgnoreCase))
+        {
+            diagnostics = new[]
+            {
+                $"The selected visual belongs to '{sourcePath}', not the active XAML document '{activePath}'."
             };
             return false;
         }
@@ -6034,22 +6045,6 @@ public partial class MainViewModel
         element = selection.XamlElement;
         diagnostics = selection.Diagnostics;
         return selection.HasSelection && selection.XamlElement is not null;
-    }
-
-    private static bool VisualNodeSourceMatchesXamlFile(
-        VisualTreeNodeSnapshot visualNode,
-        string xamlFilePath,
-        [NotNullWhen(false)] out string? sourcePath)
-    {
-        sourcePath = NormalizeXamlSourcePath(visualNode.SourceUri);
-        if (sourcePath is null)
-        {
-            return true;
-        }
-
-        var activePath = NormalizeXamlSourcePath(xamlFilePath);
-        return activePath is not null &&
-               string.Equals(sourcePath, activePath, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeXamlSourcePath(string? source)
