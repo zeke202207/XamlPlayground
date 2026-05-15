@@ -51,8 +51,8 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         {
             XamlCompletionContextKind.ClosingTag => GetClosingTagCompletions(text, position, context),
             XamlCompletionContextKind.ElementName => GetElementNameCompletions(text, position, context),
-            XamlCompletionContextKind.AttributeName => GetAttributeNameCompletions(text, context),
-            XamlCompletionContextKind.AttributeValue => GetAttributeValueCompletions(text, context),
+            XamlCompletionContextKind.AttributeName => GetAttributeNameCompletions(text, position, context),
+            XamlCompletionContextKind.AttributeValue => GetAttributeValueCompletions(text, position, context),
             _ => null
         };
 
@@ -78,7 +78,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
             return Task.FromResult<EditorQuickInfo?>(null);
         }
 
-        var namespaces = GetXmlNamespaces(text);
+        var namespaces = GetXmlNamespacesAtPosition(text, wordSpan.Start);
         var catalog = GetCatalog();
 
         if (context.Kind is XamlCompletionContextKind.ElementName or XamlCompletionContextKind.ClosingTag &&
@@ -254,7 +254,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
             return Task.FromResult<EditorLocation?>(null);
         }
 
-        var namespaces = GetXmlNamespaces(text);
+        var namespaces = GetXmlNamespacesAtPosition(text, token.Start);
         var catalog = GetCatalog();
         if (context.Kind is XamlCompletionContextKind.ElementName or XamlCompletionContextKind.ClosingTag &&
             ResolveType(tokenText, namespaces, catalog) is { } type)
@@ -612,7 +612,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         XamlCompletionContext context)
     {
         var catalog = GetCatalog();
-        var namespaces = GetXmlNamespaces(text);
+        var namespaces = GetXmlNamespacesAtPosition(text, position);
         var prefix = GetPrefix(context.CurrentToken);
         var xmlNamespace = namespaces.GetValueOrDefault(prefix);
         var parentName = GetOpenElementStack(text, position).LastOrDefault();
@@ -652,10 +652,11 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         Justification = "Browser publish roots Avalonia and playground assemblies so public XAML metadata remains available for IntelliSense.")]
     private static EditorCompletionResult? GetAttributeNameCompletions(
         string text,
+        int position,
         XamlCompletionContext context)
     {
         var catalog = GetCatalog();
-        var namespaces = GetXmlNamespaces(text);
+        var namespaces = GetXmlNamespacesAtPosition(text, position);
         if (context.TagName is null || ResolveType(context.TagName, namespaces, catalog) is not { } ownerType)
         {
             return null;
@@ -714,6 +715,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         Justification = "Browser publish roots Avalonia and playground assemblies so reflected XAML property metadata remains available for IntelliSense.")]
     private static EditorCompletionResult? GetAttributeValueCompletions(
         string text,
+        int position,
         XamlCompletionContext context)
     {
         if (context.AttributeName is null || context.TagName is null)
@@ -722,7 +724,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         }
 
         var catalog = GetCatalog();
-        var namespaces = GetXmlNamespaces(text);
+        var namespaces = GetXmlNamespacesAtPosition(text, position);
         if (ResolveType(context.TagName, namespaces, catalog) is not { } ownerType)
         {
             return null;
@@ -951,6 +953,42 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         var namespaces = GetXmlNamespacesInScope(text, elementMatch.Index);
         _ = ApplyXmlNamespaces(namespaces, elementMatch.Value);
         return namespaces;
+    }
+
+    private static IReadOnlyDictionary<string, string> GetXmlNamespacesAtPosition(string text, int position)
+    {
+        position = ClampPosition(text, position);
+        var commentRanges = GetXmlCommentRanges(text);
+
+        foreach (Match match in ElementRegex().Matches(text))
+        {
+            if (match.Index > position)
+            {
+                break;
+            }
+
+            if (IsOffsetInRanges(match.Index, commentRanges))
+            {
+                continue;
+            }
+
+            var matchEnd = match.Index + match.Length;
+            if (position < match.Index || position >= matchEnd)
+            {
+                continue;
+            }
+
+            if (match.Groups["closing"].Success)
+            {
+                return GetXmlNamespacesInScope(text, match.Index);
+            }
+
+            var namespaces = GetXmlNamespacesInScope(text, match.Index);
+            _ = ApplyXmlNamespaces(namespaces, match.Value);
+            return namespaces;
+        }
+
+        return GetXmlNamespacesInScope(text, position);
     }
 
     private static Dictionary<string, string> GetXmlNamespacesInScope(string text, int position)

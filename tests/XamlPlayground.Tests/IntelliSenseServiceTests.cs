@@ -268,6 +268,31 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task XamlDefinition_UsesScopedXmlNamespaces()
+    {
+        _ = typeof(Button);
+        var service = new XamlIntelliSenseService();
+        const string xaml = """
+            <UserControl xmlns="https://github.com/avaloniaui"
+                         xmlns:controls="using:Avalonia.Controls">
+              <controls:Button Content="Before" />
+              <StackPanel xmlns:controls="using:Missing.Namespace" />
+              <controls:Button Content="After" />
+            </UserControl>
+            """;
+
+        var firstPosition = xaml.IndexOf("controls:Button", StringComparison.Ordinal) + "controls:".Length + 2;
+        var secondPosition = xaml.LastIndexOf("controls:Button", StringComparison.Ordinal) + "controls:".Length + 2;
+        var firstDefinition = await service.GetDefinitionAsync(xaml, firstPosition, CancellationToken.None);
+        var secondDefinition = await service.GetDefinitionAsync(xaml, secondPosition, CancellationToken.None);
+
+        Assert.NotNull(firstDefinition);
+        Assert.NotNull(secondDefinition);
+        Assert.Contains(typeof(Button).FullName!, firstDefinition.PreviewText, StringComparison.Ordinal);
+        Assert.Contains(typeof(Button).FullName!, secondDefinition.PreviewText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task XamlDiagnostics_ReturnUnknownMemberWarnings()
     {
         _ = typeof(Button);
