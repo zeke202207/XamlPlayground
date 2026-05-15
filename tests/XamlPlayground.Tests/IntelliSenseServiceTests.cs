@@ -281,6 +281,27 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task XamlDiagnostics_UsesScopedXmlNamespaces()
+    {
+        _ = typeof(Button);
+        var service = new XamlIntelliSenseService();
+        const string xaml = """
+            <UserControl xmlns="https://github.com/avaloniaui"
+                         xmlns:controls="using:Avalonia.Controls">
+              <controls:Button Content="Before" />
+              <StackPanel xmlns:controls="using:Missing.Namespace" />
+              <!-- xmlns:controls="using:Missing.Namespace" -->
+              <controls:Button Content="After" />
+            </UserControl>
+            """;
+
+        var result = await service.GetDiagnosticsAsync(xaml, CancellationToken.None);
+
+        Assert.DoesNotContain(result, diagnostic =>
+            diagnostic.Code is "XAML1001" or "XAML1002");
+    }
+
+    [Fact]
     public async Task XamlReferences_ReturnResourceReferences()
     {
         var service = new XamlIntelliSenseService();

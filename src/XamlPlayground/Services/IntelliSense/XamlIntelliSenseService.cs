@@ -139,7 +139,6 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         }
 
         var catalog = GetCatalog();
-        var namespaces = GetXmlNamespaces(text);
         var commentRanges = GetXmlCommentRanges(text);
         foreach (Match match in ElementRegex().Matches(text))
         {
@@ -151,6 +150,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
             }
 
             var tagName = match.Groups["name"].Value;
+            var namespaces = GetXmlNamespaces(text, match);
             if (IsPropertyElement(tagName))
             {
                 continue;
@@ -928,20 +928,116 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
 
     private static IReadOnlyDictionary<string, string> GetXmlNamespaces(string text)
     {
-        var namespaces = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [""] = AvaloniaXmlns,
-            ["x"] = XamlXmlns
-        };
+        var namespaces = CreateDefaultXmlNamespaces();
+        var commentRanges = GetXmlCommentRanges(text);
 
         foreach (Match match in XmlnsRegex().Matches(text))
         {
+            if (IsOffsetInRanges(match.Index, commentRanges))
+            {
+                continue;
+            }
+
             var prefix = match.Groups["prefix"].Success ? match.Groups["prefix"].Value : string.Empty;
             var value = match.Groups["value"].Value;
             namespaces[prefix] = value;
         }
 
         return namespaces;
+    }
+
+    private static IReadOnlyDictionary<string, string> GetXmlNamespaces(string text, Match elementMatch)
+    {
+        var namespaces = GetXmlNamespacesInScope(text, elementMatch.Index);
+        _ = ApplyXmlNamespaces(namespaces, elementMatch.Value);
+        return namespaces;
+    }
+
+    private static Dictionary<string, string> GetXmlNamespacesInScope(string text, int position)
+    {
+        var namespaces = CreateDefaultXmlNamespaces();
+        var stack = new Stack<IReadOnlyDictionary<string, string?>>();
+        var commentRanges = GetXmlCommentRanges(text);
+
+        foreach (Match match in ElementRegex().Matches(text))
+        {
+            if (match.Index >= position)
+            {
+                break;
+            }
+
+            if (IsOffsetInRanges(match.Index, commentRanges))
+            {
+                continue;
+            }
+
+            if (match.Groups["closing"].Success)
+            {
+                if (stack.Count > 0)
+                {
+                    RestoreXmlNamespaces(namespaces, stack.Pop());
+                }
+
+                continue;
+            }
+
+            var previousValues = ApplyXmlNamespaces(namespaces, match.Value);
+            if (match.Groups["selfclosing"].Success)
+            {
+                RestoreXmlNamespaces(namespaces, previousValues);
+            }
+            else
+            {
+                stack.Push(previousValues);
+            }
+        }
+
+        return namespaces;
+    }
+
+    private static Dictionary<string, string> CreateDefaultXmlNamespaces()
+    {
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [""] = AvaloniaXmlns,
+            ["x"] = XamlXmlns
+        };
+    }
+
+    private static IReadOnlyDictionary<string, string?> ApplyXmlNamespaces(
+        Dictionary<string, string> namespaces,
+        string source)
+    {
+        var previousValues = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (Match match in XmlnsRegex().Matches(source))
+        {
+            var prefix = match.Groups["prefix"].Success ? match.Groups["prefix"].Value : string.Empty;
+            if (!previousValues.ContainsKey(prefix))
+            {
+                previousValues[prefix] = namespaces.GetValueOrDefault(prefix);
+            }
+
+            namespaces[prefix] = match.Groups["value"].Value;
+        }
+
+        return previousValues;
+    }
+
+    private static void RestoreXmlNamespaces(
+        Dictionary<string, string> namespaces,
+        IReadOnlyDictionary<string, string?> previousValues)
+    {
+        foreach (var (prefix, value) in previousValues)
+        {
+            if (value is null)
+            {
+                namespaces.Remove(prefix);
+            }
+            else
+            {
+                namespaces[prefix] = value;
+            }
+        }
     }
 
     private static IReadOnlyList<string> GetOpenElementStack(string text, int position)
