@@ -1425,6 +1425,54 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_DiagnosticsResourceReferenceEditsMutateXamlAsResourceMarkup()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            viewModel.ActiveXamlFile!.Text = """
+                                             <Border xmlns="https://github.com/avaloniaui"
+                                                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                                                     x:Name="Root"
+                                                     Background="Red" />
+                                             """;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+            var border = Assert.IsAssignableFrom<Border>(
+                RuntimeXamlPreviewLoader.LoadControl(
+                    viewModel.ActiveXamlFile.Text,
+                    null,
+                    null,
+                    viewModel.ActiveXamlFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile);
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+
+            viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!.OnPropertyEdited(new DevToolsPropertyEdit(
+                border,
+                border,
+                "Background",
+                "Background",
+                typeof(IBrush),
+                typeof(Border),
+                Brushes.Red,
+                Brushes.Blue,
+                "Red",
+                "{DynamicResource AccentBrush}",
+                isAttached: false,
+                isAvaloniaProperty: true,
+                resourceReferenceKind: DevToolsResourceReferenceKind.Dynamic,
+                resourceKey: "AccentBrush",
+                resourceKeyText: "AccentBrush"));
+
+            Assert.Contains("Background=\"{DynamicResource AccentBrush}\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Background=\"Blue\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void MainViewModel_DiagnosticsPropertyEditsDoNotSchedulePreviewReload()
     {
         TestApplication.EnsureAvaloniaInitialized();

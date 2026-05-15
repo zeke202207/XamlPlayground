@@ -2999,6 +2999,26 @@ public partial class MainViewModel
     {
         value = string.Empty;
 
+        if (edit.ResourceReferenceKind != DevToolsResourceReferenceKind.None)
+        {
+            if (!string.IsNullOrWhiteSpace(edit.NewValueText))
+            {
+                value = edit.NewValueText;
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(edit.ResourceKeyText))
+            {
+                var extensionName = edit.ResourceReferenceKind == DevToolsResourceReferenceKind.Dynamic
+                    ? "DynamicResource"
+                    : "StaticResource";
+                value = $"{{{extensionName} {edit.ResourceKeyText}}}";
+                return true;
+            }
+
+            return false;
+        }
+
         switch (edit.NewValue)
         {
             case null:
