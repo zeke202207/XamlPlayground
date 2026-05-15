@@ -302,6 +302,30 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task XamlReferences_IgnorePlainKeyAttributes()
+    {
+        var service = new XamlIntelliSenseService();
+        const string xaml = """
+            <UserControl xmlns="https://github.com/avaloniaui">
+              <KeyBinding Key="AccentBrush" />
+              <UserControl.Resources>
+                <SolidColorBrush x:Key="AccentBrush" Color="Red" />
+              </UserControl.Resources>
+              <Border Background="{StaticResource AccentBrush}" />
+            </UserControl>
+            """;
+
+        var referencePosition = xaml.LastIndexOf("AccentBrush", StringComparison.Ordinal) + 2;
+        var definition = await service.GetDefinitionAsync(xaml, referencePosition, CancellationToken.None);
+        var plainKeyPosition = xaml.IndexOf("Key=\"AccentBrush\"", StringComparison.Ordinal) + "Key=\"".Length + 2;
+        var plainKeyReferences = await service.GetReferencesAsync(xaml, plainKeyPosition, CancellationToken.None);
+
+        Assert.NotNull(definition);
+        Assert.Equal(xaml.IndexOf("x:Key=\"AccentBrush\"", StringComparison.Ordinal) + "x:Key=\"".Length, definition.StartOffset);
+        Assert.Empty(plainKeyReferences);
+    }
+
+    [Fact]
     public async Task XamlReferences_IgnoresPlainAttributeValues()
     {
         var service = new XamlIntelliSenseService();

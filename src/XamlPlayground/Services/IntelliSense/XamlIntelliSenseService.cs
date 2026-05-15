@@ -1107,7 +1107,7 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
     [GeneratedRegex("\\{(?:StaticResource|DynamicResource)(?:\\s+ResourceKey\\s*=)?\\s*(?<key>[^\\s,}]+)", RegexOptions.Compiled)]
     private static partial Regex ResourceReferenceRegex();
 
-    [GeneratedRegex("(?<![A-Za-z0-9_.:-])(?:x:Key|Key)\\s*=\\s*(?:\"(?<key>[^\"]+)\"|'(?<key>[^']+)')", RegexOptions.Compiled)]
+    [GeneratedRegex("(?<![A-Za-z0-9_.:-])x:Key\\s*=\\s*(?:\"(?<key>[^\"]+)\"|'(?<key>[^']+)')", RegexOptions.Compiled)]
     private static partial Regex ResourceDefinitionRegex();
 
     private sealed record XamlTypeCatalog(
