@@ -611,21 +611,21 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
         var includeStatic = targetSymbol is ITypeSymbol ||
                             memberAccessExpression.Expression is IdentifierNameSyntax identifier &&
                             char.IsUpper(identifier.Identifier.ValueText.FirstOrDefault());
+        var accessibilityContext = GetAccessibilityContext(
+            context,
+            memberAccessExpression.Name.SpanStart,
+            cancellationToken);
 
         var items = new List<EditorCompletionItem>();
         foreach (var group in GetAllMembers(targetType)
                      .Where(symbol => IsCompletionSymbol(symbol) && symbol.IsStatic == includeStatic)
+                     .Where(symbol => IsAccessible(context.Compilation, symbol, accessibilityContext, targetType))
                      .GroupBy(symbol => (symbol.Name, symbol.Kind))
                      .OrderBy(group => group.Key.Name, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var symbol = group.First();
-            if (!IsAccessible(context.Compilation, symbol, targetType))
-            {
-                continue;
-            }
-
             var description = FormatSymbolGroupDescription(group);
             items.Add(new EditorCompletionItem(
                 symbol.Name,
@@ -636,6 +636,25 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
         }
 
         return items;
+    }
+
+    private static ISymbol GetAccessibilityContext(
+        CSharpCompilationContext context,
+        int position,
+        CancellationToken cancellationToken)
+    {
+        var enclosingSymbol = context.SemanticModel.GetEnclosingSymbol(position, cancellationToken);
+        if (enclosingSymbol is INamedTypeSymbol namedType)
+        {
+            return namedType;
+        }
+
+        if (enclosingSymbol?.ContainingType is { } containingType)
+        {
+            return containingType;
+        }
+
+        return context.Compilation.Assembly;
     }
 
     private static IReadOnlyList<EditorCompletionItem> GetGlobalCompletions(
@@ -923,10 +942,14 @@ public sealed class CSharpIntelliSenseService : IEditorIntelliSenseService
         }
     }
 
-    private static bool IsAccessible(Compilation compilation, ISymbol symbol, ITypeSymbol within)
+    private static bool IsAccessible(
+        Compilation compilation,
+        ISymbol symbol,
+        ISymbol within,
+        ITypeSymbol targetType)
     {
-        return symbol.DeclaredAccessibility is Accessibility.Public or Accessibility.Internal or Accessibility.Protected or Accessibility.ProtectedOrInternal ||
-               compilation.IsSymbolAccessibleWithin(symbol, within);
+        var throughType = within is ITypeSymbol ? targetType : null;
+        return compilation.IsSymbolAccessibleWithin(symbol, within, throughType);
     }
 
     private static EditorCompletionKind GetCompletionKind(ISymbol symbol)

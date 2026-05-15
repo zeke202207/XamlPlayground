@@ -39,6 +39,37 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task CSharpCompletion_FiltersInaccessibleTargetMembers()
+    {
+        var service = new CSharpIntelliSenseService();
+        const string code = """
+            public sealed class Customer
+            {
+                public string Name { get; set; } = "";
+                private string Secret { get; set; } = "";
+                protected string ProtectedCode { get; set; } = "";
+            }
+
+            public sealed class Consumer
+            {
+                public void Update()
+                {
+                    var customer = new Customer();
+                    customer.
+                }
+            }
+            """;
+
+        var position = code.IndexOf("customer.", StringComparison.Ordinal) + "customer.".Length;
+        var result = await service.GetCompletionsAsync(code, position, explicitInvocation: true, null, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Contains(result.Items, item => item.Text == "Name");
+        Assert.DoesNotContain(result.Items, item => item.Text == "Secret");
+        Assert.DoesNotContain(result.Items, item => item.Text == "ProtectedCode");
+    }
+
+    [Fact]
     public async Task CSharpSignatureHelp_ReturnsInvocationOverloads()
     {
         _ = typeof(StackPanel);
