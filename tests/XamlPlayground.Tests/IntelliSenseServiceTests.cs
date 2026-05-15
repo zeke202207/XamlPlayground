@@ -262,6 +262,25 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task XamlDiagnostics_IgnoresCommentedMarkup()
+    {
+        _ = typeof(Button);
+        var service = new XamlIntelliSenseService();
+        const string xaml = """
+            <UserControl xmlns="https://github.com/avaloniaui">
+              <!-- <Button MissingProperty="1" /> -->
+              <Button Content="Save" />
+            </UserControl>
+            """;
+
+        var result = await service.GetDiagnosticsAsync(xaml, CancellationToken.None);
+
+        Assert.DoesNotContain(result, diagnostic =>
+            diagnostic.Code == "XAML1002" &&
+            diagnostic.Message.Contains("MissingProperty", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task XamlReferences_ReturnResourceReferences()
     {
         var service = new XamlIntelliSenseService();

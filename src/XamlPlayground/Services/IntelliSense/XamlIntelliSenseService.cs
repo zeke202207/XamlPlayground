@@ -140,11 +140,12 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
 
         var catalog = GetCatalog();
         var namespaces = GetXmlNamespaces(text);
+        var commentRanges = GetXmlCommentRanges(text);
         foreach (Match match in ElementRegex().Matches(text))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (match.Groups["closing"].Success)
+            if (match.Groups["closing"].Success || IsOffsetInRanges(match.Index, commentRanges))
             {
                 continue;
             }
@@ -190,6 +191,40 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
         }
 
         return Task.FromResult<IReadOnlyList<EditorDiagnostic>>(diagnostics);
+    }
+
+    private static IReadOnlyList<TextSpan> GetXmlCommentRanges(string text)
+    {
+        var ranges = new List<TextSpan>();
+        var start = 0;
+        while ((start = text.IndexOf("<!--", start, StringComparison.Ordinal)) >= 0)
+        {
+            var end = text.IndexOf("-->", start + 4, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                ranges.Add(new TextSpan(start, text.Length));
+                break;
+            }
+
+            end += 3;
+            ranges.Add(new TextSpan(start, end));
+            start = end;
+        }
+
+        return ranges;
+    }
+
+    private static bool IsOffsetInRanges(int offset, IReadOnlyList<TextSpan> ranges)
+    {
+        foreach (var range in ranges)
+        {
+            if (offset >= range.Start && offset < range.End)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public Task<EditorLocation?> GetDefinitionAsync(
