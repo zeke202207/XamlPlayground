@@ -1842,7 +1842,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         documentAssemblyName);
                 if (control is { })
                 {
-                    ShowControl(xamlFile, control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
+                    ShowControl(
+                        xamlFile,
+                        control,
+                        xamlText,
+                        CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)),
+                        previewAssemblyScope);
                     previewAssemblyScope = null;
                 }
             }
@@ -1866,7 +1871,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         documentAssemblyName);
                 if (control is { })
                 {
-                    ShowControl(xamlFile, control, CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)), previewAssemblyScope);
+                    ShowControl(
+                        xamlFile,
+                        control,
+                        xamlText,
+                        CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)),
+                        previewAssemblyScope);
                     previewAssemblyScope = null;
                 }
             }
@@ -2759,6 +2769,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void ShowControl(
         InMemoryProjectFile xamlFile,
         Control control,
+        string previewSourceXaml,
         string? diagnosticsMessage,
         WorkspacePreviewAssemblyScope? assemblyScope = null)
     {
@@ -2772,7 +2783,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         StopRemotePreview();
         Control = scope;
         DiagnosticsRoot = scope;
-        SetDiagnosticsPreviewXamlFile(xamlFile, xamlFile.Kind != ProjectFileKind.Resource);
+        SetDiagnosticsPreviewXamlFile(xamlFile, previewSourceXaml, xamlFile.Kind != ProjectFileKind.Resource);
         LastErrorMessage = diagnosticsMessage;
         _previous = assemblyScope;
         previousScope?.Unload();

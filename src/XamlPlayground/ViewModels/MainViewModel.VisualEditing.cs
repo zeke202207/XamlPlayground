@@ -5930,13 +5930,15 @@ public partial class MainViewModel
 
     private void SetDiagnosticsPreviewXamlFile(
         InMemoryProjectFile xamlFile,
+        string previewSourceXaml,
         bool supportsSourceMutations = true)
     {
         ArgumentNullException.ThrowIfNull(xamlFile);
+        ArgumentNullException.ThrowIfNull(previewSourceXaml);
 
         _diagnosticsPreviewXamlFile = xamlFile;
-        _diagnosticsPreviewSourceXamlText = supportsSourceMutations ? xamlFile.Text : null;
-        _diagnosticsAcceptedXamlText = supportsSourceMutations ? xamlFile.Text : null;
+        _diagnosticsPreviewSourceXamlText = supportsSourceMutations ? previewSourceXaml : null;
+        _diagnosticsAcceptedXamlText = supportsSourceMutations ? previewSourceXaml : null;
         _diagnosticsPreviewUsesGeneratedSource = !supportsSourceMutations;
     }
 

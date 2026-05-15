@@ -1652,6 +1652,61 @@ public sealed class VisualEditingTests
     }
 
     [Fact]
+    public void MainViewModel_DiagnosticsPropertyEditsRejectDocumentChangedAfterPreviewLoad()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var viewModel = new MainViewModel(null);
+            var previewXaml = """
+                              <StackPanel xmlns="https://github.com/avaloniaui"
+                                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                <Button Content="Preview" />
+                              </StackPanel>
+                              """;
+            viewModel.ActiveXamlFile!.Text = previewXaml;
+            var diagnostics = new List<RuntimeXamlDiagnostic>();
+            var root = Assert.IsAssignableFrom<StackPanel>(
+                RuntimeXamlPreviewLoader.LoadControl(
+                    previewXaml,
+                    null,
+                    null,
+                    viewModel.ActiveXamlFile.Path,
+                    diagnostics));
+            Assert.Empty(diagnostics);
+            var button = Assert.IsType<Button>(root.Children.Single());
+
+            viewModel.ActiveXamlFile.Text = """
+                                            <StackPanel xmlns="https://github.com/avaloniaui"
+                                                        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                                              <Button Content="Edited" />
+                                            </StackPanel>
+                                            """;
+            SetDiagnosticsPreviewXamlFile(viewModel, viewModel.ActiveXamlFile, previewXaml);
+            Assert.NotNull(viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler);
+
+            viewModel.DiagnosticsDevToolsOptions.PropertyEditHandler!.OnPropertyEdited(new DevToolsPropertyEdit(
+                button,
+                button,
+                "Content",
+                "Content",
+                typeof(object),
+                typeof(ContentControl),
+                "Preview",
+                "Mutated",
+                "Preview",
+                "Mutated",
+                isAttached: false,
+                isAvaloniaProperty: true));
+
+            Assert.Contains("Content=\"Edited\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Content=\"Mutated\"", viewModel.ActiveXamlFile.Text, StringComparison.Ordinal);
+            Assert.Contains("Diagnostics preview is stale", viewModel.VisualEditorStatus, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void MainViewModel_DiagnosticsPropertyEditsMapAgainstPreviewSourceAfterLineShift()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -4938,8 +4993,12 @@ public sealed class VisualEditingTests
             ?.ToString();
     }
 
-    private static void SetDiagnosticsPreviewXamlFile(MainViewModel viewModel, InMemoryProjectFile xamlFile)
+    private static void SetDiagnosticsPreviewXamlFile(
+        MainViewModel viewModel,
+        InMemoryProjectFile xamlFile,
+        string? previewSourceXaml = null)
     {
+        var previewSource = previewSourceXaml ?? xamlFile.Text;
         var fileField = typeof(MainViewModel).GetField(
             "_diagnosticsPreviewXamlFile",
             BindingFlags.Instance | BindingFlags.NonPublic);
@@ -4950,13 +5009,13 @@ public sealed class VisualEditingTests
             "_diagnosticsPreviewSourceXamlText",
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(textField);
-        textField.SetValue(viewModel, xamlFile.Text);
+        textField.SetValue(viewModel, previewSource);
 
         var acceptedTextField = typeof(MainViewModel).GetField(
             "_diagnosticsAcceptedXamlText",
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(acceptedTextField);
-        acceptedTextField.SetValue(viewModel, xamlFile.Text);
+        acceptedTextField.SetValue(viewModel, previewSource);
 
         var generatedSourceField = typeof(MainViewModel).GetField(
             "_diagnosticsPreviewUsesGeneratedSource",
