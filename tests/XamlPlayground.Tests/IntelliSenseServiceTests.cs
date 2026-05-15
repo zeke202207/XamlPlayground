@@ -172,6 +172,24 @@ public sealed class IntelliSenseServiceTests
     }
 
     [Fact]
+    public async Task XamlCompletion_RecognizesStaticAttachedPropertyOwners()
+    {
+        _ = typeof(Button);
+        var service = new XamlIntelliSenseService();
+        const string incompleteXaml = """<Button xmlns="https://github.com/avaloniaui" """;
+        const string xaml = """<Button xmlns="https://github.com/avaloniaui" AutomationProperties.Name="Save" />""";
+
+        var result = await service.GetCompletionsAsync(incompleteXaml, incompleteXaml.Length, explicitInvocation: true, null, CancellationToken.None);
+        var diagnostics = await service.GetDiagnosticsAsync(xaml, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Contains(result.Items, item => item.Text == "AutomationProperties.Name");
+        Assert.DoesNotContain(diagnostics, diagnostic =>
+            diagnostic.Code == "XAML1002" &&
+            diagnostic.Message.Contains("AutomationProperties.Name", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task XamlCompletion_ReturnsEnumValuesForAttributeValues()
     {
         _ = typeof(Button);

@@ -940,18 +940,21 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
                      .Where(static assembly => !assembly.IsDynamic)
                      .SelectMany(GetLoadableTypes))
         {
-            if (!IsCandidateType(type))
+            if (!IsCatalogType(type))
             {
                 continue;
             }
 
-            var assemblyName = type.Assembly.GetName().Name ?? string.Empty;
-            types.Add(new XamlTypeInfo(
-                GetXamlTypeName(type),
-                type.Namespace ?? string.Empty,
-                assemblyName,
-                type,
-                IsAvaloniaNamespace(type)));
+            if (IsCandidateType(type))
+            {
+                var assemblyName = type.Assembly.GetName().Name ?? string.Empty;
+                types.Add(new XamlTypeInfo(
+                    GetXamlTypeName(type),
+                    type.Namespace ?? string.Empty,
+                    assemblyName,
+                    type,
+                    IsAvaloniaNamespace(type)));
+            }
 
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy))
             {
@@ -1006,6 +1009,12 @@ public sealed partial class XamlIntelliSenseService : IEditorIntelliSenseService
     private static bool IsCandidateType(Type type)
     {
         return type is { IsPublic: true, IsAbstract: false, IsGenericTypeDefinition: false } &&
+               IsCatalogType(type);
+    }
+
+    private static bool IsCatalogType(Type type)
+    {
+        return type is { IsPublic: true, IsGenericTypeDefinition: false } &&
                type.Namespace is not null &&
                type.Assembly.GetName().Name is { } assemblyName &&
                (assemblyName.StartsWith("Avalonia", StringComparison.Ordinal) ||
