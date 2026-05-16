@@ -224,11 +224,44 @@ public static class CompilerService
         CSharpParseOptions? parseOptions = null,
         CSharpCompilationOptions? compilationOptions = null)
     {
-        var workspaceReferenceList = workspaceReferences?
-            .Where(reference =>
-                string.IsNullOrWhiteSpace(assemblyName) ||
-                !string.Equals(reference.Name, assemblyName, StringComparison.OrdinalIgnoreCase))
-            .ToArray() ?? Array.Empty<WorkspaceAssemblyReference>();
+        var emitResult = await EmitProjectAssembly(
+            assemblyName,
+            codeFiles,
+            workspaceReferences,
+            parseOptions,
+            compilationOptions);
+        if (!emitResult.Success || emitResult.AssemblyImage is null)
+        {
+            foreach (var error in emitResult.Diagnostics.Where(static x => x.Severity == DiagnosticSeverity.Error))
+            {
+                Console.WriteLine(error);
+            }
+
+            return new ScriptCompilationResult(null, null, emitResult.Diagnostics, Array.Empty<Assembly>());
+        }
+
+        var workspaceReferenceList = GetEffectiveWorkspaceReferences(assemblyName, workspaceReferences);
+        using var ms = new MemoryStream(emitResult.AssemblyImage, writable: false);
+
+        var context = new WorkspaceAssemblyLoadContext(
+            Path.GetRandomFileName(),
+            workspaceReferenceList,
+            privateAssemblyNames: string.IsNullOrWhiteSpace(assemblyName) ? null : new[] { assemblyName });
+        var assembly = context.LoadFromStream(ms);
+        var loadedAssemblies = context.LoadRuntimeAssemblies(
+            string.IsNullOrWhiteSpace(assemblyName) ? null : assemblyName);
+
+        return new ScriptCompilationResult(assembly, context, emitResult.Diagnostics, loadedAssemblies);
+    }
+
+    public static async Task<ScriptCompilationEmitResult> EmitProjectAssembly(
+        string assemblyName,
+        IEnumerable<(string Path, string Text)> codeFiles,
+        IEnumerable<WorkspaceAssemblyReference>? workspaceReferences = null,
+        CSharpParseOptions? parseOptions = null,
+        CSharpCompilationOptions? compilationOptions = null)
+    {
+        var workspaceReferenceList = GetEffectiveWorkspaceReferences(assemblyName, workspaceReferences);
 
         // MSBuild workspaces provide target-framework reference assemblies.
         // Mixing those with the playground runtime (for example net8 System.Runtime
@@ -258,28 +291,23 @@ public static class CompilerService
 
         using var ms = new MemoryStream();
         var result = compilation.Emit(ms);
-        var errors = result.Diagnostics.Where(x => x.Severity == DiagnosticSeverity.Error);
         if (!result.Success)
         {
-            foreach (var error in errors)
-            {
-                Console.WriteLine(error);
-            }
-
-            return new ScriptCompilationResult(null, null, result.Diagnostics, Array.Empty<Assembly>());
+            return new ScriptCompilationEmitResult(null, result.Diagnostics);
         }
 
-        ms.Seek(0, SeekOrigin.Begin);
+        return new ScriptCompilationEmitResult(ms.ToArray(), result.Diagnostics);
+    }
 
-        var context = new WorkspaceAssemblyLoadContext(
-            Path.GetRandomFileName(),
-            workspaceReferenceList,
-            privateAssemblyNames: string.IsNullOrWhiteSpace(assemblyName) ? null : new[] { assemblyName });
-        var assembly = context.LoadFromStream(ms);
-        var loadedAssemblies = context.LoadRuntimeAssemblies(
-            string.IsNullOrWhiteSpace(assemblyName) ? null : assemblyName);
-
-        return new ScriptCompilationResult(assembly, context, result.Diagnostics, loadedAssemblies);
+    private static WorkspaceAssemblyReference[] GetEffectiveWorkspaceReferences(
+        string assemblyName,
+        IEnumerable<WorkspaceAssemblyReference>? workspaceReferences)
+    {
+        return workspaceReferences?
+            .Where(reference =>
+                string.IsNullOrWhiteSpace(assemblyName) ||
+                !string.Equals(reference.Name, assemblyName, StringComparison.OrdinalIgnoreCase))
+            .ToArray() ?? Array.Empty<WorkspaceAssemblyReference>();
     }
 
     private static IReadOnlyList<PortableExecutableReference> MergeReferences(
@@ -338,6 +366,13 @@ public static class CompilerService
             ? null
             : Path.GetFileNameWithoutExtension(path);
     }
+}
+
+public sealed record ScriptCompilationEmitResult(
+    byte[]? AssemblyImage,
+    IReadOnlyList<Diagnostic> Diagnostics)
+{
+    public bool Success => AssemblyImage is { Length: > 0 };
 }
 
 public sealed record ScriptCompilationResult(

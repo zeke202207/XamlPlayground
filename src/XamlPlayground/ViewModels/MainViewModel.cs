@@ -35,6 +35,7 @@ using RemotePixelFormat = Avalonia.Remote.Protocol.Viewport.PixelFormat;
 using Avalonia.Remote.Protocol.Viewport;
 using XamlPlayground.Services;
 using XamlPlayground.Services.IntelliSense;
+using XamlPlayground.Services.Preview;
 using XamlPlayground.ViewModels.Docking;
 using XamlPlayground.ViewModels.Workspace;
 using XamlPlayground.Workspace;
@@ -90,9 +91,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _workspaceStatus = "No solution loaded.";
     [ObservableProperty] private bool _isWorkspaceLoading;
     [ObservableProperty] private string _currentDockPerspectiveId = PlaygroundDockFactory.DefaultPerspectiveId;
+    [ObservableProperty] private string _previewStatus = "Idle.";
+    [ObservableProperty] private PreviewReloadStrategy _previewReloadStrategy = PreviewReloadStrategy.NoOp;
     private readonly IDockThemeManager _dockThemeManager;
     private readonly InMemorySolutionFactory _solutionFactory;
     private readonly WorkspaceRemotePreviewService _remotePreviewService = new();
+    private readonly PreviewSessionManager _previewSessionManager = new();
     private IDevToolsPropertyEditHandler _diagnosticsPropertyEditHandler = null!;
     private bool _update;
     private bool _rerunRequested;
@@ -1848,6 +1852,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         xamlText,
                         CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)),
                         previewAssemblyScope);
+                    MarkPreviewLoaded(project, xamlFile, PreviewHostCapabilities.InlineDesign);
                     previewAssemblyScope = null;
                 }
             }
@@ -1877,6 +1882,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         xamlText,
                         CombineDiagnostics(diagnosticsMessage, FormatXamlDiagnostics(xamlDiagnostics)),
                         previewAssemblyScope);
+                    MarkPreviewLoaded(project, xamlFile, PreviewHostCapabilities.InlineDesign);
                     previewAssemblyScope = null;
                 }
             }
@@ -1899,6 +1905,29 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 RunActiveDocument();
             }
         }
+    }
+
+    private void MarkPreviewLoaded(
+        InMemoryProject? project,
+        InMemoryProjectFile xamlFile,
+        PreviewHostCapabilities capabilities)
+    {
+        if (project is null)
+        {
+            PreviewReloadStrategy = PreviewReloadStrategy.InlineReload;
+            PreviewStatus = "Reloading inline design preview.";
+            return;
+        }
+
+        var snapshot = PreviewSnapshotFactory.Create(
+            Solution,
+            project,
+            xamlFile,
+            project.OutputAssemblyPath);
+        var plan = _previewSessionManager.PlanNext(snapshot, capabilities);
+        _previewSessionManager.MarkLoaded(snapshot);
+        PreviewReloadStrategy = plan.Strategy;
+        PreviewStatus = plan.Description;
     }
 
     private bool TryUseWorkspaceOutputAssemblyFallback(
@@ -1936,7 +1965,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         project.OutputAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
-        if (ShouldBuildWorkspaceProjectBeforeUsingOutput(project))
+        if (ShouldBuildWorkspaceProjectBeforeRemotePreview(project, xamlFile))
         {
             StopRemotePreview();
             if (!await TryBuildWorkspaceProjectAsync(project) ||
@@ -1960,6 +1989,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         var projectDirectory = ResolveWorkspaceDirectory(Path.GetDirectoryName(project.ProjectFilePath)) ??
                                ResolveWorkspaceDirectory(Path.GetDirectoryName(outputAssemblyPath));
         var projectPath = BuildRemotePreviewXamlProjectPath(xamlFile.Path, projectDirectory);
+        var snapshot = PreviewSnapshotFactory.Create(
+            Solution,
+            project,
+            xamlFile,
+            outputAssemblyPath);
+        var plan = _previewSessionManager.PlanNext(snapshot, PreviewHostCapabilities.RemoteDesigner);
+        PreviewReloadStrategy = plan.Strategy;
+        PreviewStatus = plan.Description;
         var result = await _remotePreviewService.StartOrUpdateAsync(
             xamlText,
             outputAssemblyPath,
@@ -1976,6 +2013,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ClearDiagnosticsPreviewXamlFile();
         IsRemotePreviewActive = true;
         LastErrorMessage = "Using isolated workspace preview host.";
+        _previewSessionManager.MarkLoaded(snapshot);
         _previous = null;
         previousScope?.Unload();
         return true;
@@ -2344,7 +2382,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return IsWorkspaceOutputAssemblyStale(project, targetAssemblyPath);
     }
 
-    private static bool IsWorkspaceOutputAssemblyStale(InMemoryProject project, string targetAssemblyPath)
+    private static bool ShouldBuildWorkspaceProjectBeforeRemotePreview(
+        InMemoryProject project,
+        InMemoryProjectFile? liveXamlFile)
+    {
+        var targetAssemblyPath = ResolveWorkspaceTargetAssemblyPath(project) ?? project.OutputAssemblyPath;
+        if (string.IsNullOrWhiteSpace(targetAssemblyPath) || !File.Exists(targetAssemblyPath))
+        {
+            return true;
+        }
+
+        return IsWorkspaceOutputAssemblyStale(project, targetAssemblyPath, liveXamlFile);
+    }
+
+    private static bool IsWorkspaceOutputAssemblyStale(
+        InMemoryProject project,
+        string targetAssemblyPath,
+        InMemoryProjectFile? liveXamlFile = null)
     {
         DateTime outputWriteTime;
         try
@@ -2358,6 +2412,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         foreach (var file in project.Files.Where(IsWorkspaceBuildInputFile))
         {
+            if (liveXamlFile is { } &&
+                ReferenceEquals(file, liveXamlFile) &&
+                file.IsXaml)
+            {
+                continue;
+            }
+
             var sourcePath = ResolveWorkspaceProjectInputPath(project, file);
             if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
             {
@@ -2780,7 +2841,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Child = control
         };
 
-        StopRemotePreview();
+        StopRemotePreview(resetPreviewSession: IsRemotePreviewActive);
         Control = scope;
         DiagnosticsRoot = scope;
         SetDiagnosticsPreviewXamlFile(xamlFile, previewSourceXaml, xamlFile.Kind != ProjectFileKind.Resource);
@@ -2789,9 +2850,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         previousScope?.Unload();
     }
 
-    private void StopRemotePreview()
+    private void StopRemotePreview(bool resetPreviewSession = true)
     {
         _remotePreviewService.Stop();
+        if (resetPreviewSession)
+        {
+            _previewSessionManager.Reset();
+            PreviewReloadStrategy = PreviewReloadStrategy.NoOp;
+            PreviewStatus = "Idle.";
+        }
+
         IsRemotePreviewActive = false;
         RemotePreviewBitmap = null;
     }

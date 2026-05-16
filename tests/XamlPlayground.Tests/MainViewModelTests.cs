@@ -22,6 +22,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using XamlPlayground.Controls;
 using XamlPlayground.Views.Docking;
 using XamlPlayground.Services;
+using XamlPlayground.Services.Preview;
 using XamlPlayground.Services.Theming;
 using XamlPlayground.ViewModels;
 using XamlPlayground.ViewModels.Docking;
@@ -2297,6 +2298,56 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void WorkspaceRemotePreviewBuildDecision_UsesBuiltAssemblyForActiveLooseXamlStaleness()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundRemoteLiveXaml-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "SampleApp");
+        var projectPath = Path.Combine(projectDirectory, "SampleApp.csproj");
+        var xamlPath = Path.Combine(projectDirectory, "MainWindow.axaml");
+        var outputPath = Path.Combine(projectDirectory, "bin", "Debug", "net10.0", "SampleApp.dll");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(xamlPath, "<Window xmlns=\"https://github.com/avaloniaui\" />");
+            File.WriteAllText(outputPath, "not a real assembly");
+
+            var outputTime = DateTime.UtcNow.AddMinutes(-10);
+            var xamlTime = DateTime.UtcNow.AddMinutes(10);
+            File.SetLastWriteTimeUtc(outputPath, outputTime);
+            File.SetLastWriteTimeUtc(xamlPath, xamlTime);
+
+            var project = new InMemoryProject("SampleApp", "SampleApp", "msbuild", projectPath)
+            {
+                AssemblyName = "SampleApp",
+                OutputAssemblyPath = outputPath,
+                IsMsBuildWorkspace = true
+            };
+            var xamlFile = project.AddFile(new InMemoryProjectFile(
+                "MainWindow.axaml",
+                "<Window xmlns=\"https://github.com/avaloniaui\" />",
+                ProjectFileKind.Xaml,
+                sourcePath: xamlPath));
+
+            var normalMethod = typeof(MainViewModel).GetMethod(
+                "ShouldBuildWorkspaceProjectBeforeUsingOutput",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            var remoteMethod = typeof(MainViewModel).GetMethod(
+                "ShouldBuildWorkspaceProjectBeforeRemotePreview",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(normalMethod);
+            Assert.NotNull(remoteMethod);
+
+            Assert.True((bool)normalMethod.Invoke(null, new object[] { project })!);
+            Assert.False((bool)remoteMethod.Invoke(null, new object?[] { project, xamlFile })!);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
     public void WorkspaceBuildRestoreRequirement_DetectsProjectFileNewerThanOutput()
     {
         var root = Path.Combine(Path.GetTempPath(), $"XamlPlaygroundBuildRestore-{Guid.NewGuid():N}");
@@ -2568,6 +2619,162 @@ public sealed class MainViewModelTests
                 dockable?.Dispose();
             }
         });
+    }
+
+    [Fact]
+    public void PreviewSnapshotFactory_CapturesWorkspacePreviewContract()
+    {
+        var solution = new InMemorySolution("SampleSolution");
+        var project = new InMemoryProject("SampleApp", "SampleApp", "avalonia")
+        {
+            AssemblyName = "SampleApp.Desktop",
+            IsMsBuildWorkspace = true,
+            TargetFramework = "net10.0",
+            OutputAssemblyPath = "/tmp/SampleApp.Desktop.dll"
+        };
+        solution.Projects.Add(project);
+        project.AddFile(new InMemoryProjectFile(
+            "App.axaml",
+            "<Application xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        var activeXaml = project.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        project.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml.cs",
+            "public partial class MainView { }",
+            ProjectFileKind.CSharp));
+        project.AddFile(new InMemoryProjectFile(
+            "Styles/Resources.axaml",
+            "<ResourceDictionary xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Resource));
+
+        var snapshot = PreviewSnapshotFactory.Create(solution, project, activeXaml);
+
+        Assert.Equal("SampleSolution", snapshot.SolutionName);
+        Assert.Equal("SampleApp", snapshot.ProjectName);
+        Assert.Equal("SampleApp.Desktop", snapshot.AssemblyName);
+        Assert.Equal("Views/MainView.axaml", snapshot.ActiveXamlPath);
+        Assert.Equal("Views/MainView.axaml.cs", snapshot.ActiveCodeBehindPath);
+        Assert.Equal("App.axaml", snapshot.AppXamlPath);
+        Assert.Equal("net10.0", snapshot.TargetFramework);
+        Assert.True(snapshot.IsMsBuildWorkspace);
+        Assert.Contains(snapshot.Files, static file => file.Path == "Styles/Resources.axaml" && file.Kind == ProjectFileKind.Resource);
+    }
+
+    [Fact]
+    public void PreviewSessionManager_PlansRemoteLiveUpdateForActiveXamlChanges()
+    {
+        var solution = new InMemorySolution("SampleSolution");
+        var project = new InMemoryProject("SampleApp", "SampleApp", "avalonia")
+        {
+            AssemblyName = "SampleApp"
+        };
+        solution.Projects.Add(project);
+        var activeXaml = project.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\"><TextBlock Text=\"One\" /></UserControl>",
+            ProjectFileKind.Xaml));
+        project.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml.cs",
+            "public partial class MainView { }",
+            ProjectFileKind.CSharp));
+
+        var manager = new PreviewSessionManager();
+        var firstSnapshot = PreviewSnapshotFactory.Create(solution, project, activeXaml);
+        manager.MarkLoaded(firstSnapshot);
+
+        activeXaml.ApplyTextEdit(
+            "<UserControl xmlns=\"https://github.com/avaloniaui\"><TextBlock Text=\"Two\" /></UserControl>");
+        var secondSnapshot = PreviewSnapshotFactory.Create(solution, project, activeXaml);
+        var plan = manager.PlanNext(secondSnapshot, PreviewHostCapabilities.RemoteDesigner);
+
+        Assert.Equal(PreviewUpdateKind.XamlOnly, plan.Changes.Kind);
+        Assert.Equal(PreviewReloadStrategy.RemoteLiveXamlUpdate, plan.Strategy);
+        Assert.True(plan.IsIsolated);
+        Assert.Equal(new[] { "Views/MainView.axaml" }, plan.Changes.ChangedPaths);
+    }
+
+    [Fact]
+    public void PreviewChangeClassifier_RequiresCompilationForCodeChanges()
+    {
+        var solution = new InMemorySolution("SampleSolution");
+        var project = new InMemoryProject("SampleApp", "SampleApp", "avalonia");
+        solution.Projects.Add(project);
+        var activeXaml = project.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        var codeFile = project.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml.cs",
+            "public partial class MainView { }",
+            ProjectFileKind.CSharp));
+
+        var firstSnapshot = PreviewSnapshotFactory.Create(solution, project, activeXaml);
+        codeFile.ApplyTextEdit("public partial class MainView { public string Title => \"Updated\"; }");
+        var secondSnapshot = PreviewSnapshotFactory.Create(solution, project, activeXaml);
+
+        var changes = PreviewChangeClassifier.Classify(firstSnapshot, secondSnapshot);
+
+        Assert.Equal(PreviewUpdateKind.CodeOrProject, changes.Kind);
+        Assert.True(changes.RequiresCompilation);
+        Assert.Equal(new[] { "Views/MainView.axaml.cs" }, changes.ChangedPaths);
+    }
+
+    [Fact]
+    public void PreviewChangeClassifier_DetectsReferenceFingerprintChanges()
+    {
+        var solution = new InMemorySolution("SampleSolution");
+        var project = new InMemoryProject("SampleApp", "SampleApp", "avalonia");
+        solution.Projects.Add(project);
+        var activeXaml = project.AddFile(new InMemoryProjectFile(
+            "Views/MainView.axaml",
+            "<UserControl xmlns=\"https://github.com/avaloniaui\" />",
+            ProjectFileKind.Xaml));
+        var firstReference = WorkspaceAssemblyReference.FromImage(
+            "WorkspaceDependency.dll",
+            CompileTestAssemblyImage("WorkspaceDependency", "public sealed class FirstDependency { }"),
+            isRuntimeAssembly: true);
+        var secondReference = WorkspaceAssemblyReference.FromImage(
+            "WorkspaceDependency.dll",
+            CompileTestAssemblyImage("WorkspaceDependency", "public sealed class SecondDependency { }"),
+            isRuntimeAssembly: true);
+        Assert.NotNull(firstReference);
+        Assert.NotNull(secondReference);
+
+        project.AssemblyReferences.Add(firstReference);
+        var firstSnapshot = PreviewSnapshotFactory.Create(solution, project, activeXaml);
+        project.AssemblyReferences.Clear();
+        project.AssemblyReferences.Add(secondReference);
+        var secondSnapshot = PreviewSnapshotFactory.Create(solution, project, activeXaml);
+
+        var changes = PreviewChangeClassifier.Classify(firstSnapshot, secondSnapshot);
+
+        Assert.Equal(PreviewUpdateKind.References, changes.Kind);
+        Assert.True(changes.ReferencesChanged);
+        Assert.True(changes.RequiresCompilation);
+    }
+
+    [Fact]
+    public async Task CompilerService_EmitProjectAssembly_ReturnsBytesWithoutLoadingAssembly()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var assemblyName = "EmitOnly" + Guid.NewGuid().ToString("N");
+        var result = await CompilerService.EmitProjectAssembly(
+            assemblyName,
+            new[]
+            {
+                (Path: "Sample.cs", Text: "public sealed class EmitOnlySample { public int Value => 42; }")
+            });
+
+        Assert.True(
+            result.Success,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.ToString())));
+        Assert.NotNull(result.AssemblyImage);
+        Assert.DoesNotContain(AssemblyLoadContext.Default.Assemblies, assembly =>
+            string.Equals(assembly.GetName().Name, assemblyName, StringComparison.Ordinal));
     }
 
     [Fact]
