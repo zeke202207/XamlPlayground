@@ -3294,6 +3294,74 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void DockPerspective_DefaultKeepsOriginalWorkspaceRegions()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var root = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+
+        Assert.DoesNotContain(Enumerate(root).OfType<IToolDock>(), dock => dock.Id == "LeftTools");
+        AssertToolDock(root, "PreviewDock", "Preview", "Preview");
+        AssertToolDock(
+            root,
+            "RightTools",
+            "SolutionExplorer",
+            "SolutionExplorer",
+            "MsBuildWorkspace",
+            "VisualStructure",
+            "VisualProperties",
+            "VisualToolbox",
+            "VisualAnimations",
+            "StylesInspector",
+            "BindingsInspector",
+            "ResourcesInspector",
+            "ControlThemes");
+        AssertToolDock(
+            root,
+            "Bottom",
+            Utilities.IsBrowser() ? "Errors" : "AnimationTimelineSheet",
+            "AnimationTimelineSheet",
+            "StyleEditor",
+            "BindingEditor",
+            "ResourceEditor",
+            "DiagnosticsCombinedTree",
+            "DiagnosticsLogicalTree",
+            "DiagnosticsVisualTree",
+            "DiagnosticsEvents",
+            "DiagnosticsResources",
+            "DiagnosticsAssets",
+            "Errors");
+    }
+
+    [Fact]
+    public void DockPerspective_WorkflowPresetsPrioritizePrimarySurface()
+    {
+        TestApplication.EnsureAvaloniaInitialized();
+
+        var viewModel = new MainViewModel(null);
+        var factory = Assert.IsType<PlaygroundDockFactory>(viewModel.DockFactory);
+
+        viewModel.ApplyDockPerspectiveCommand.Execute("Code");
+
+        var codeRoot = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        AssertToolDock(codeRoot, "LeftTools", "SolutionExplorer", "SolutionExplorer", "MsBuildWorkspace");
+        var codePreviewDock = AssertToolDock(codeRoot, "PreviewDock", "Preview", "Preview");
+        AssertToolDock(codeRoot, "RightTools", "VisualStructure", "VisualStructure", "BindingsInspector", "ResourcesInspector");
+        AssertToolDock(codeRoot, "Bottom", "Errors", "Errors", "DiagnosticsEvents", "DiagnosticsResources");
+        Assert.True(codePreviewDock.Proportion < 0.30);
+
+        viewModel.ApplyDockPerspectiveCommand.Execute("Preview");
+
+        var previewRoot = Assert.IsAssignableFrom<IRootDock>(viewModel.DockLayout);
+        var previewDock = AssertToolDock(previewRoot, "PreviewDock", "Preview", "Preview");
+        AssertToolDock(previewRoot, "LeftTools", "SolutionExplorer", "SolutionExplorer");
+        AssertToolDock(previewRoot, "Bottom", "Errors", "Errors");
+        Assert.True(previewDock.Proportion > 1.0);
+        Assert.True(factory.IsToolVisible("Preview"));
+    }
+
+    [Fact]
     public void DockPerspective_ReusesCachedToolsAcrossLayouts()
     {
         TestApplication.EnsureAvaloniaInitialized();
@@ -5837,6 +5905,21 @@ public sealed class MainViewModelTests
                 yield return child;
             }
         }
+    }
+
+    private static IToolDock AssertToolDock(
+        IRootDock root,
+        string id,
+        string activeToolId,
+        params string[] toolIds)
+    {
+        var dock = Assert.Single(Enumerate(root).OfType<IToolDock>(), candidate => candidate.Id == id);
+        var visibleToolIds = Assert.IsAssignableFrom<IEnumerable<IDockable>>(dock.VisibleDockables);
+
+        Assert.Equal(toolIds, visibleToolIds.Select(static dockable => dockable.Id).ToArray());
+        Assert.Equal(activeToolId, dock.ActiveDockable?.Id);
+
+        return dock;
     }
 
     private static string GetRepositoryRoot([CallerFilePath] string sourcePath = "")
