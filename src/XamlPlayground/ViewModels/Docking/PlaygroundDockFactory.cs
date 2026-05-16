@@ -11,6 +11,7 @@ using Dock.Model.Mvvm;
 using Dock.Model.Mvvm.Controls;
 using Dock.Settings;
 using XamlPlayground;
+using XamlPlayground.Extensions;
 
 namespace XamlPlayground.ViewModels.Docking;
 
@@ -19,43 +20,15 @@ public sealed class PlaygroundDockFactory : Factory
     public const string DefaultPerspectiveId = "Default";
 
     public static IReadOnlyList<DockPerspectiveDescriptor> PerspectiveDescriptors { get; } =
-    [
-        new(DefaultPerspectiveId, "Default Workspace"),
-        new("Wysiwyg", "WYSIWYG Editor"),
-        new("Structure", "Structure Focus"),
-        new("Diagnostics", "Dev Tools Diagnostics"),
-        new("Animation", "Animation Editing"),
-        new("Theme", "Theme Editing"),
-        new("Bindings", "Bindings and Resources"),
-        new("Code", "Code and Errors"),
-        new("Preview", "Preview Review")
-    ];
+        BuiltInExtensionProvider.Manifest.Contributions.Perspectives
+            .Select(static perspective => new DockPerspectiveDescriptor(perspective.Id, perspective.Title))
+            .ToArray();
 
     public static IReadOnlyList<DockToolDescriptor> ToolDescriptors { get; } =
-    [
-        new("SolutionExplorer", "Solution Explorer", DockToolRegion.Left),
-        new("MsBuildWorkspace", "MSBuild Workspace", DockToolRegion.Left),
-        new("VisualStructure", "Structure", DockToolRegion.Left),
-        new("VisualToolbox", "Toolbox", DockToolRegion.Left),
-        new("Preview", "Preview", DockToolRegion.Preview),
-        new("VisualProperties", "Properties", DockToolRegion.Right),
-        new("VisualAnimations", "Animations", DockToolRegion.Right),
-        new("StylesInspector", "Styles", DockToolRegion.Right),
-        new("BindingsInspector", "Bindings", DockToolRegion.Right),
-        new("ResourcesInspector", "Resources", DockToolRegion.Right),
-        new("ControlThemes", "Themes", DockToolRegion.Right),
-        new("AnimationTimelineSheet", "Timeline", DockToolRegion.Bottom),
-        new("StyleEditor", "Style Editor", DockToolRegion.Bottom),
-        new("BindingEditor", "Binding Editor", DockToolRegion.Bottom),
-        new("ResourceEditor", "Resource Editor", DockToolRegion.Bottom),
-        new("DiagnosticsCombinedTree", "Combined Tree", DockToolRegion.Bottom),
-        new("DiagnosticsLogicalTree", "Logical Tree", DockToolRegion.Bottom),
-        new("DiagnosticsVisualTree", "Visual Tree", DockToolRegion.Bottom),
-        new("DiagnosticsEvents", "Events", DockToolRegion.Bottom),
-        new("DiagnosticsResources", "Resources", DockToolRegion.Bottom),
-        new("DiagnosticsAssets", "Assets", DockToolRegion.Bottom),
-        new("Errors", "Errors", DockToolRegion.Bottom)
-    ];
+        BuiltInExtensionProvider.Manifest.Contributions.Views
+            .Where(static view => view.IsTool)
+            .Select(static view => new DockToolDescriptor(view.Id, view.Title, ParseDockToolRegion(view.Location)))
+            .ToArray();
 
     private readonly MainViewModel _shell;
     private readonly Dictionary<string, IDockable> _toolCache = new(StringComparer.Ordinal);
@@ -96,6 +69,18 @@ public sealed class PlaygroundDockFactory : Factory
     }
 
     public string CurrentPerspectiveId { get; private set; } = DefaultPerspectiveId;
+
+    private static DockToolRegion ParseDockToolRegion(string location)
+    {
+        return location.ToLowerInvariant() switch
+        {
+            "left" => DockToolRegion.Left,
+            "preview" => DockToolRegion.Preview,
+            "right" => DockToolRegion.Right,
+            "bottom" => DockToolRegion.Bottom,
+            _ => DockToolRegion.Right
+        };
+    }
 
     public override IRootDock CreateLayout()
     {

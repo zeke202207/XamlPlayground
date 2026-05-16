@@ -140,6 +140,19 @@
                     Classes="main"
                     Command="{Binding BuildSolutionCommand}" />
 
+          <MenuItem Header="Extensions"
+                    Classes="main"
+                    ItemsSource="{Binding ExtensionCommandMenuItems}">
+            <MenuItem.Styles>
+              <Style Selector="MenuItem > MenuItem"
+                     x:DataType="vm:ExtensionCommandMenuItemViewModel">
+                <Setter Property="Header" Value="{Binding Header}" />
+                <Setter Property="Command" Value="{Binding Command}" />
+                <Setter Property="CommandParameter" Value="{Binding}" />
+              </Style>
+            </MenuItem.Styles>
+          </MenuItem>
+
           <MenuItem CornerRadius="3"
                     Classes="main popup"
                     ItemsSource="{Binding Samples}">

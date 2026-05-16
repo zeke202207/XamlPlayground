@@ -36,6 +36,7 @@ using Avalonia.Remote.Protocol.Viewport;
 using XamlPlayground.Services;
 using XamlPlayground.Services.IntelliSense;
 using XamlPlayground.Services.Preview;
+using XamlPlayground.Extensions;
 using XamlPlayground.ViewModels.Docking;
 using XamlPlayground.ViewModels.Workspace;
 using XamlPlayground.Workspace;
@@ -119,6 +120,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _isDarkTheme = IsApplicationDarkTheme();
         _dockThemeManager = new DockFluentThemeManager();
         _solutionFactory = new InMemorySolutionFactory(OnProjectFileChanged);
+        ExtensionHost = new ExtensionHostService();
+        ExtensionHost.RegisterProvider(new BuiltInExtensionProvider());
+        RegisterExternalExtensionPackages();
         _remotePreviewService.FrameReceived += OnRemotePreviewFrameReceived;
         _remotePreviewService.ErrorReceived += error => Dispatcher.UIThread.Post(
             () => LastErrorMessage = FormatRemotePreviewError(error));
@@ -152,7 +156,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         DockPerspectiveMenuItems = new ObservableCollection<DockPerspectiveMenuItemViewModel>(
             PlaygroundDockFactory.PerspectiveDescriptors.Select(descriptor => new DockPerspectiveMenuItemViewModel(descriptor, ApplyDockPerspectiveCommand)));
         InitializeVisualEditing();
+        InitializeBuiltInExtensionCommands();
+        InitializeExtensionCommandSurface();
         InitializeDockLayout();
+        QueueExtensionActivation(ExtensionActivationEvents.OnStartupFinished);
 
         if (!string.IsNullOrEmpty(initialGist))
         {
@@ -165,6 +172,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     public IStorageProvider? StorageProvider { get; set; }
+
+    public ExtensionHostService ExtensionHost { get; }
 
     public bool IsInProcessPreviewActive => !IsRemotePreviewActive;
 
@@ -181,6 +190,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         _remotePreviewService.Dispose();
+        DisposeBuiltInExtensionCommands();
+        try
+        {
+            ExtensionHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception exception)
+        {
+            LastErrorMessage = exception.Message;
+        }
+
         UnloadPreviousInProcessPreview();
     }
 
@@ -525,6 +544,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(id))
+        {
+            QueueExtensionActivationForDockTool(id);
+        }
+
         UpdateDockToolMenuState(factory);
     }
 
@@ -538,6 +562,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         DockLayout = factory.CreatePerspectiveLayout(id);
         CurrentDockPerspectiveId = factory.CurrentPerspectiveId;
         UpdateDockMenuState();
+
+        if (!string.IsNullOrWhiteSpace(id) &&
+            ExtensionHost.GetPerspectiveContributions()
+                .FirstOrDefault(perspective => perspective.Id.Equals(id, StringComparison.Ordinal)) is { } perspective)
+        {
+            foreach (var viewId in perspective.ViewIds)
+            {
+                QueueExtensionActivation(ExtensionActivationEvents.OnView(viewId));
+            }
+        }
     }
 
     private void RestoreDockTools()
@@ -623,6 +657,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         RefreshVisualEditingModel(updateSourceSelection: false);
         RefreshControlThemes();
+        QueueExtensionActivation(ExtensionActivationEvents.OnWorkspaceOpened);
+        QueueExtensionActivationForWorkspaceFile(ActiveWorkspaceFile);
     }
 
     private static void EnsureSolutionDocumentsOnCurrentThread(InMemorySolution solution)
@@ -1477,6 +1513,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         WorkspaceStatus = $"{project.Name}: {file.Path}";
         RefreshVisualEditingModel(updateSourceSelection: !xamlFileChanged);
+        QueueExtensionActivationForWorkspaceFile(file);
 
         if (!_openingSample &&
             EnableAutoRun &&
@@ -1912,6 +1949,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         InMemoryProjectFile xamlFile,
         PreviewHostCapabilities capabilities)
     {
+        QueueExtensionActivationForPreview(capabilities);
         if (project is null)
         {
             PreviewReloadStrategy = PreviewReloadStrategy.InlineReload;
@@ -1994,7 +2032,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             project,
             xamlFile,
             outputAssemblyPath);
-        var plan = _previewSessionManager.PlanNext(snapshot, PreviewHostCapabilities.RemoteDesigner);
+        var capabilities = PreviewHostCapabilities.RemoteDesigner;
+        QueueExtensionActivationForPreview(capabilities);
+        var plan = _previewSessionManager.PlanNext(snapshot, capabilities);
         PreviewReloadStrategy = plan.Strategy;
         PreviewStatus = plan.Description;
         var result = await _remotePreviewService.StartOrUpdateAsync(
