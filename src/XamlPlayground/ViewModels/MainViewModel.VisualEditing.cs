@@ -6132,7 +6132,9 @@ public partial class MainViewModel
 
     private void LoadVisualEditorToolbox()
     {
-        var catalog = new ToolboxCatalogBuilder().Build(new ToolboxContext(new[]
+        var builder = new ToolboxCatalogBuilder();
+        builder.AddContributor(new ExtensionToolboxContributor(ExtensionHost.GetToolboxItemContributions()));
+        var catalog = builder.Build(new ToolboxContext(new[]
         {
             typeof(Control).Assembly,
             typeof(MainViewModel).Assembly
