@@ -3,6 +3,12 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>XamlPlayground</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>XamlPlayground</PackageId>
+    <Title>XamlPlayground</Title>
+    <Description>Interactive Avalonia XAML editor and previewer core library.</Description>
+    <PackageTags>avalonia;avaloniaui;xaml;designer;previewer;editor</PackageTags>
+    <ProDataGridPackageVersion Condition="'$(ProDataGridPackageVersion)' == ''">12.0.4</ProDataGridPackageVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,33 +25,34 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
-    <PackageReference Include="Avalonia.Controls.ColorPicker" Version="$(AvaloniaColorPickerVersion)" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
-    <PackageReference Include="Avalonia.Markup.Xaml.Loader" Version="$(AvaloniaVersion)" />
-    <PackageReference Include="Xaml.Behaviors.Avalonia" Version="$(AvaloniaBehaviorsVersion)" />
-    <PackageReference Include="Avalonia.AvaloniaEdit" Version="$(AvaloniaEditVersion)" />
-    <PackageReference Include="AvaloniaEdit.TextMate" Version="$(AvaloniaEditTextMateVersion)" />
-    <PackageReference Include="TextMateSharp.Grammars" Version="$(TextMateSharpGrammarsVersion)" />
-    <PackageReference Include="Octokit" Version="$(OctokitVersion)" />
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="$(CommunityToolkitMvvmVersion)" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="$(MicrosoftCodeAnalysisVersion)" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="$(MicrosoftCodeAnalysisVersion)" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="$(MicrosoftCodeAnalysisVersion)" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="$(MicrosoftCodeAnalysisVersion)" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="$(MicrosoftCodeAnalysisVersion)" />
-    <PackageReference Include="Microsoft.Build.Locator" Version="$(MicrosoftBuildLocatorVersion)" />
-    <PackageReference Include="Microsoft.Build.Framework" Version="$(MicrosoftBuildFrameworkVersion)" ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Dock.Avalonia" Version="$(DockVersion)" />
-    <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="$(DockVersion)" />
-    <PackageReference Include="Dock.Model.Mvvm" Version="$(DockVersion)" />
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Controls.ColorPicker" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Markup.Xaml.Loader" />
+    <PackageReference Include="Xaml.Behaviors.Avalonia" />
+    <PackageReference Include="Avalonia.AvaloniaEdit" />
+    <PackageReference Include="AvaloniaEdit.TextMate" />
+    <PackageReference Include="TextMateSharp.Grammars" />
+    <PackageReference Include="Octokit" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Common" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" />
+    <PackageReference Include="Microsoft.Build.Locator" ExcludeAssets="build;buildTransitive;analyzers" />
+    <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" PrivateAssets="build;buildTransitive;contentfiles;analyzers" />
+    <PackageReference Include="Dock.Avalonia" />
+    <PackageReference Include="Dock.Avalonia.Themes.Fluent" />
+    <PackageReference Include="Dock.Model.Mvvm" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\XamlPlayground.AvaloniaEdit.Minimap\XamlPlayground.AvaloniaEdit.Minimap.csproj" />
-    <ProjectReference Include="..\..\external\ProDataGrid\src\Avalonia.Controls.DataGrid\Avalonia.Controls.DataGrid.csproj" />
-    <ProjectReference Include="..\..\external\ProDataGrid\src\ProDiagnostics\ProDiagnostics.csproj" />
+    <ProjectReference Include="..\..\external\ProDataGrid\src\Avalonia.Controls.DataGrid\Avalonia.Controls.DataGrid.csproj" GlobalPropertiesToRemove="VersionPrefix;VersionSuffix;PackageVersion" />
+    <ProjectReference Include="..\..\external\ProDataGrid\src\ProDiagnostics\ProDiagnostics.csproj" GlobalPropertiesToRemove="VersionPrefix;VersionSuffix;PackageVersion" />
   </ItemGroup>
 
   <ItemGroup>
@@ -59,5 +66,25 @@
   <ItemGroup>
     <EmbeddedResource Include="Samples\*.xml" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="NormalizeExternalProjectReferencePackageVersions"
+          AfterTargets="_GetProjectReferenceVersions"
+          Condition="'@(_ProjectReferencesWithVersions)' != ''">
+    <!-- Pack queries referenced project versions with this package's suffix; keep external dependencies on their published version. -->
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)"
+                                      Condition="'%(_ProjectReferencesWithVersions.Filename)' == 'Avalonia.Controls.DataGrid'">
+        <ProjectVersion>$(ProDataGridPackageVersion)</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)"
+                                      Condition="'%(_ProjectReferencesWithVersions.Filename)' == 'ProDiagnostics'">
+        <ProjectVersion>$(ProDataGridPackageVersion)</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+  </Target>
 
 </Project>

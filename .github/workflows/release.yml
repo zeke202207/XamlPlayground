@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags:
+    - v*
+  workflow_dispatch:
+    inputs:
+      version_prefix:
+        description: Package version prefix. Defaults to the tag without the leading v, or Directory.Build.props.
+        required: false
+        type: string
+      version_suffix:
+        description: Optional prerelease suffix, for example preview.1.
+        required: false
+        type: string
+      publish:
+        description: Publish packages to NuGet.
+        required: true
+        default: false
+        type: boolean
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build, pack, and publish
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git init .
+        gh auth setup-git --hostname github.com --force
+        git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+        git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+        git checkout --force FETCH_HEAD
+        git submodule update --init --recursive
+
+    - name: Setup .NET
+      shell: bash
+      run: |
+        if ! command -v dotnet >/dev/null 2>&1 || ! dotnet --version | grep -q '^10\.'; then
+          curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+          bash dotnet-install.sh --channel 10.0 --install-dir "$PWD/.dotnet"
+          echo "$PWD/.dotnet" >> "$GITHUB_PATH"
+          export PATH="$PWD/.dotnet:$PATH"
+        fi
+        dotnet --info
+
+    - name: Resolve package version
+      shell: bash
+      run: |
+        version_prefix="${{ inputs.version_prefix }}"
+        version_suffix="${{ inputs.version_suffix }}"
+
+        if [ -z "$version_prefix" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+          version_prefix="${GITHUB_REF_NAME#v}"
+        fi
+
+        echo "VERSION_PREFIX=$version_prefix" >> "$GITHUB_ENV"
+        echo "VERSION_SUFFIX=$version_suffix" >> "$GITHUB_ENV"
+
+    - name: Install wasm-tools
+      run: dotnet workload install wasm-tools
+
+    - name: Restore solution
+      run: dotnet restore XamlPlayground.sln
+
+    - name: Build solution
+      run: dotnet build XamlPlayground.sln --configuration Release --no-restore /p:RunAOTCompilation=false
+
+    - name: Test solution
+      run: dotnet test XamlPlayground.sln --configuration Release --no-build
+
+    - name: Build NuGet package projects
+      shell: bash
+      run: |
+        build_args=(--configuration Release --no-restore /p:RunAOTCompilation=false)
+
+        if [ -n "$VERSION_PREFIX" ]; then
+          build_args+=("/p:VersionPrefix=$VERSION_PREFIX")
+        fi
+
+        build_args+=("/p:VersionSuffix=$VERSION_SUFFIX")
+
+        dotnet build src/XamlPlayground.AvaloniaEdit.Minimap/XamlPlayground.AvaloniaEdit.Minimap.csproj "${build_args[@]}"
+        dotnet build src/XamlPlayground/XamlPlayground.csproj "${build_args[@]}"
+
+    - name: Pack NuGet packages
+      shell: bash
+      run: |
+        pack_args=(--configuration Release --no-build --output artifacts/packages)
+
+        if [ -n "$VERSION_PREFIX" ]; then
+          pack_args+=("/p:VersionPrefix=$VERSION_PREFIX")
+        fi
+
+        pack_args+=("/p:VersionSuffix=$VERSION_SUFFIX")
+
+        dotnet pack src/XamlPlayground.AvaloniaEdit.Minimap/XamlPlayground.AvaloniaEdit.Minimap.csproj "${pack_args[@]}"
+        dotnet pack src/XamlPlayground/XamlPlayground.csproj "${pack_args[@]}"
+
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuget-packages
+        path: artifacts/packages/*
+        if-no-files-found: error
+
+    - name: Publish to NuGet
+      if: github.event_name == 'push' || inputs.publish
+      shell: bash
+      env:
+        NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      run: |
+        if [ -z "$NUGET_API_KEY" ]; then
+          echo "NUGET_API_KEY secret is required to publish packages." >&2
+          exit 1
+        fi
+
+        pushd artifacts/packages
+        for package in *.nupkg; do
+          dotnet nuget push "$package" \
+            --api-key "$NUGET_API_KEY" \
+            --source "https://api.nuget.org/v3/index.json" \
+            --skip-duplicate
+        done
+        popd

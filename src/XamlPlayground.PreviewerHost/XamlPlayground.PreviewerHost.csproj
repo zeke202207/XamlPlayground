@@ -5,11 +5,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>XamlPlayground.PreviewerHost</RootNamespace>
     <AssemblyName>XamlPlayground.PreviewerHost</AssemblyName>
+    <IsPackable>false</IsPackable>
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia" />
   </ItemGroup>
 
 </Project>

@@ -879,13 +879,10 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
-    public void PreviewerHostProject_ReferencesAvaloniaPackageForDesignerSupport()
+    public void PreviewerHostProject_UsesCentrallyVersionedAvaloniaPackageForDesignerSupport()
     {
-        var projectPath = Path.Combine(
-            GetRepositoryRoot(),
-            "src",
-            "XamlPlayground.PreviewerHost",
-            "XamlPlayground.PreviewerHost.csproj");
+        var repositoryRoot = GetRepositoryRoot();
+        var projectPath = Path.Combine(repositoryRoot, "src", "XamlPlayground.PreviewerHost", "XamlPlayground.PreviewerHost.csproj");
         var document = XDocument.Load(projectPath);
         var packageReference = document
             .Descendants("PackageReference")
@@ -893,7 +890,17 @@ public sealed class MainViewModelTests
                 string.Equals((string?)element.Attribute("Include"), "Avalonia", StringComparison.Ordinal));
 
         Assert.NotNull(packageReference);
-        Assert.Equal("$(AvaloniaVersion)", (string?)packageReference.Attribute("Version"));
+        Assert.Null(packageReference.Attribute("Version"));
+
+        var centralPackagesPath = Path.Combine(repositoryRoot, "Directory.Packages.props");
+        var centralPackages = XDocument.Load(centralPackagesPath);
+        var packageVersion = centralPackages
+            .Descendants("PackageVersion")
+            .SingleOrDefault(static element =>
+                string.Equals((string?)element.Attribute("Include"), "Avalonia", StringComparison.Ordinal));
+
+        Assert.NotNull(packageVersion);
+        Assert.Equal("$(AvaloniaVersion)", (string?)packageVersion.Attribute("Version"));
     }
 
     [Fact]
@@ -5924,7 +5931,43 @@ public sealed class MainViewModelTests
 
     private static string GetRepositoryRoot([CallerFilePath] string sourcePath = "")
     {
-        return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
+        static string? FindRepositoryRoot(string? startPath)
+        {
+            if (string.IsNullOrWhiteSpace(startPath))
+            {
+                return null;
+            }
+
+            var directory = File.Exists(startPath)
+                ? Path.GetDirectoryName(startPath)
+                : Directory.Exists(startPath)
+                    ? startPath
+                    : Path.GetDirectoryName(startPath);
+
+            for (var current = directory is null ? null : new DirectoryInfo(directory);
+                 current is not null;
+                 current = current.Parent)
+            {
+                var centralPackagesPath = Path.Combine(current.FullName, "Directory.Packages.props");
+                var previewerHostProjectPath = Path.Combine(
+                    current.FullName,
+                    "src",
+                    "XamlPlayground.PreviewerHost",
+                    "XamlPlayground.PreviewerHost.csproj");
+
+                if (File.Exists(centralPackagesPath) && File.Exists(previewerHostProjectPath))
+                {
+                    return current.FullName;
+                }
+            }
+
+            return null;
+        }
+
+        return FindRepositoryRoot(sourcePath)
+               ?? FindRepositoryRoot(AppContext.BaseDirectory)
+               ?? FindRepositoryRoot(Directory.GetCurrentDirectory())
+               ?? throw new DirectoryNotFoundException("Could not locate the XamlPlayground repository root.");
     }
 
     private static SolutionExplorerNodeViewModel? FindNode(

@@ -1,11 +1,19 @@
 # Xaml Playground for Avalonia
 
 [![CI](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/build.yml/badge.svg)](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/build.yml)
+[![Release](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/release.yml/badge.svg)](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/release.yml)
 [![Deploy to GitHub Pages](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/pages.yml/badge.svg)](https://github.com/wieslawsoltes/XamlPlayground/actions/workflows/pages.yml)
 
 <img src="src/XamlPlayground/Assets/Logo.svg" alt="Xaml Playground logo" width="160">
 
 Xaml Playground is an interactive XAML editor and previewer for Avalonia.
+
+## NuGet Packages
+
+| Package | Version | Downloads | Description |
+| --- | --- | --- | --- |
+| [`XamlPlayground`](https://www.nuget.org/packages/XamlPlayground/) | [![NuGet](https://img.shields.io/nuget/v/XamlPlayground.svg)](https://www.nuget.org/packages/XamlPlayground/) | [![NuGet downloads](https://img.shields.io/nuget/dt/XamlPlayground.svg)](https://www.nuget.org/packages/XamlPlayground/) | Core Avalonia XAML editor and previewer library. |
+| [`XamlPlayground.AvaloniaEdit.Minimap`](https://www.nuget.org/packages/XamlPlayground.AvaloniaEdit.Minimap/) | [![NuGet](https://img.shields.io/nuget/v/XamlPlayground.AvaloniaEdit.Minimap.svg)](https://www.nuget.org/packages/XamlPlayground.AvaloniaEdit.Minimap/) | [![NuGet downloads](https://img.shields.io/nuget/dt/XamlPlayground.AvaloniaEdit.Minimap.svg)](https://www.nuget.org/packages/XamlPlayground.AvaloniaEdit.Minimap/) | AvaloniaEdit minimap and inline editor extension controls. |
 
 ## Visual XAML Editing
 
