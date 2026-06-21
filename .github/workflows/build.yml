@@ -81,3 +81,6 @@ jobs:
       run: dotnet build src/XamlPlayground.Web/XamlPlayground.Web.csproj --configuration Release --no-restore /p:RunAOTCompilation=false
     - name: Test solution
       run: dotnet test XamlPlayground.sln --configuration Release --no-restore
+    - name: Pack NuGet packages
+      if: runner.os == 'Linux'
+      run: dotnet pack XamlPlayground.sln --configuration Release --no-build --output artifacts/packages /p:VersionSuffix=ci.${{ github.run_number }}
