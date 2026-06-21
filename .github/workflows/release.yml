@@ -81,6 +81,20 @@ jobs:
     - name: Test solution
       run: dotnet test XamlPlayground.sln --configuration Release --no-build
 
+    - name: Build NuGet package projects
+      shell: bash
+      run: |
+        build_args=(--configuration Release --no-restore /p:RunAOTCompilation=false)
+
+        if [ -n "$VERSION_PREFIX" ]; then
+          build_args+=("/p:VersionPrefix=$VERSION_PREFIX")
+        fi
+
+        build_args+=("/p:VersionSuffix=$VERSION_SUFFIX")
+
+        dotnet build src/XamlPlayground.AvaloniaEdit.Minimap/XamlPlayground.AvaloniaEdit.Minimap.csproj "${build_args[@]}"
+        dotnet build src/XamlPlayground/XamlPlayground.csproj "${build_args[@]}"
+
     - name: Pack NuGet packages
       shell: bash
       run: |
