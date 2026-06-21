@@ -3475,14 +3475,10 @@ public sealed class VisualEditingTests
                     new Rect(firstTopLeft.Value, firstButton.Bounds.Size)));
                 PumpLayout(window);
 
-                var pointer = new Avalonia.Input.Pointer(
-                    Avalonia.Input.Pointer.GetNextFreeId(),
-                    PointerType.Mouse,
-                    isPrimary: true);
                 var start = firstTopLeft.Value + new Vector(12, 12);
                 var end = secondTopLeft.Value + new Vector(12, 12);
-                preview.RaiseEvent(CreatePointerPressedArgs(preview, preview, pointer, start));
-                preview.RaiseEvent(CreatePointerMovedArgs(preview, preview, pointer, end));
+                MouseDownPreviewPoint(preview, previewSurface, start);
+                MouseMovePreviewPoint(preview, previewSurface, end, RawInputModifiers.LeftMouseButton);
                 PumpLayout(window);
 
                 Assert.True(viewModel.VisualEditorPreviewDropTargetVisible);
@@ -3500,7 +3496,7 @@ public sealed class VisualEditingTests
                 Assert.True(File.Exists(path));
                 Assert.True(new FileInfo(path).Length > 0);
 
-                preview.RaiseEvent(CreatePointerReleasedArgs(preview, preview, pointer, end));
+                MouseUpPreviewPoint(preview, previewSurface, end);
                 PumpLayout(window);
             }
             finally
@@ -3574,21 +3570,17 @@ public sealed class VisualEditingTests
                     new Rect(moveTopLeft.Value, moveButton.Bounds.Size)));
                 PumpLayout(window);
 
-                var pointer = new Avalonia.Input.Pointer(
-                    Avalonia.Input.Pointer.GetNextFreeId(),
-                    PointerType.Mouse,
-                    isPrimary: true);
                 var start = moveTopLeft.Value + new Vector(12, 12);
                 var end = targetTopLeft.Value + new Vector(targetBorder.Bounds.Width / 2, targetBorder.Bounds.Height / 2);
-                preview.RaiseEvent(CreatePointerPressedArgs(preview, preview, pointer, start));
-                preview.RaiseEvent(CreatePointerMovedArgs(preview, preview, pointer, end));
+                MouseDownPreviewPoint(preview, previewSurface, start);
+                MouseMovePreviewPoint(preview, previewSurface, end, RawInputModifiers.LeftMouseButton);
                 PumpLayout(window);
 
                 Assert.True(viewModel.VisualEditorPreviewDropTargetVisible);
                 Assert.True(viewModel.VisualEditorPreviewDropPlaceholderVisible);
                 Assert.False(viewModel.VisualEditorPreviewInsertionVisible);
 
-                preview.RaiseEvent(CreatePointerReleasedArgs(preview, preview, pointer, end));
+                MouseUpPreviewPoint(preview, previewSurface, end);
                 PumpLayout(window);
 
                 var updated = viewModel.ActiveXamlFile.Text;
@@ -4873,13 +4865,8 @@ public sealed class VisualEditingTests
         var previewSurface = Assert.Single(
             preview.GetVisualDescendants().OfType<Grid>(),
             grid => grid.Name == "PreviewSurface");
-        var pointer = new Avalonia.Input.Pointer(
-            Avalonia.Input.Pointer.GetNextFreeId(),
-            PointerType.Mouse,
-            isPrimary: true);
-
-        preview.RaiseEvent(CreatePointerPressedArgs(preview, previewSurface, pointer, point, modifiers));
-        preview.RaiseEvent(CreatePointerReleasedArgs(preview, previewSurface, pointer, point, modifiers));
+        MouseDownPreviewPoint(preview, previewSurface, point, modifiers);
+        MouseUpPreviewPoint(preview, previewSurface, point, modifiers);
     }
 
     private static Point GetPreviewControlCenter(
@@ -4923,6 +4910,72 @@ public sealed class VisualEditingTests
 
         Assert.Fail($"Could not map {control.GetType().Name} '{control.Name}' to the preview surface.");
         return default;
+    }
+
+    private static void MouseDownPreviewPoint(
+        PreviewView preview,
+        Control previewSurface,
+        Point point,
+        KeyModifiers modifiers = KeyModifiers.None)
+    {
+        var topLevel = Assert.IsAssignableFrom<TopLevel>(TopLevel.GetTopLevel(preview));
+        var topLevelPoint = TranslatePreviewSurfacePoint(previewSurface, topLevel, point);
+        topLevel.MouseDown(topLevelPoint, MouseButton.Left, ToRawInputModifiers(modifiers));
+    }
+
+    private static void MouseMovePreviewPoint(
+        PreviewView preview,
+        Control previewSurface,
+        Point point,
+        RawInputModifiers modifiers = RawInputModifiers.None)
+    {
+        var topLevel = Assert.IsAssignableFrom<TopLevel>(TopLevel.GetTopLevel(preview));
+        var topLevelPoint = TranslatePreviewSurfacePoint(previewSurface, topLevel, point);
+        topLevel.MouseMove(topLevelPoint, modifiers);
+    }
+
+    private static void MouseUpPreviewPoint(
+        PreviewView preview,
+        Control previewSurface,
+        Point point,
+        KeyModifiers modifiers = KeyModifiers.None)
+    {
+        var topLevel = Assert.IsAssignableFrom<TopLevel>(TopLevel.GetTopLevel(preview));
+        var topLevelPoint = TranslatePreviewSurfacePoint(previewSurface, topLevel, point);
+        topLevel.MouseUp(topLevelPoint, MouseButton.Left, ToRawInputModifiers(modifiers));
+    }
+
+    private static Point TranslatePreviewSurfacePoint(Control previewSurface, TopLevel topLevel, Point point)
+    {
+        var topLevelPoint = previewSurface.TranslatePoint(point, topLevel);
+        Assert.NotNull(topLevelPoint);
+        return topLevelPoint.Value;
+    }
+
+    private static RawInputModifiers ToRawInputModifiers(KeyModifiers modifiers)
+    {
+        var raw = RawInputModifiers.None;
+        if (modifiers.HasFlag(KeyModifiers.Control))
+        {
+            raw |= RawInputModifiers.Control;
+        }
+
+        if (modifiers.HasFlag(KeyModifiers.Shift))
+        {
+            raw |= RawInputModifiers.Shift;
+        }
+
+        if (modifiers.HasFlag(KeyModifiers.Alt))
+        {
+            raw |= RawInputModifiers.Alt;
+        }
+
+        if (modifiers.HasFlag(KeyModifiers.Meta))
+        {
+            raw |= RawInputModifiers.Meta;
+        }
+
+        return raw;
     }
 
     private static PointerPressedEventArgs CreatePointerPressedArgs(

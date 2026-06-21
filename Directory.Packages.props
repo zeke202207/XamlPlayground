@@ -4,8 +4,8 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <AvaloniaVersion>12.0.2</AvaloniaVersion>
-    <AvaloniaColorPickerVersion>12.0.0</AvaloniaColorPickerVersion>
+    <AvaloniaVersion>12.0.4</AvaloniaVersion>
+    <AvaloniaColorPickerVersion>12.0.4</AvaloniaColorPickerVersion>
     <AvaloniaBehaviorsVersion>12.0.0</AvaloniaBehaviorsVersion>
     <AvaloniaEditVersion>12.0.0</AvaloniaEditVersion>
     <AvaloniaEditTextMateVersion>12.0.0</AvaloniaEditTextMateVersion>

@@ -8,7 +8,7 @@
     <Title>XamlPlayground</Title>
     <Description>Interactive Avalonia XAML editor and previewer core library.</Description>
     <PackageTags>avalonia;avaloniaui;xaml;designer;previewer;editor</PackageTags>
-    <ProDataGridPackageVersion Condition="'$(ProDataGridPackageVersion)' == ''">12.0.0</ProDataGridPackageVersion>
+    <ProDataGridPackageVersion Condition="'$(ProDataGridPackageVersion)' == ''">12.0.4</ProDataGridPackageVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -41,8 +41,8 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" />
-    <PackageReference Include="Microsoft.Build.Locator" />
-    <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Locator" ExcludeAssets="build;buildTransitive;analyzers" />
+    <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" PrivateAssets="build;buildTransitive;contentfiles;analyzers" />
     <PackageReference Include="Dock.Avalonia" />
     <PackageReference Include="Dock.Avalonia.Themes.Fluent" />
     <PackageReference Include="Dock.Model.Mvvm" />
