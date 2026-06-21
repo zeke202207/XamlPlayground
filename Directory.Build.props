@@ -6,18 +6,30 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <PropertyGroup>
-    <AvaloniaVersion>12.0.2</AvaloniaVersion>
-    <AvaloniaColorPickerVersion>12.0.0</AvaloniaColorPickerVersion>
-    <AvaloniaBehaviorsVersion>12.0.0</AvaloniaBehaviorsVersion>
-    <AvaloniaEditVersion>12.0.0</AvaloniaEditVersion>
-    <AvaloniaEditTextMateVersion>12.0.0</AvaloniaEditTextMateVersion>
-    <TextMateSharpGrammarsVersion>2.0.3</TextMateSharpGrammarsVersion>
-    <OctokitVersion>14.0.0</OctokitVersion>
-    <CommunityToolkitMvvmVersion>8.4.2</CommunityToolkitMvvmVersion>
-    <ReactiveMarblesPropertyChangedVersion>2.0.27</ReactiveMarblesPropertyChangedVersion>
-    <MicrosoftCodeAnalysisVersion>5.3.0</MicrosoftCodeAnalysisVersion>
-    <MicrosoftBuildLocatorVersion>1.11.2</MicrosoftBuildLocatorVersion>
-    <MicrosoftBuildFrameworkVersion>17.11.48</MicrosoftBuildFrameworkVersion>
-    <DockVersion>12.0.0.2</DockVersion>
+    <XamlPlaygroundVersionPrefix Condition="'$(XamlPlaygroundVersionPrefix)' == ''">0.1.0</XamlPlaygroundVersionPrefix>
+    <XamlPlaygroundVersionSuffix Condition="'$(XamlPlaygroundVersionSuffix)' == ''"></XamlPlaygroundVersionSuffix>
+    <VersionPrefix Condition="'$(VersionPrefix)' == ''">$(XamlPlaygroundVersionPrefix)</VersionPrefix>
+    <VersionSuffix Condition="'$(VersionSuffix)' == ''">$(XamlPlaygroundVersionSuffix)</VersionSuffix>
+    <PackageOutputPath Condition="'$(PackageOutputPath)' == ''">$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
+  </PropertyGroup>
+  <PropertyGroup>
+    <Authors>Wieslaw Soltes</Authors>
+    <Company>Wieslaw Soltes</Company>
+    <Product>XamlPlayground</Product>
+    <Description>Interactive Avalonia XAML editor and previewer libraries.</Description>
+    <Copyright>Copyright (c) $([System.DateTime]::Now.ToString(`yyyy`)) Wieslaw Soltes</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/wieslawsoltes/XamlPlayground</PackageProjectUrl>
+    <PackageReleaseNotes>https://github.com/wieslawsoltes/XamlPlayground/releases</PackageReleaseNotes>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageTags>avalonia;avaloniaui;xaml;designer;previewer</PackageTags>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/wieslawsoltes/XamlPlayground</RepositoryUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 </Project>

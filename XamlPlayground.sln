@@ -10,11 +10,12 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "build", "build", "{2629EA9C
 	ProjectSection(SolutionItems) = preProject
 		.editorconfig = .editorconfig
 		Directory.Build.props = Directory.Build.props
+		Directory.Packages.props = Directory.Packages.props
 		global.json = global.json
 		nuget.config = nuget.config
-		.github\workflows\azure-swa.yml = .github\workflows\azure-swa.yml
 		.github\workflows\build.yml = .github\workflows\build.yml
 		.github\workflows\pages.yml = .github\workflows\pages.yml
+		.github\workflows\release.yml = .github\workflows\release.yml
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XamlPlayground.Browser", "src\XamlPlayground.Browser\XamlPlayground.Browser.csproj", "{00E8340C-7F10-446C-A1B4-48C68D8F1612}"
