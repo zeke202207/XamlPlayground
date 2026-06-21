@@ -25,7 +25,7 @@ env:
   DOTNET_NOLOGO: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   release:
@@ -109,12 +109,33 @@ jobs:
         dotnet pack src/XamlPlayground.AvaloniaEdit.Minimap/XamlPlayground.AvaloniaEdit.Minimap.csproj "${pack_args[@]}"
         dotnet pack src/XamlPlayground/XamlPlayground.csproj "${pack_args[@]}"
 
-    - name: Upload package artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: nuget-packages
-        path: artifacts/packages/*
-        if-no-files-found: error
+    - name: Verify package artifacts
+      shell: bash
+      run: |
+        shopt -s nullglob
+        packages=(artifacts/packages/*)
+
+        if [ "${#packages[@]}" -eq 0 ]; then
+          echo "No package artifacts were created." >&2
+          exit 1
+        fi
+
+        printf 'Created package artifacts:\n'
+        printf '  %s\n' "${packages[@]}"
+
+    - name: Upload package assets to GitHub Release
+      if: github.event_name == 'push' && github.ref_type == 'tag'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Release $GITHUB_REF_NAME"
+        fi
+
+        gh release upload "$GITHUB_REF_NAME" artifacts/packages/* --clobber
 
     - name: Publish to NuGet
       if: github.event_name == 'push' || inputs.publish
